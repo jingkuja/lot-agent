@@ -234,6 +234,7 @@ export function ChatPanel({
         disabled={isStreaming}
         autoFocus={isEmpty}
         mode={mode}
+        imageScenes={mode === "image"}
         placeholder={
           mode === "ppt" ? t("描述要制作的 PPT，可上传模版与内容文件") : mode === "contract" ? t("上传旧版与新版合同，我来找出条款与主体差异") : mode !== "default" ? t("请输入内容") : undefined
         }

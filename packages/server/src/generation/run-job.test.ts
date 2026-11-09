@@ -759,3 +759,55 @@ describe("Kling voice references", () => {
     expect(provider.create).not.toHaveBeenCalled();
   });
 });
+
+describe("runGenerationJob image sets", () => {
+  const setInput = { ...job.input, prompt: "cover", prompts: ["cover", "detail", "scene"], n: 3, scene: "product_set", displayPrompt: "保温杯套图" };
+
+  it("makes one single-image request per prompt and stores the set together", async () => {
+    let next = 0;
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: `t${++next}`, status: "queued", progress: 0 })),
+      poll: vi.fn(async (id: string) => ({ status: "completed", progress: 100, urls: [`https://img.example/${id}.png`] })),
+    };
+    const { deps, calls } = fakeDeps(provider);
+    const out = await runGenerationJob(deps, { ...job, input: setInput }, "image");
+    expect(vi.mocked(provider.create).mock.calls.map(([request]) => [request.prompt, request.n])).toEqual([["cover", 1], ["detail", 1], ["scene", 1]]);
+    expect(out.assets).toHaveLength(3);
+    expect(out.missing).toBeUndefined();
+    expect(calls.vendorIdSet).toBe(JSON.stringify(["t1", "t2", "t3"]));
+    const done = calls.message.at(-1);
+    expect(done.status).toBe("completed");
+    expect(done.metadata).toMatchObject({ prompt: "保温杯套图", scene: "product_set" });
+  });
+
+  it("keeps the images already made when a later request fails, and does not cache the partial set", async () => {
+    let next = 0;
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => {
+        if (++next === 2) throw new Error("vendor rejected");
+        return { taskId: `t${next}`, status: "queued", progress: 0 };
+      }),
+      poll: vi.fn(async (id: string) => ({ status: "completed", progress: 100, url: `https://img.example/${id}.png` })),
+    };
+    const { deps, calls } = fakeDeps(provider);
+    const out = await runGenerationJob(deps, { ...job, input: setInput }, "image");
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(out.assets).toHaveLength(1);
+    expect(out.missing).toBe(2);
+    expect(calls.cacheSet).toBeNull();
+    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", missing: 2 });
+  });
+
+  it("on a re-delivered job polls the submitted images and never submits again", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(),
+      poll: vi.fn(async (id: string) => ({ status: "completed", progress: 100, url: `https://img.example/${id}.png` })),
+    };
+    const { deps } = fakeDeps(provider);
+    vi.mocked(deps.db.getTaskVendorId).mockResolvedValue(JSON.stringify(["t1", "t2"]));
+    const out = await runGenerationJob(deps, { ...job, input: setInput }, "image");
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(provider.poll).toHaveBeenCalledTimes(2);
+    expect(out.missing).toBe(1);
+  });
+});

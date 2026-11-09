@@ -37,7 +37,32 @@ export const IMAGE_RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9
 export const DEFAULT_IMAGE_RATIO = "1:1";
 export const IMAGE_MAX_COUNT = 4;
 
+/** Image types above the composer, in display order (自由创作 first). 自由创作 sends the text as written; the others
+ * are checked against the scene and rewritten on the server before any image is paid for. */
+export const IMAGE_SCENES = [
+  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined },
+  {
+    value: "product_set", label: "产品套图",
+    placeholder: "输入产品名和卖点，可上传产品图；如：保温杯，316 不锈钢，12 小时保温，适合通勤",
+    hint: "按「图片参数」里的张数依次生成：封面主图、卖点图、使用场景图、细节图",
+  },
+  {
+    value: "main_images", label: "主副图",
+    placeholder: "输入产品名、特点或想要的风格，可上传产品图；如：白色无线耳机，简约科技风",
+    hint: "第 1 张是主图，其余是多角度、细节和使用场景副图；张数在「图片参数」里选择",
+  },
+  {
+    value: "white_background", label: "白底图",
+    placeholder: "上传产品图或输入产品名，生成纯白背景的商品图；如：红色运动鞋，侧面 45 度",
+    hint: "纯白背景、产品居中、柔和棚拍光，适合电商平台上架",
+  },
+] as const;
+export type ImageScene = typeof IMAGE_SCENES[number]["value"];
+export const DEFAULT_IMAGE_SCENE: ImageScene = "free";
+
 export interface ImageSettings {
+  /** Only on a composer send; generated-image edits never carry a scene. */
+  scene?: ImageScene;
   /** 1K / 2K / 4K; sent with `ratio` instead of a pixel size. */
   resolution?: string;
   ratio?: string;

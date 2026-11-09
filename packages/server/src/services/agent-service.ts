@@ -736,6 +736,20 @@ export class AgentService {
     return result;
   }
 
+  /** Check and rewrite an e-commerce image request before the paid image call. Runs on the background
+   * utility model (never the turn's model or Claude); the gateway bills it, so nothing is metered here. */
+  async imageSceneText(system: string, input: string, userId: string, agentId: string | undefined, signal?: AbortSignal): Promise<string> {
+    const { llm } = await this.resolveUtilityLLM({ userId, agentId });
+    let text = "";
+    for await (const chunk of llm.chat([
+      { role: "system", content: system },
+      { role: "user", content: input },
+    ], undefined, { signal, params: { maxTokens: 4000 } })) {
+      if (chunk.type === "text") text += chunk.content;
+    }
+    return text;
+  }
+
   async rewriteKnowledgeQuery(
     userMessage: string,
     opts?: { userId?: string; modelId?: string }

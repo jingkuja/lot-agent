@@ -568,6 +568,8 @@ export const api = {
       first_frame?: string;
       last_frame?: string;
       model?: string;
+      /** Image scene; omitted for 自由创作. */
+      scene?: string;
     }
   ) =>
     request<{

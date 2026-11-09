@@ -50,10 +50,20 @@ export function isRealPersonRejection(body: unknown): boolean {
   catch { return false; }
 }
 
+// OpenAI / Azure image safety refusals, matched on fixed error identifiers only.
+const CONTENT_BLOCK_CODES = new Set(["moderation_blocked", "content_policy_violation", "content_filter", "responsibleaipolicyviolation"]);
+
+/** The vendor's safety system refused the request. Reads only the `code` / `type` identifiers, never the message. */
+export function isContentBlocked(j: Record<string, unknown>): boolean {
+  const error = j.error && typeof j.error === "object" ? j.error as Record<string, unknown> : j;
+  return [error.code, error.type, j.code].some((value) => typeof value === "string" && CONTENT_BLOCK_CODES.has(value.toLowerCase()));
+}
+
 /** Detect an error envelope without copying any free-form vendor text. */
 export function extractVendorError(j: Record<string, unknown>, phase: ProviderPhase = "poll"): string | undefined {
   if (j.error || j.message || (j.code && j.code !== 0)) {
-    return new ProviderError("generation", phase, isRealPersonRejection(j) ? "REAL_PERSON_REJECTED" : "TASK_FAILED").message;
+    const code = isRealPersonRejection(j) ? "REAL_PERSON_REJECTED" : isContentBlocked(j) ? "CONTENT_BLOCKED" : "TASK_FAILED";
+    return new ProviderError("generation", phase, code).message;
   }
   return undefined;
 }

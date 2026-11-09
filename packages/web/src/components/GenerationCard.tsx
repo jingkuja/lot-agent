@@ -110,12 +110,15 @@ export function GenerationCard({
 
   if (status === "completed" && assets && assets.length > 0) {
     return (
-      <div className="gen-card-assets">
-        {assets.map((a, i) => (
-          <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
-            onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined} />
-        ))}
-      </div>
+      <>
+        <div className="gen-card-assets">
+          {assets.map((a, i) => (
+            <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
+              onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined} />
+          ))}
+        </div>
+        {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
+      </>
     );
   }
 
@@ -130,9 +133,12 @@ export function GenerationCard({
   const videoFailed = mediaType === "video" && failed;
   // The server classifies the vendor rejection; raw patterns cover older messages.
   const realPersonRejected = /REAL_PERSON_REJECTED|\.PrivacyInformation\b|may contain (?:a )?real person/i.test(error ?? "");
-  const showFailureHint = videoFailed || (failed && realPersonRejected);
+  const contentBlocked = /CONTENT_BLOCKED/.test(error ?? "");
+  const showFailureHint = videoFailed || (failed && (realPersonRejected || contentBlocked));
   const failureHint = realPersonRejected
     ? "上传的参考图包含真人，需要先完成真人认证后再使用。"
+    : contentBlocked
+      ? "出图模型的安全审核拒绝了这次请求，常见原因是知名动漫或影视角色、品牌标志、真人或敏感内容。请换成自有产品的图片和描述后重试，这次不扣积分。"
     : resultUnknown
       ? "暂时无法确认视频生成结果，请刷新会话查看，或联系客服。"
       : "请稍后再试，或联系客服。";
@@ -159,6 +165,9 @@ export function GenerationCard({
     <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={t(error) ?? undefined}>
       <MediaIcon mediaType={mediaType} />
       <div className="gen-card-label">{t(label)}</div>
+      {failed && generation.notice && (
+        <div className="gen-card-error" role="status"><p>{t(generation.notice)}</p></div>
+      )}
       {showFailureHint && (
         <div className="gen-card-error" role="status">
           <p>{t(failureHint)}</p>

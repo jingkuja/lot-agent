@@ -11,6 +11,7 @@ import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
+import { ImageSceneError, imageSceneUsesSet, parseImageScene, planImageScene } from "../generation/image-scene.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
   downshiftMiniprogramImageSize,
@@ -592,6 +593,8 @@ export function createGenerationRoutes(service: AgentService) {
       first_frame?: unknown;
       last_frame?: unknown;
       model?: string;
+      /** Image scene: 自由创作 by default; the e-commerce scenes are checked and rewritten first. */
+      scene?: unknown;
     };
     try {
       body = await c.req.json();
@@ -603,6 +606,8 @@ export function createGenerationRoutes(service: AgentService) {
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
+    const scene = mediaType === "image" ? parseImageScene(body.scene) : "free";
+    if (!scene) return c.json({ error: "unknown image scene" }, 400);
     // The mini program and marketing studio create one conversation per paid video attempt. Use a
     // database lease (shared across server processes) plus its durable message
     // to replay retries, including a retry after enqueue returned no response.
@@ -690,6 +695,27 @@ export function createGenerationRoutes(service: AgentService) {
       const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
       if (!quota.ok) return c.json({ error: quota.reason, code: quota.code, estimatedCost }, 402);
 
+      // E-commerce scenes: check the request fits and rewrite it before anything is paid for or stored.
+      // A failed or off-topic check sends no image request; the user simply sends again.
+      let modelPrompts: string[] = [prompt];
+      if (scene !== "free") {
+        let plan;
+        try {
+          const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
+          plan = await planImageScene(
+            { scene, prompt, count: Number(settings.n ?? 1), referenceImages: media?.length ?? 0 },
+            (system, user) => service.imageSceneText(system, user, userId, conv.agent_id, signal)
+          );
+        } catch (error) {
+          console.warn("[image.scene] plan failed", { scene, errorType: error instanceof ImageSceneError ? "invalid_plan" : (error as Error)?.name });
+          return c.json({ error: "创作助手暂时无法整理这次描述，未提交出图，请稍后重试或改用自由创作", code: "IMAGE_SCENE_UNAVAILABLE" }, 503);
+        }
+        if (!plan.fits) return c.json({ error: plan.message, code: "IMAGE_SCENE_MISMATCH" }, 422);
+        modelPrompts = plan.prompts;
+        // Set scenes make one image per prompt; the white-background scene keeps the requested count.
+        if (imageSceneUsesSet(scene)) settings = { ...settings, n: modelPrompts.length };
+      }
+
       // Persist user message.
       const userMessageId = randomUUID();
       await service.db.addMessage(userMessageId, conversationId, "user", prompt);
@@ -700,7 +726,7 @@ export function createGenerationRoutes(service: AgentService) {
       // message before a follow-up status write could land.
       const assistantMessageId = randomUUID();
       const supportsProgress = service.generationSupportsProgress[mediaType];
-      const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress };
+      const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress, ...(scene !== "free" ? { scene } : {}) };
       await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
         metadata: { ...baseMeta, status: "generating" },
         model: resolvedModel ?? modelId,
@@ -718,7 +744,10 @@ export function createGenerationRoutes(service: AgentService) {
           ...videoReferences,
           ...(media ? { media } : {}),
           ...(resolvedModel ? { modelId: resolvedModel } : {}),
-          prompt,
+          prompt: modelPrompts[0],
+          // Set scenes: one image per prompt, each its own model request. The card keeps showing the user's text.
+          ...(modelPrompts.length > 1 ? { prompts: modelPrompts } : {}),
+          ...(scene !== "free" ? { scene, displayPrompt: prompt } : {}),
           conversationId,
           assistantMessageId,
           requireUserModelKey: agentExtension(conv.agent_id)?.ownerKeyOnly === true,

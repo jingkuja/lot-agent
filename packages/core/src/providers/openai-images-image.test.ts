@@ -184,4 +184,14 @@ describe("OpenAIImagesImageProvider", () => {
     expect(error.message).not.toContain("Invalid image");
     for (const privateValue of [prompt, image, "private-key"]) expect(error.message).not.toContain(privateValue);
   });
+
+  it("classifies a safety-system refusal without copying its message", async () => {
+    const body = { error: { code: "moderation_blocked", type: "image_generation_user_error", message: "rejected by the safety system, request ID x" } };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => JSON.stringify(body) })) as unknown as typeof fetch);
+    const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });
+    const error = await provider.create({ prompt: "toy" }).then((): never => { throw new Error("expected failure"); }, (error: Error) => error);
+    expect(error.message).toContain("CONTENT_BLOCKED");
+    expect(error.message).toContain("安全审核");
+    expect(error.message).not.toContain("safety system");
+  });
 });

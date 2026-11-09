@@ -681,3 +681,60 @@ it.each([4, 15])("accepts marketing video duration boundary %s", async (duration
   expect(res.status).toBe(202);
   expect(service.jobQueue.enqueue).toHaveBeenCalledWith("video.generate", expect.objectContaining({ durationSec }), "u1");
 });
+
+describe("POST /conversations/:id/generations image scenes", () => {
+  const send = (service: any, body: Record<string, unknown>) => app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mediaType: "image", settings: { resolution: "1K", ratio: "1:1", n: 3 }, ...body }),
+  });
+
+  it("returns the scene check's reason and sends nothing when the request does not fit", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn(async () => '{"fits": false, "message": "这是风景，不是商品。可以试试：蓝牙音箱白底图"}');
+    const res = await send(service, { prompt: "海边日落", scene: "white_background" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "这是风景，不是商品。可以试试：蓝牙音箱白底图", code: "IMAGE_SCENE_MISMATCH" });
+    expect(service.db.addMessage).not.toHaveBeenCalled();
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not submit an image when the scene check fails", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn(async () => "not json");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await send(service, { prompt: "保温杯", scene: "product_set" });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ code: "IMAGE_SCENE_UNAVAILABLE" });
+      expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
+
+  it("queues one rewritten prompt per set image and keeps the user's text on the card", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn(async () => '{"fits": true, "prompts": ["cover", "points", "scene"]}');
+    const res = await send(service, { prompt: "保温杯，12 小时保温", scene: "product_set", media: [{ type: "reference_image", url: "/static/uploads/cup.png" }] });
+    expect(res.status).toBe(202);
+    const [system, user] = service.imageSceneText.mock.calls[0];
+    expect(system).toContain("1 reference image(s)");
+    expect(user).toBe("保温杯，12 小时保温");
+    const input = service.jobQueue.enqueue.mock.calls[0][1];
+    expect(input).toMatchObject({ prompt: "cover", prompts: ["cover", "points", "scene"], n: 3, scene: "product_set", displayPrompt: "保温杯，12 小时保温" });
+    expect((await res.json() as any).assistantMessage.metadata).toMatchObject({ prompt: "保温杯，12 小时保温", scene: "product_set" });
+  });
+
+  it("leaves free creation untouched", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn();
+    const res = await send(service, { prompt: "菊花" });
+    expect(res.status).toBe(202);
+    expect(service.imageSceneText).not.toHaveBeenCalled();
+    expect(service.jobQueue.enqueue.mock.calls[0][1]).toMatchObject({ prompt: "菊花" });
+    expect(service.jobQueue.enqueue.mock.calls[0][1].prompts).toBeUndefined();
+  });
+
+  it("rejects an unknown scene", async () => {
+    const res = await send(fakeService(), { prompt: "菊花", scene: "poster" });
+    expect(res.status).toBe(400);
+  });
+});

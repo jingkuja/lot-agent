@@ -95,6 +95,8 @@ type GenAssets = { url: string; mime: string; durationSec?: number }[];
  */
 type GenOut = {
   assetIds: string[]; assets: GenAssets; downloadFailed?: boolean; sourceUrl?: string; sourceUrls?: string[]; error?: string;
+  /** Image-set requests that produced no image (the rest of the set was kept). */
+  missing?: number;
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -140,7 +142,9 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
   const baseMeta = {
     kind: "generation",
     mediaType,
-    prompt,
+    // Scene images send rewritten prompts to the model; the card keeps the user's own text.
+    prompt: typeof input.displayPrompt === "string" ? input.displayPrompt : prompt,
+    ...(typeof input.scene === "string" ? { scene: input.scene } : {}),
     taskId: job.id,
     settings: {
       size: input.size,
@@ -253,9 +257,29 @@ async function downloadAndFinalize(
   }
 }
 
+/** Image-set prompts (主副图 / 产品套图): each makes one image with its own request. */
+function imageSetPrompts(mediaType: MediaType, input: Record<string, unknown>): string[] | undefined {
+  const prompts = input.prompts;
+  if (mediaType !== "image" || !Array.isArray(prompts) || prompts.length < 2) return undefined;
+  return prompts.every((prompt) => typeof prompt === "string" && prompt) ? prompts as string[] : undefined;
+}
+
+/** Vendor ids already submitted for an image set, so a re-delivered job never pays for an image twice. */
+function parseSetVendorIds(value: string | null | undefined): string[] | null {
+  if (!value) return null;
+  try {
+    const ids = JSON.parse(value) as unknown;
+    if (Array.isArray(ids) && ids.every((id) => typeof id === "string")) return ids as string[];
+  } catch {
+    // A plain id from a single-prompt run of the same task.
+  }
+  return [value];
+}
+
 export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType: MediaType): Promise<GenOut> {
   const input = job.input;
   const prompt = (input.prompt as string) ?? "";
+  const setPrompts = imageSetPrompts(mediaType, input);
   const media = input.media as ReferenceMedia[] | undefined;
   const inputReference = input.input_reference as ReferenceInput | undefined;
   const referenceVideo = input.reference_video as ReferenceInput | undefined;
@@ -289,7 +313,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     await assertNotCancelled();
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
-      prompt, size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
+      prompt, ...(setPrompts ? { prompts: setPrompts } : {}),
+      size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
       input_reference: inputReference,
       reference_video: referenceVideo,
@@ -306,6 +331,14 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       await setMsg("completed", { assets: cached.assets });
       await deps.updateProgress(job.id, 100);
       return cached;
+    }
+
+    if (setPrompts) {
+      return await runImageSet(deps, job, setPrompts, cacheKey, setMsg, assertNotCancelled, {
+        size: input.size as string | undefined,
+        quality: (input.quality as string | undefined) ?? "auto",
+        media: await imageReferencesAsDataUrls(deps, media),
+      });
     }
 
     // Resume support: if this job already created a vendor task on a previous
@@ -399,6 +432,77 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
     throw err;
   }
+}
+
+async function pollToCompletion(deps: RunJobDeps, vendorTaskId: string, onProgress: (progress: number) => Promise<void>,
+  assertNotCancelled: () => Promise<void>): Promise<PollResult> {
+  const sleep = deps.sleep ?? realSleep;
+  const pollIntervalMs = deps.pollIntervalMs ?? 3000;
+  const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
+  const start = Date.now();
+  let p = await deps.provider.poll(vendorTaskId);
+  for (;;) {
+    await onProgress(p.progress);
+    if (p.status === "completed") return p;
+    if (p.status === "failed") throw new GenerationError("GENERATION_FAILED", p.error ?? "generation failed");
+    if (Date.now() - start > maxWaitMs) throw new GenerationError("TIMED_OUT", "generation timed out");
+    await assertNotCancelled();
+    await sleep(pollIntervalMs);
+    p = await deps.provider.poll(vendorTaskId);
+  }
+}
+
+/**
+ * One request per prompt, in order, each for a single image; the finished images are stored together as one
+ * result. Submitted vendor ids are persisted after every request: a re-delivered job polls those and never
+ * submits an image again. A request that fails stops the set (it would most likely fail again); images
+ * already made are still kept, and the card says how many are missing.
+ */
+async function runImageSet(
+  deps: RunJobDeps,
+  job: JobLike,
+  prompts: string[],
+  cacheKey: string | null,
+  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>,
+  assertNotCancelled: () => Promise<void>,
+  request: { size?: string; quality: string; media?: ReferenceMedia[] }
+): Promise<GenOut> {
+  const persisted = parseSetVendorIds(await deps.db.getTaskVendorId(job.id));
+  const vendorIds = persisted ?? [];
+  const sourceUrls: string[] = [];
+  let failure: unknown;
+  for (let index = 0; index < prompts.length; index++) {
+    let vendorTaskId: string | undefined = vendorIds[index];
+    try {
+      if (!vendorTaskId) {
+        if (persisted) break;
+        await assertNotCancelled();
+        console.log("[image.generate] set request", JSON.stringify({ taskId: job.id, model: deps.vendorModel, index }));
+        const created = await deps.provider.create({ prompt: prompts[index], size: request.size, n: 1, quality: request.quality, media: request.media });
+        vendorTaskId = created.taskId;
+        vendorIds.push(vendorTaskId);
+        await deps.db.setTaskVendorId(job.id, JSON.stringify(vendorIds));
+      }
+      const share = 100 / prompts.length;
+      const done = await pollToCompletion(deps, vendorTaskId,
+        (progress) => deps.updateProgress(job.id, Math.min(99, Math.round(index * share + progress * share / 100))), assertNotCancelled);
+      const url = done.urls?.find(Boolean) ?? done.url;
+      if (!url) throw new Error("generation completed without a url");
+      sourceUrls.push(url);
+    } catch (err) {
+      if (err instanceof JobCancelledError || deps.signal?.aborted) throw err;
+      failure = err;
+      break;
+    }
+  }
+  if (!sourceUrls.length) throw failure ?? new Error("generation completed without a url");
+  const partial = sourceUrls.length < prompts.length;
+  const finalize = partial
+    ? (status: string, extra: Record<string, unknown>) => setMsg(status, { ...extra, missing: prompts.length - sourceUrls.length })
+    : setMsg;
+  // A partial set is not cached: sending the same request again should try for the whole set.
+  const out = await downloadAndFinalize(deps, job, "image", sourceUrls, partial ? null : cacheKey, finalize);
+  return partial && !out.downloadFailed ? { ...out, missing: prompts.length - sourceUrls.length } : out;
 }
 
 /**

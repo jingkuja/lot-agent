@@ -66,6 +66,7 @@
   --gen-card-from: color-mix(in srgb, var(--accent) 14%, transparent);
   --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
 
+
   /* Brand wordmark — solid canal cyan, not a rainbow clip. */
   --brand-logo-plate: #ffffff;
   --brand-grad-from: #0e7c8b;  --brand-grad-to: #128fa0;
@@ -159,6 +160,7 @@
   --accent-grad: linear-gradient(180deg, #5eead4, #22d3ee);
   --gen-card-from: color-mix(in srgb, var(--accent) 16%, transparent);
   --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
+
 
   --brand-logo-plate: #ffffff;
   --brand-grad-from: #5eead4;  --brand-grad-to: #22d3ee;
@@ -1309,6 +1311,122 @@ html, body, #root {
 .input-modal-hint--error {
   color: var(--error);
 }
+
+/* Image composer: the image-type console dock seated on the composer's top edge
+   (自由创作 / 产品套图 / 主副图 / 白底图). Same pairing as the points card and its 充值 button:
+   a pale accent-tinted panel with a deep accent pill. Everything derives from theme variables. */
+.scene-dock {
+  --scene-glow: color-mix(in srgb, var(--accent) 34%, transparent);
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto -1px;
+  padding: 9px 12px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-bottom: 0;
+  border-radius: 26px 26px 0 0;
+  background:
+    radial-gradient(90% 120% at 50% 130%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+    color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  box-shadow: 0 -8px 26px -16px var(--scene-glow);
+  overflow: hidden;
+}
+/* Console texture: a faint accent grid with a few twinkling points. */
+.scene-dock-stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.5px 1.5px at 14% 72%, color-mix(in srgb, var(--accent) 70%, transparent) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 38% 20%, color-mix(in srgb, var(--accent) 60%, transparent) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 66% 80%, color-mix(in srgb, var(--accent) 70%, transparent) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 90% 26%, color-mix(in srgb, var(--accent) 60%, transparent) 50%, transparent 51%),
+    linear-gradient(color-mix(in srgb, var(--accent) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent) 1px, transparent 1px);
+  background-size: auto, auto, auto, auto, 14px 14px, 14px 14px;
+  mask-image: linear-gradient(180deg, transparent, black 45%);
+  animation: scene-dock-twinkle 4.5s ease-in-out infinite alternate;
+}
+.scene-dock-track {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  /* Room for the active tab's glow: the scroll container would clip it to a box. */
+  padding: 10px 14px;
+  margin: -10px -14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.scene-dock-track::-webkit-scrollbar { display: none; }
+.scene-dock-tab {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.14s;
+}
+.scene-dock-tab:hover:not(:disabled):not(.active) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+/* The 充值 button's recipe, with a stronger glow. */
+.scene-dock-tab.active {
+  color: var(--text-on-accent);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 76%, var(--text)));
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 4px 14px var(--scene-glow), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 28%, transparent);
+}
+.scene-dock-tab:active:not(:disabled) { transform: translateY(1px); }
+.scene-dock-tab:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.scene-dock-tab:disabled { cursor: default; }
+.scene-dock-tab:disabled:not(.active) { opacity: 0.55; }
+.scene-dock-spark {
+  font-size: 12px;
+  animation: scene-dock-pulse 1.8s ease-in-out infinite;
+}
+/* The composer below gets an accent horizon where the dock meets it. */
+.input-box--scene {
+  position: relative;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-input));
+  box-shadow: 0 16px 40px -30px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.input-box--scene::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 35%, color-mix(in srgb, var(--accent) 45%, var(--bg-card)) 50%,
+    var(--accent) 65%, transparent);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  pointer-events: none;
+}
+@keyframes scene-dock-twinkle { from { opacity: 0.55; } to { opacity: 1; } }
+@keyframes scene-dock-pulse { 0%, 100% { opacity: 0.65; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .scene-dock-stars, .scene-dock-spark { animation: none; }
+}
+@media (max-width: 620px) {
+  .scene-dock { max-width: 100%; padding: 7px 6px 6px; border-radius: 22px 22px 0 0; }
+  .scene-dock-track { gap: 2px; padding: 8px 6px; margin: -8px -6px; }
+  .scene-dock-tab { padding: 7px 10px; gap: 4px; font-size: 13px; letter-spacing: 0; }
+  .scene-dock-spark { font-size: 11px; }
+}
+.image-scene-hint { padding: 0 2px; }
 
 .input-seedance-hint {
   display: flex;
@@ -4375,6 +4493,7 @@ html, body, #root {
 .gen-card.video.gen-card--failed { aspect-ratio: auto; min-height: 240px; padding: 24px 20px; box-sizing: border-box; }
 .gen-card-error { max-width: 100%; color: var(--text-secondary); font-size: 14px; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
 .gen-card-error p { margin: 0; }
+.gen-card-notice { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
 .gen-card-error p + p { margin-top: 8px; }
 .gen-card-cancel {
   padding: 5px 16px;

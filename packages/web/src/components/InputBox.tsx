@@ -5,7 +5,10 @@ import {
   DEFAULT_IMAGE_QUALITY,
   DEFAULT_IMAGE_RATIO,
   DEFAULT_IMAGE_RESOLUTION,
+  DEFAULT_IMAGE_SCENE,
   IMAGE_AUTO_RATIO,
+  IMAGE_SCENES,
+  type ImageScene,
   imageSizeError,
   nearestImageRatio,
 } from "../lib/image-settings.js";
@@ -81,7 +84,13 @@ interface InputBoxProps {
   videoDurations?: readonly string[];
   /** 图片模式是否显示「图片张数」；只保留一张图的场景（获客宝海报）关闭。 */
   imageCount?: boolean;
+  /** 图片模式顶部的电商场景标签（自由创作 / 产品套图 / 主副图 / 白底图）；只在图片 Agent 会话中打开。 */
+  imageScenes?: boolean;
 }
+
+/** The composer remounts when a new chat gets its first message (and on conversation switches);
+ * keep the chosen image type the way the image settings picker keeps its own choices. */
+let lastImageScene: ImageScene = DEFAULT_IMAGE_SCENE;
 
 const MAX_FILES = 5;
 const MAX_IMAGE_REFERENCE_IMAGES = 5;
@@ -120,9 +129,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   onChange,
   videoDurations,
   imageCount = true,
+  imageScenes = false,
 }: InputBoxProps, ref) {
   const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
+  const [imageScene, setImageSceneState] = useState<ImageScene>(() => lastImageScene);
+  const setImageScene = (scene: ImageScene) => { lastImageScene = scene; setImageSceneState(scene); };
+  const sceneTabs = mode === "image" && imageScenes;
+  const activeScene = sceneTabs ? IMAGE_SCENES.find((scene) => scene.value === imageScene) : undefined;
   const promptValue = value !== undefined ? value : internalValue;
   const setPromptValue = onChange ?? setInternalValue;
   const pickerModels = useMemo(
@@ -225,10 +239,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   /** Composer image settings with 智能 replaced by a concrete ratio the server accepts. */
   const currentImageSettings = useCallback((): ImageSettings | undefined => {
     const current = settingsRef.current as ImageSettings | undefined;
-    if (mode !== "image" || current?.ratio !== IMAGE_AUTO_RATIO) return current;
+    if (mode !== "image" || !current) return current;
+    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene } : current;
+    if (current.ratio !== IMAGE_AUTO_RATIO) return withScene;
     const size = files[0] ? cachedImageSize(files[0]) : undefined;
-    return { ...current, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO };
-  }, [mode, files]);
+    return { ...withScene, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO };
+  }, [mode, files, sceneTabs, imageScene]);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -542,7 +558,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   }, []);
 
   return (
-    <div className={`input-box${embedded ? " input-box--embedded" : ""}`}>
+    <>
+    {sceneTabs && (
+      // A console dock seated on the composer's top edge: the chosen image type lights up.
+      <div className="scene-dock" role="tablist" aria-label={t("创作类型")}>
+        <span className="scene-dock-stars" aria-hidden />
+        <div className="scene-dock-track">
+          {IMAGE_SCENES.map((scene) => (
+            <button
+              key={scene.value}
+              type="button"
+              role="tab"
+              aria-selected={imageScene === scene.value}
+              className={`scene-dock-tab${imageScene === scene.value ? " active" : ""}`}
+              onClick={() => setImageScene(scene.value)}
+              disabled={disabled}
+            >
+              {imageScene === scene.value && <span className="scene-dock-spark" aria-hidden>✦</span>}
+              {t(scene.label)}
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+    <div className={`input-box${embedded ? " input-box--embedded" : ""}${sceneTabs ? " input-box--scene" : ""}`}>
+      {activeScene?.hint && <p className="input-modal-hint image-scene-hint">{t(activeScene.hint)}</p>}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
@@ -688,7 +728,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
         placeholder={
-          disabled && !embedded ? t("Agent 正在思考…") : t(placeholder) ?? t("输入消息，Enter 发送，Shift+Enter 换行")
+          disabled && !embedded ? t("Agent 正在思考…") : t(activeScene?.placeholder ?? placeholder) ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
         disabled={disabled}
         rows={1}
@@ -1052,5 +1092,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         />
       )}
     </div>
+    </>
   );
 });

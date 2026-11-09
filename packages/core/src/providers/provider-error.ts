@@ -1,6 +1,8 @@
 export type ProviderPhase = "create" | "poll" | "download";
 /** CONNECT_ERROR: the connection failed before any request byte was sent. */
-export type ProviderErrorCode = "HTTP_ERROR" | "TRANSPORT_ERROR" | "CONNECT_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED" | "REAL_PERSON_REJECTED";
+/** CONTENT_BLOCKED: the vendor's safety system refused the request (e.g. `moderation_blocked`); nothing was charged. */
+export type ProviderErrorCode = "HTTP_ERROR" | "TRANSPORT_ERROR" | "CONNECT_ERROR" | "INVALID_RESPONSE" | "TASK_FAILED" | "REAL_PERSON_REJECTED"
+  | "CONTENT_BLOCKED";
 
 /** No untrusted body, exception cause, prompt or URL is retained here. */
 export class ProviderError extends Error {
@@ -23,6 +25,7 @@ export class ProviderError extends Error {
       && !options.privateValues?.some(value => value && options.requestId === value) ? options.requestId : undefined;
     const summary = code === "REAL_PERSON_REJECTED"
       ? "参考图包含真人，需先完成真人认证"
+      : code === "CONTENT_BLOCKED" ? "出图模型的安全审核拒绝了这次请求"
       : `${provider === "kling-voice" ? "Kling 音色" : provider === "qwen-voice" ? "千问音色" : provider === "speech" ? "语音合成" : "媒体供应商"}请求失败`;
     super(`${summary}（${phase}，${code}${status ? `，HTTP ${status}` : ""}${id ? `，request_id: ${id}` : ""}）`);
     this.httpStatus = status;
@@ -31,6 +34,6 @@ export class ProviderError extends Error {
     if (typeof options.vendorCode === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(options.vendorCode)) this.vendorCode = options.vendorCode;
     if (options.gatewayRequestId && !options.privateValues?.includes(options.gatewayRequestId)) this.gatewayRequestId = options.gatewayRequestId;
     // Only reads may be retried. A failed POST can have an unknown outcome.
-    this.retryable = phase !== "create" && code !== "TASK_FAILED" && code !== "REAL_PERSON_REJECTED";
+    this.retryable = phase !== "create" && code !== "TASK_FAILED" && code !== "REAL_PERSON_REJECTED" && code !== "CONTENT_BLOCKED";
   }
 }

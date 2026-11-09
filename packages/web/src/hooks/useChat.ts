@@ -1,6 +1,6 @@
 import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
-import { api, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
@@ -14,6 +14,16 @@ import {
 // The message/generation view models live with the reducer; components keep
 // importing them from here.
 export type { DisplayMessage, GenerationView } from "./chat-reducer.js";
+
+function sceneOf(settings: unknown): string | undefined {
+  const scene = settings && typeof settings === "object" ? (settings as { scene?: unknown }).scene : undefined;
+  return typeof scene === "string" && scene ? scene : undefined;
+}
+
+/** Translated by the card, which formats the `{0}` template. */
+function missingNotice(missing: number): string {
+  return `套图中有 ${missing} 张未生成成功`;
+}
 
 export function useChat(
   conversationId: string | null,
@@ -94,6 +104,7 @@ export function useChat(
                 progress: 100,
                 assets: out?.assets,
                 error: downloadFailed ? (out?.error as string | undefined) : t.error,
+                ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing) } : {}),
                 taskId,
               },
             });
@@ -162,6 +173,7 @@ export function useChat(
               supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
               error: parsedMeta.error,
+              ...(typeof parsedMeta.missing === "number" && parsedMeta.missing > 0 ? { notice: missingNotice(parsedMeta.missing) } : {}),
               taskId: parsedMeta.taskId as string | undefined,
               settings: parsedMeta.mediaType === "image" ? generationSettings(parsedMeta.settings) : undefined,
             }
@@ -531,6 +543,8 @@ export function useChat(
             first_frame: firstFrame,
             last_frame: lastFrame,
             model: modelId,
+            // Settings stay whitelisted on the server; the scene travels on its own.
+            scene: mediaType === "image" ? sceneOf(settings) : undefined,
           });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
@@ -558,10 +572,12 @@ export function useChat(
           // The create request itself failed (non-2xx / network). Flip the
           // optimistic bubble to "failed" so the attempt + error stay visible.
           const msg = e instanceof Error ? e.message : String(e);
+          // A scene request that was off-topic or could not be prepared sent no image: say why on the card.
+          const sceneNotice = e instanceof ApiClientError && (e.code === "IMAGE_SCENE_MISMATCH" || e.code === "IMAGE_SCENE_UNAVAILABLE");
           dispatch({
             type: "generation_finished",
             messageId: tempGenId,
-            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}` },
+            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}`, ...(sceneNotice ? { notice: msg } : {}) },
           });
         }
       })();
