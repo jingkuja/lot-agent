@@ -204,11 +204,12 @@ function parseMediaSettings(value: unknown): CampaignMediaSettings | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   const source = object(value);
   const settings: CampaignMediaSettings = {};
+  if (source.resolution !== undefined) settings.resolution = text(source.resolution, "清晰度", 1, 16);
   if (source.size !== undefined) settings.size = text(source.size, "分辨率", 1, 32);
   if (source.n !== undefined) settings.n = integer(source.n, "出图数量", 1, 4, 1);
   if (source.quality !== undefined) settings.quality = text(source.quality, "质量", 1, 32);
   if (source.durationSec !== undefined) settings.durationSec = integer(source.durationSec, "视频时长", -1, 60, 5);
-  if (source.ratio !== undefined) settings.ratio = text(source.ratio, "视频比例", 1, 16);
+  if (source.ratio !== undefined) settings.ratio = text(source.ratio, "比例", 1, 16);
   if (source.generate_audio !== undefined) settings.generate_audio = boolean(source.generate_audio, "视频声音");
   return settings;
 }

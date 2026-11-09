@@ -16,6 +16,8 @@ export interface GenerationView {
 }
 
 export interface GenerationSettings {
+  resolution?: string;
+  ratio?: string;
   size?: string;
   n?: number;
   quality?: string;
@@ -24,8 +26,10 @@ export interface GenerationSettings {
 /** Keeps only well-typed image settings from stored message metadata. */
 export function generationSettings(raw: unknown): GenerationSettings | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const { size, n, quality } = raw as Record<string, unknown>;
+  const { resolution, ratio, size, n, quality } = raw as Record<string, unknown>;
   const settings: GenerationSettings = {
+    ...(typeof resolution === "string" && resolution ? { resolution } : {}),
+    ...(typeof ratio === "string" && ratio ? { ratio } : {}),
     ...(typeof size === "string" && size ? { size } : {}),
     ...(typeof n === "number" && Number.isInteger(n) && n > 0 ? { n } : {}),
     ...(typeof quality === "string" && quality ? { quality } : {}),

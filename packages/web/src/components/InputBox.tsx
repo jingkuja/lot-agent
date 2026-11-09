@@ -1,7 +1,14 @@
 import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VIDEO_DURATIONS, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
-import { DEFAULT_IMAGE_QUALITY, DEFAULT_IMAGE_SIZE, imageSizeError } from "../lib/image-settings.js";
+import {
+  DEFAULT_IMAGE_QUALITY,
+  DEFAULT_IMAGE_RATIO,
+  DEFAULT_IMAGE_RESOLUTION,
+  IMAGE_AUTO_RATIO,
+  imageSizeError,
+  nearestImageRatio,
+} from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import {
   isKlingModel,
@@ -18,7 +25,11 @@ import type { PickedFile } from "../api/client.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { api, type KnowledgeBase, type KnowledgeBaseRef } from "../api/client.js";
 import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
-import { MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, MAX_GROK_REFERENCE_VIDEOS, GROK_REFERENCE_VIDEO_MAX_SECONDS, durationsUpTo, grokReferencesIssue, checkKlingReferenceImage, klingReferenceImagesIssue, klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration } from "../lib/video-references.js";
+import {
+  MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, MAX_GROK_REFERENCE_VIDEOS,
+  GROK_REFERENCE_VIDEO_MAX_SECONDS, durationsUpTo, grokReferencesIssue, checkKlingReferenceImage, klingReferenceImagesIssue,
+  klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration, cachedImageSize, readImageSize,
+} from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
@@ -29,7 +40,6 @@ export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
 export interface InputBoxHandle {
   getFiles: () => PickedFile[];
   getSettings: () => ImageSettings | VideoSettings | undefined;
-  getImageSettingsError: () => string | null;
   getMissingMentions: () => string[];
   /** Image settings for a send that bypasses the composer (editing a generated
    * image): `original` (the image's own settings) when known, else the composer's,
@@ -69,6 +79,8 @@ interface InputBoxProps {
   onChange?: (value: string) => void;
   /** 视频时长选项；不传则沿用项目默认 4～15秒。 */
   videoDurations?: readonly string[];
+  /** 图片模式是否显示「图片张数」；只保留一张图的场景（获客宝海报）关闭。 */
+  imageCount?: boolean;
 }
 
 const MAX_FILES = 5;
@@ -107,6 +119,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   value,
   onChange,
   videoDurations,
+  imageCount = true,
 }: InputBoxProps, ref) {
   const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
@@ -190,11 +203,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   // the event handler — never inline in JSX (would leak a blob URL per render)
   // and never in a render/effect path (StrictMode double-invokes those).
   const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(
-    mode === "image" ? { size: DEFAULT_IMAGE_SIZE, n: 1, quality: DEFAULT_IMAGE_QUALITY } : undefined
+    mode === "image" ? { resolution: DEFAULT_IMAGE_RESOLUTION, ratio: DEFAULT_IMAGE_RATIO, n: 1, quality: DEFAULT_IMAGE_QUALITY } : undefined
   );
-  const [imageSettingsError, setImageSettingsError] = useState<string | null>(null);
   const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
-  const handleImageSettingsError = useCallback((error: string | null) => { setImageSettingsError(error); }, []);
   const pickerSelected = pickerModels.some((m) => m.id === selectedModel)
     ? selectedModel
     : pickerModels[0]?.id ?? (!onModelChange ? selectedModel : null) ?? null;
@@ -205,6 +216,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (!pickerSelected || pickerSelected === selectedModel) return;
     onModelChange(pickerSelected);
   }, [mode, onModelChange, pickerSelected, selectedModel]);
+
+  // 智能 ratio follows the first reference image; measure picks ahead of the send.
+  useEffect(() => {
+    if (mode !== "image") return;
+    for (const file of files) void readImageSize(file).catch(() => undefined);
+  }, [mode, files]);
+  /** Composer image settings with 智能 replaced by a concrete ratio the server accepts. */
+  const currentImageSettings = useCallback((): ImageSettings | undefined => {
+    const current = settingsRef.current as ImageSettings | undefined;
+    if (mode !== "image" || current?.ratio !== IMAGE_AUTO_RATIO) return current;
+    const size = files[0] ? cachedImageSize(files[0]) : undefined;
+    return { ...current, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO };
+  }, [mode, files]);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -443,21 +467,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   useImperativeHandle(ref, () => ({
     getFiles: collectPickedFiles,
-    getSettings: () => mediaMode ? settingsRef.current : undefined,
-    getImageSettingsError: () => imageSettingsError,
+    getSettings: () => mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined,
     getMissingMentions: () => missingMentions,
     prepareImageSend: (original) => {
       if (noModels) return { error: "模型目录暂时不可用，请稍后重试或联系管理员" };
+      const n = original?.n ?? 1;
+      const quality = original?.quality ?? DEFAULT_IMAGE_QUALITY;
+      // The server re-derives the size from the tier, so the stored settings go back unchanged.
+      if (original?.resolution && original.ratio) return { settings: { ...original, n, quality } };
       if (original?.size) {
-        const settings = { size: original.size, n: original.n ?? 1, quality: original.quality ?? DEFAULT_IMAGE_QUALITY };
-        const error = imageSizeError(settings.size, effectiveImageModel);
-        return error ? { error } : { settings };
+        const error = imageSizeError(original.size, effectiveImageModel);
+        return error ? { error } : { settings: { size: original.size, n, quality } };
       }
+      // Editing a generated image: 智能 has no composer reference to follow.
       const current = settingsRef.current as ImageSettings | undefined;
-      const error = imageSettingsError ?? imageSizeError(current?.size ?? "", effectiveImageModel);
-      return error ? { error } : { settings: current };
+      return { settings: current?.ratio === IMAGE_AUTO_RATIO ? { ...current, ratio: DEFAULT_IMAGE_RATIO } : current };
     },
-  }), [collectPickedFiles, mediaMode, imageSettingsError, missingMentions, noModels, effectiveImageModel]);
+  }), [collectPickedFiles, mode, mediaMode, currentImageSettings, missingMentions, noModels, effectiveImageModel]);
 
   const handleSend = useCallback(() => {
     if (checkingMediaRef.current) return;
@@ -465,14 +491,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (noModels) {
       setNoModelNotice(true);
       return;
-    }
-    if (mode === "image") {
-      const current = settingsRef.current as ImageSettings | undefined;
-      const err = imageSizeError(current?.size ?? "", effectiveImageModel);
-      if (err) {
-        setImageSettingsError(err);
-        return;
-      }
     }
     let picked: PickedFile[];
     try {
@@ -483,7 +501,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     }
     const hasFiles = picked.length > 0;
     if ((!trimmed && !hasFiles) || disabled || !onSend) return;
-    onSend(trimmed, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
+    onSend(trimmed, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setPromptValue("");
     setUploadLimitNotice(false);
     setFiles([]);
@@ -497,7 +515,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, effectiveImageModel, setPromptValue]);
+  }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, currentImageSettings, setPromptValue]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -536,12 +554,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
           {t("模型目录暂时不可用，请稍后重试或联系管理员")}</div>
-      )}
-      {mode === "image" && imageSettingsError && (
-        <div className="input-modal-hint input-modal-hint--error" role="alert">
-          <span aria-hidden>⚠️</span>
-          {t(imageSettingsError)}
-        </div>
       )}
       {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
         <div className="input-modal-hint" role="alert">
@@ -978,21 +990,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             </div>
             </>
           )}
-          {onModelChange && (
-            <ModelPicker
-              models={pickerModels}
-              value={pickerSelected}
-              onChange={onModelChange}
-              disabled={disabled}
-              emptyLabel={mode === "image" ? "暂无模型" : undefined}
-            />
+          {onModelChange && mode !== "image" && (
+            <ModelPicker models={pickerModels} value={pickerSelected} onChange={onModelChange} disabled={disabled} />
           )}
           {mode === "image" && (
             <ImageSettingsPicker
               disabled={disabled}
+              models={pickerModels}
               selectedModel={effectiveImageModel}
+              onModelChange={onModelChange}
+              allowCount={imageCount}
               onChange={handleSettingsChange}
-              onError={handleImageSettingsError}
             />
           )}
           {mode === "video" && (
@@ -1016,7 +1024,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             <button
               onClick={handleSend}
               className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={checkingMedia || (mode === "image" && !!imageSettingsError) || (!promptValue.trim() && files.length === 0 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile)) && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile)}
+              disabled={checkingMedia || (
+                !promptValue.trim() && files.length === 0
+                && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
+                && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
+              )}
               title={t("发送")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

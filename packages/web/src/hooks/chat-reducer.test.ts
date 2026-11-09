@@ -298,6 +298,8 @@ describe("generation settings", () => {
   it("keeps only well-typed image settings from stored metadata", () => {
     expect(generationSettings({ size: "1024x1536", n: 2, quality: "high", durationSec: null })).toEqual({ size: "1024x1536", n: 2, quality: "high" });
     expect(generationSettings({ size: 1, n: 1.5, quality: "" })).toBeUndefined();
+    expect(generationSettings({ resolution: "2K", ratio: "4:3", size: "2368x1776", n: 3 }))
+      .toEqual({ resolution: "2K", ratio: "4:3", size: "2368x1776", n: 3 });
     expect(generationSettings(undefined)).toBeUndefined();
   });
 

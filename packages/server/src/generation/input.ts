@@ -13,7 +13,9 @@ import { grokVideoInputIssue, isGrokVideoModel } from "@lot-agent/core";
 type GenerationSettingValue = string | number | boolean;
 
 const SETTING_TYPES: Record<"image" | "video", Record<string, "string" | "number" | "boolean">> = {
-  image: { size: "string", n: "number", quality: "string" },
+  // Image clients send a tier (1K/2K/4K) and a ratio; the server derives `size`.
+  // A bare `size` stays accepted for older clients and stored settings.
+  image: { resolution: "string", ratio: "string", size: "string", n: "number", quality: "string" },
   // TokenHub billing needs an explicit resolution tier or size (WxH).
   // Keep ratio independent so square/portrait videos retain the selected tier.
   video: { resolution: "string", size: "string", durationSec: "number", ratio: "string", quality: "string", generate_audio: "boolean" },
@@ -25,6 +27,35 @@ export const DEFAULT_IMAGE_QUALITY = "auto";
 export const IMAGE_MIN_PIXELS = 655_360;
 export const IMAGE_MAX_PIXELS = 8_294_400;
 export const IMAGE_MAX_EDGE = 3840;
+export const IMAGE_MAX_COUNT = 4;
+
+/** Pixel budget per tier. 4K is the vendor maximum (3840×2160 = 2880×2880). */
+export const IMAGE_RESOLUTION_PIXELS = { "1K": 1024 * 1024, "2K": 2048 * 2048, "4K": IMAGE_MAX_PIXELS } as const;
+export type ImageResolution = keyof typeof IMAGE_RESOLUTION_PIXELS;
+export const IMAGE_RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"] as const;
+
+const roundTo16 = (value: number) => Math.max(16, Math.round(value / 16) * 16);
+
+/**
+ * Standard pixel size for a tier and ratio: the tier's pixel budget at that
+ * ratio, both edges on the vendor's 16 px grid and within its edge / pixel
+ * limits. gpt-image 1.5 only takes its three fixed sizes, so it gets the
+ * matching orientation instead. Returns null for an unknown tier or ratio.
+ */
+export function imageSizeForTier(resolution: string, ratio: string, modelId?: string): string | null {
+  const tier = resolution.trim().toUpperCase();
+  if (!(tier in IMAGE_RESOLUTION_PIXELS) || !(IMAGE_RATIOS as readonly string[]).includes(ratio)) return null;
+  const [rw, rh] = ratio.split(":").map(Number);
+  if (isGptImage15(modelId)) return rw === rh ? "1024x1024" : rw > rh ? "1536x1024" : "1024x1536";
+  const budget = IMAGE_RESOLUTION_PIXELS[tier as ImageResolution];
+  let scale = Math.min(Math.sqrt(budget / (rw * rh)), IMAGE_MAX_EDGE / Math.max(rw, rh));
+  for (;;) {
+    const width = Math.min(roundTo16(rw * scale), IMAGE_MAX_EDGE);
+    const height = Math.min(roundTo16(rh * scale), IMAGE_MAX_EDGE);
+    if (width * height <= IMAGE_MAX_PIXELS) return `${width}x${height}`;
+    scale *= 0.99;
+  }
+}
 
 /** gpt-image 1.5 only accepts the three standard sizes; custom WxH is rejected. */
 export function isGptImage15(modelId?: string): boolean {
@@ -40,6 +71,9 @@ export function validateImageGenerationSettings(
 ): string | null {
   if (typeof settings.quality === "string" && !(IMAGE_QUALITY_VALUES as readonly string[]).includes(settings.quality)) {
     return "质量仅支持 auto、low、medium、high";
+  }
+  if (settings.n !== undefined && (!Number.isInteger(settings.n) || Number(settings.n) < 1 || Number(settings.n) > IMAGE_MAX_COUNT)) {
+    return `图片张数仅支持 1–${IMAGE_MAX_COUNT} 张`;
   }
   if (typeof settings.size !== "string") return null;
   const matched = /^(\d+)x(\d+)$/.exec(settings.size);
@@ -158,12 +192,20 @@ export function pickGenerationSettings(
   return out;
 }
 
-/** Default image quality to `auto` then validate size/quality for the model. */
+/** Default image quality to `auto`, derive `size` from a tier + ratio, then
+ * validate size/count/quality for the model. */
 export function finalizeImageSettings(
   settings: Record<string, GenerationSettingValue>,
   modelId?: string
 ): { settings: Record<string, GenerationSettingValue>; error: string | null } {
   const next = { ...settings };
   if (typeof next.quality !== "string") next.quality = DEFAULT_IMAGE_QUALITY;
+  if (typeof next.resolution === "string" || typeof next.ratio === "string") {
+    const resolution = typeof next.resolution === "string" ? next.resolution.trim().toUpperCase() : "";
+    const ratio = typeof next.ratio === "string" ? next.ratio : "";
+    const size = imageSizeForTier(resolution, ratio, modelId);
+    if (!size) return { settings: next, error: "请选择有效的清晰度和图片比例" };
+    Object.assign(next, { resolution, ratio, size });
+  }
   return { settings: next, error: validateImageGenerationSettings(next, modelId) };
 }

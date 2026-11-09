@@ -448,6 +448,16 @@ describe("CustomerAcquisitionService", () => {
       }),
       "u1",
     );
+
+    // The composer sends a tier + ratio; the server derives the standard size.
+    await service.createAsset("u1", {
+      assetType: "poster", prompt: "生成海报", publicAudience: "制造业管理者",
+      productId: "00000000-0000-4000-8000-000000000101", objective: "咨询",
+      channels: ["朋友圈"], callToAction: "预约",
+      mediaSettings: { resolution: "2K", ratio: "16:9", n: 1, quality: "high" },
+    });
+    expect(enqueue).toHaveBeenLastCalledWith("image.generate", expect.objectContaining({ size: "2736x1536" }), "u1");
+    expect((enqueue.mock.calls.at(-1) as unknown as [string, { prompt: string }])[1].prompt).toContain("2736x1536");
   });
 
   it("passes knowledge bases and attachments into copy generation", async () => {

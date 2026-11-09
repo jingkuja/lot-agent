@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db/database.js";
 import { isGrokVideoModel, type JobQueue } from "@lot-agent/core";
-import { billedVideoSeconds, resolveVideoGenerateAudio, validateImageGenerationSettings } from "../generation/input.js";
+import { billedVideoSeconds, finalizeImageSettings, resolveVideoGenerateAudio } from "../generation/input.js";
 import { ConversationActionDrafts } from "./conversation-drafts.js";
 import { ConflictError, DigitalEmployeeError, GenerationFailedError, InputError, NotFoundError, QuotaError } from "./errors.js";
 import {
@@ -368,12 +368,15 @@ export class CustomerAcquisitionService {
       const availability = await this.getModelAvailability(userId);
       mediaModelId = resolveCampaignModel(availability, isPoster ? "image" : "video", resolvedInput.modelId);
       if (isPoster) {
-        const invalid = validateImageGenerationSettings({
-          size: resolvedInput.mediaSettings?.size ?? "1536x1024",
-          n: resolvedInput.mediaSettings?.n ?? 1,
-          quality: resolvedInput.mediaSettings?.quality ?? "high",
+        // The composer sends a tier + ratio; derive the pixel size the poster request and prompt use.
+        const { resolution, ratio, size, n, quality } = resolvedInput.mediaSettings ?? {};
+        const finalized = finalizeImageSettings({
+          ...(resolution !== undefined ? { resolution } : {}),
+          ...(ratio !== undefined ? { ratio } : {}),
+          size: size ?? "1536x1024", n: n ?? 1, quality: quality ?? "high",
         }, mediaModelId);
-        if (invalid) throw new InputError(invalid);
+        if (finalized.error) throw new InputError(finalized.error);
+        if (resolution !== undefined) resolvedInput.mediaSettings = { ...resolvedInput.mediaSettings, size: finalized.settings.size as string };
       }
       const quota = await this.modelResolver?.checkQuota?.({
         userId,

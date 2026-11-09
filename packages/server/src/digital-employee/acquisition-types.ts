@@ -115,6 +115,8 @@ export interface CampaignModelResolver {
 export type AssetTypeInput = "copy" | "poster" | "video";
 
 export interface CampaignMediaSettings {
+  /** Image tier (1K / 2K / 4K); with `ratio` the server derives `size`. */
+  resolution?: string;
   size?: string;
   n?: number;
   quality?: string;

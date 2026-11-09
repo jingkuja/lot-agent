@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   billedVideoSeconds,
   finalizeImageSettings,
+  IMAGE_RATIOS,
+  imageSizeForTier,
   pickGenerationSettings,
+  validateImageGenerationSettings,
   pickVideoReferenceInputs,
   resolveVideoGenerateAudio,
 } from "./input.js";
@@ -33,10 +36,10 @@ describe("pickGenerationSettings", () => {
     ).toEqual({ size: "720x1280", durationSec: 5, ratio: "16:9", quality: "720p", generate_audio: false });
   });
 
-  it("accepts string video resolution without exposing it to image requests", () => {
+  it("accepts string resolutions for video and image tiers", () => {
     expect(pickGenerationSettings("video", { resolution: "1080p" })).toEqual({ resolution: "1080p" });
     expect(pickGenerationSettings("video", { resolution: 1080 })).toEqual({});
-    expect(pickGenerationSettings("image", { resolution: "1080p" })).toEqual({});
+    expect(pickGenerationSettings("image", { resolution: "2K", ratio: "4:3", n: 2 })).toEqual({ resolution: "2K", ratio: "4:3", n: 2 });
   });
 
   it("drops a video audio flag carrying the wrong type", () => {
@@ -104,6 +107,42 @@ describe("pickGenerationSettings", () => {
     );
     expect(finalizeImageSettings({ size: "1024x1024" }, "gpt-image-1.5").error).toBeNull();
     expect(finalizeImageSettings({ size: "1280x720" }, "gpt-image-2").error).toBeNull();
+  });
+
+  it("maps 1K / 2K / 4K and every ratio to a valid standard size", () => {
+    expect(imageSizeForTier("1K", "1:1")).toBe("1024x1024");
+    expect(imageSizeForTier("2K", "1:1")).toBe("2048x2048");
+    expect(imageSizeForTier("4K", "1:1")).toBe("2880x2880");
+    expect(imageSizeForTier("4K", "16:9")).toBe("3840x2160");
+    expect(imageSizeForTier("4K", "9:16")).toBe("2160x3840");
+    expect(imageSizeForTier("2K", "3:2", "gpt-image-1.5")).toBe("1536x1024");
+    expect(imageSizeForTier("8K", "1:1")).toBeNull();
+    expect(imageSizeForTier("2K", "7:3")).toBeNull();
+    for (const tier of ["1K", "2K", "4K"]) {
+      for (const ratio of IMAGE_RATIOS) {
+        const size = imageSizeForTier(tier, ratio)!;
+        expect(validateImageGenerationSettings({ size }), `${tier} ${ratio} ${size}`).toBeNull();
+        const [w, h] = size.split("x").map(Number);
+        const [rw, rh] = ratio.split(":").map(Number);
+        expect(Math.abs(w / h - rw / rh) / (rw / rh)).toBeLessThan(0.02);
+      }
+    }
+  });
+
+  it("derives the size from a tier and ratio, replacing any client size", () => {
+    expect(finalizeImageSettings({ resolution: "4k", ratio: "16:9", size: "1024x1024", n: 3 })).toEqual({
+      settings: { resolution: "4K", ratio: "16:9", size: "3840x2160", n: 3, quality: "auto" },
+      error: null,
+    });
+    expect(finalizeImageSettings({ resolution: "2K" }).error).toBe("请选择有效的清晰度和图片比例");
+    expect(finalizeImageSettings({ resolution: "2K", ratio: "auto" }).error).toBe("请选择有效的清晰度和图片比例");
+  });
+
+  it("allows one to four images", () => {
+    expect(finalizeImageSettings({ size: "1024x1024", n: 4 }).error).toBeNull();
+    expect(finalizeImageSettings({ size: "1024x1024", n: 5 }).error).toBe("图片张数仅支持 1–4 张");
+    expect(finalizeImageSettings({ size: "1024x1024", n: 1.5 }).error).toBe("图片张数仅支持 1–4 张");
+    expect(finalizeImageSettings({ size: "1024x1024", n: 0 }).error).toBe("图片张数仅支持 1–4 张");
   });
 
   it("rejects unknown quality values", () => {

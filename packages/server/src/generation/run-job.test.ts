@@ -129,6 +129,51 @@ describe("runGenerationJob", () => {
     expect(calls.metered).toBe(true);
   });
 
+  it("stores every requested image, keeps the tier on the message and meters the stored count", async () => {
+    const urls = ["https://img.example/1.png", "https://img.example/2.png", "https://img.example/3.png", "https://img.example/4.png"];
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "completed", progress: 100 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: urls[0], urls })),
+    };
+    const { deps, calls } = fakeDeps(provider);
+    const input = { ...job.input, resolution: "2K", ratio: "4:3", size: "2368x1776", n: 3 };
+    const out = await runGenerationJob(deps, { ...job, input }, "image");
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ n: 3, size: "2368x1776" }));
+    expect(deps.urlToBytes).toHaveBeenCalledTimes(3);
+    expect(out.assetIds).toHaveLength(3);
+    expect(deps.db.createAsset).toHaveBeenCalledTimes(3);
+    expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 0, outputCount: 3 } }));
+    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", settings: { resolution: "2K", ratio: "4:3", n: 3 } });
+    expect(calls.message.at(-1).metadata.assets).toHaveLength(3);
+  });
+
+  it("keeps a multi-image result whole: one failed download stores nothing and keeps every source url", async () => {
+    const urls = ["https://img.example/1.png", "https://img.example/2.png"];
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "completed", progress: 100 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: urls[0], urls })),
+    };
+    const { deps, calls } = fakeDeps(provider, {
+      urlToBytes: vi.fn(async (url: string) => {
+        if (url.endsWith("2.png")) throw new Error("reset");
+        return { body: Buffer.from("x"), mime: "image/png" };
+      }),
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const out = await runGenerationJob(deps, { ...job, input: { ...job.input, n: 2 } }, "image");
+      expect(out).toMatchObject({ downloadFailed: true, sourceUrl: urls[0], sourceUrls: urls });
+      expect(deps.db.createAsset).not.toHaveBeenCalled();
+      expect(calls.metered).toBe(false);
+      expect(calls.message.at(-1).metadata).toMatchObject({ status: "download_failed", sourceUrls: urls });
+    } finally { warn.mockRestore(); }
+
+    vi.mocked(deps.urlToBytes).mockResolvedValue({ body: Buffer.from("x"), mime: "image/png" });
+    const retried = await redownloadGenerationJob(deps, { ...job, input: { ...job.input, n: 2, sourceUrl: urls[0], sourceUrls: urls } }, "image");
+    expect(retried.assetIds).toHaveLength(2);
+    expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 0, outputCount: 2 } }));
+  });
+
   it("forwards image quality to the provider, defaulting to auto", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

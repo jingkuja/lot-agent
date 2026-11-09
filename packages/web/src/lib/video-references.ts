@@ -121,6 +121,10 @@ export function klingReferenceVideosIssue(files: readonly File[]): string | unde
 export interface ImageSize { width: number; height: number }
 
 const imageSizeCache = new WeakMap<File, ImageSize>();
+/** A size `readImageSize` already measured, without waiting. */
+export function cachedImageSize(file: File): ImageSize | undefined {
+  return imageSizeCache.get(file);
+}
 export function readImageSize(file: File): Promise<ImageSize> {
   const cached = imageSizeCache.get(file);
   if (cached !== undefined) return Promise.resolve(cached);

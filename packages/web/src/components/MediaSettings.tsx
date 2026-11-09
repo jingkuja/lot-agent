@@ -1,15 +1,14 @@
 import { useI18n } from "../i18n/index.js";
-import { useState, useRef, useEffect } from "react";
-import { isGptImage15 } from "../lib/model-filter.js";
+import { useState, useRef, useEffect, useLayoutEffect, type CSSProperties } from "react";
 import {
   DEFAULT_IMAGE_QUALITY,
-  DEFAULT_IMAGE_SIZE,
-  IMAGE_PRESETS,
+  DEFAULT_IMAGE_RATIO,
+  DEFAULT_IMAGE_RESOLUTION,
+  IMAGE_AUTO_RATIO,
+  IMAGE_MAX_COUNT,
   IMAGE_QUALITIES,
-  imageSizeError,
-  isMultipleOf16,
-  parseDim,
-  parseImageSize,
+  IMAGE_RATIOS,
+  IMAGE_RESOLUTIONS,
   type ImageSettings,
 } from "../lib/image-settings.js";
 import {
@@ -20,7 +19,7 @@ import {
 } from "../lib/video-settings.js";
 
 export type { ImageSettings } from "../lib/image-settings.js";
-export { IMAGE_PRESETS, IMAGE_QUALITIES } from "../lib/image-settings.js";
+export { IMAGE_QUALITIES } from "../lib/image-settings.js";
 
 export interface Ratio {
   label: string;
@@ -121,97 +120,125 @@ function ResBarIcon() {
   );
 }
 
-/* ── 图像生成：分辨率（三档预设 + 自定义）+ 质量 ── */
+/* ── 图像生成：张数 · 质量 · 模型 · 比例 · 清晰度 ── */
 
 // Remembered for the page session. The input box is unmounted/remounted when the
 // conversation switches between its empty (hero) and message-list layouts (e.g.
 // on the first send), which would otherwise reset the picker to its default.
 const lastImage = {
-  size: DEFAULT_IMAGE_SIZE,
+  n: 1,
   quality: DEFAULT_IMAGE_QUALITY,
+  ratio: DEFAULT_IMAGE_RATIO as string,
+  resolution: DEFAULT_IMAGE_RESOLUTION as string,
 };
 
-function splitSize(size: string): { width: string; height: string } {
-  const dim = parseImageSize(size);
-  if (dim) return { width: String(dim.width), height: String(dim.height) };
-  const [width = "", height = ""] = size.split("x");
-  return { width, height };
+function AutoRatioIcon() {
+  return (
+    <svg className="image-ratio-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <polyline points="8 12 8 8 12 8" />
+      <polyline points="16 12 16 16 12 16" />
+    </svg>
+  );
+}
+
+/** Visible vertical band for `el`: the viewport narrowed by every clipping ancestor (the chat panel hides overflow). */
+function visibleBand(el: HTMLElement): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (/hidden|auto|scroll|clip/.test(`${style.overflow} ${style.overflowY}`)) {
+      const rect = node.getBoundingClientRect();
+      top = Math.max(top, rect.top);
+      bottom = Math.min(bottom, rect.bottom);
+    }
+  }
+  return { top, bottom };
+}
+
+const POPUP_GAP = 10;
+const POPUP_EDGE = 8;
+const POPUP_MAX_HEIGHT = 640;
+
+export interface ImageModelOption {
+  id: string;
+  label?: string;
+  description?: string;
 }
 
 export function ImageSettingsPicker({
   disabled,
+  models = [],
   selectedModel,
+  onModelChange,
+  allowCount = true,
   onChange,
-  onError,
 }: {
   disabled?: boolean;
+  /** Visible image models (already labeled 默认 / 旗舰); the model row shows only with `onModelChange`. */
+  models?: ImageModelOption[];
   selectedModel?: string | null;
+  onModelChange?: (id: string) => void;
+  /** Hide the image count where only one image is kept (获客宝 posters). */
+  allowCount?: boolean;
   onChange?: (s: ImageSettings) => void;
-  onError?: (error: string | null) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const allowCustom = !isGptImage15(selectedModel);
-  const [size, setSize] = useState(() => {
-    if (allowCustom || IMAGE_PRESETS.some((p) => p.size === lastImage.size)) return lastImage.size;
-    lastImage.size = DEFAULT_IMAGE_SIZE;
-    return DEFAULT_IMAGE_SIZE;
-  });
+  const [n, setN] = useState(() => lastImage.n);
   const [quality, setQuality] = useState(() => lastImage.quality);
-  const [widthStr, setWidthStr] = useState(() => splitSize(size).width);
-  const [heightStr, setHeightStr] = useState(() => splitSize(size).height);
+  const [ratio, setRatio] = useState(() => lastImage.ratio);
+  const [resolution, setResolution] = useState(() => lastImage.resolution);
+  const count = allowCount ? n : 1;
+  // Open upward unless the space above is short and below is roomier; never past the visible band.
+  const [placement, setPlacement] = useState<{ below: boolean; maxHeight: number } | null>(null);
 
-  const applySize = (next: string) => {
-    lastImage.size = next;
-    setSize(next);
-    const parts = splitSize(next);
-    setWidthStr(parts.width);
-    setHeightStr(parts.height);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const band = visibleBand(wrap);
+      const rect = wrap.getBoundingClientRect();
+      const above = rect.top - band.top - POPUP_GAP - POPUP_EDGE;
+      const below = band.bottom - rect.bottom - POPUP_GAP - POPUP_EDGE;
+      const openBelow = above < 360 && below > above;
+      setPlacement({ below: openBelow, maxHeight: Math.max(160, Math.min(POPUP_MAX_HEIGHT, openBelow ? below : above)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, wrapRef]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    onChange?.({ resolution, ratio, n: count, quality });
+  }, [resolution, ratio, count, quality, onChange]);
+
+  const pickN = (value: number) => {
+    const next = Math.min(IMAGE_MAX_COUNT, Math.max(1, Math.round(value) || 1));
+    lastImage.n = next;
+    setN(next);
   };
-
-  useEffect(() => {
-    if (allowCustom) return;
-    if (IMAGE_PRESETS.some((p) => p.size === lastImage.size)) return;
-    applySize(DEFAULT_IMAGE_SIZE);
-  }, [allowCustom]);
-
-  const error = imageSizeError(size, selectedModel);
-  const preset = IMAGE_PRESETS.find((p) => p.size === size);
-  const qualityMeta = IMAGE_QUALITIES.find((q) => q.value === quality) ?? IMAGE_QUALITIES[0];
-  const parsed = parseImageSize(size);
-  const triggerGlyph = preset
-    ? { w: preset.w, h: preset.h }
-    : parsed
-      ? { w: parsed.width, h: parsed.height }
-      : { w: 1, h: 1 };
-
-  useEffect(() => {
-    onChange?.({ size, n: 1, quality });
-    onError?.(error);
-  }, [size, quality, error, onChange, onError]);
-
-  const pickPreset = (next: string) => applySize(next);
   const pickQuality = (value: string) => {
     lastImage.quality = value;
     setQuality(value);
   };
-  const onDimChange = (nextWidth: string, nextHeight: string) => {
-    if (!allowCustom) return;
-    const width = nextWidth.replace(/[^\d]/g, "");
-    const height = nextHeight.replace(/[^\d]/g, "");
-    setWidthStr(width);
-    setHeightStr(height);
-    const w = parseDim(width);
-    const h = parseDim(height);
-    const next = w != null && h != null ? `${w}x${h}` : `${width}x${height}`;
-    lastImage.size = next;
-    setSize(next);
+  const pickRatio = (value: string) => {
+    lastImage.ratio = value;
+    setRatio(value);
   };
-  const widthInvalid = !isMultipleOf16(parseDim(widthStr) ?? 0);
-  const heightInvalid = !isMultipleOf16(parseDim(heightStr) ?? 0);
-
-  const sizeLabel = parsed ? `${parsed.width}×${parsed.height}` : size.replace("x", "×");
+  const pickResolution = (value: string) => {
+    lastImage.resolution = value;
+    setResolution(value);
+  };
+  const [rw, rh] = ratio === IMAGE_AUTO_RATIO ? [1, 1] : ratio.split(":").map(Number);
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -220,74 +247,33 @@ export function ImageSettingsPicker({
         className="media-trigger"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
-        aria-haspopup="true"
+        aria-haspopup="dialog"
         aria-expanded={open}
-        title={t("图片设置")}
       >
-        <RatioGlyph w={triggerGlyph.w} h={triggerGlyph.h} size={14} />
-        <span className="media-trigger-label">{t(sizeLabel)} · {t(qualityMeta.label)}</span>
+        <RatioGlyph w={rw} h={rh} size={14} />
+        <span className="media-trigger-label">{t("图片参数")}</span>
         <ChevronIcon />
       </button>
       {open && (
-        <div className="media-popup">
-          <div className="media-section-title">{t("分辨率")}</div>
+        <div
+          className={`media-popup image-settings-popup${placement?.below ? " media-popup--below" : ""}`}
+          style={placement ? { maxHeight: placement.maxHeight } : undefined}
+          role="dialog"
+          aria-label={t("图片参数")}
+        >
+          <div className="media-section-title">{t("清晰度")}</div>
           <div className="seg-track">
-            {IMAGE_PRESETS.map((p) => (
+            {IMAGE_RESOLUTIONS.map((value) => (
               <button
-                key={p.size}
+                key={value}
                 type="button"
-                className={`seg seg--stack ${p.size === size ? "active" : ""}`}
-                onClick={() => pickPreset(p.size)}
+                className={`seg ${value === resolution ? "active" : ""}`}
+                onClick={() => pickResolution(value)}
               >
-                <RatioGlyph w={p.w} h={p.h} size={20} />
-                <span>{t(p.label)}</span>
-                <small>{p.size.replace("x", "×")}</small>
+                {value}
               </button>
             ))}
           </div>
-          <div className="media-section-title">{t("自定义分辨率")}</div>
-          {allowCustom ? (
-            <>
-              <div className="res-row">
-                <label className={`res-field${widthInvalid ? " res-field--invalid" : ""}`}>
-                  <span className="res-key">W</span>
-                  <input
-                    className="res-input"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={widthStr}
-                    onChange={(e) => onDimChange(e.target.value, heightStr)}
-                    aria-invalid={widthInvalid}
-                    aria-label={t("宽度")}
-                  />
-                </label>
-                <span className="res-link" aria-hidden>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5.93" />
-                    <path d="M14 11a5 5 0 0 0-7.07 0L5.52 12.41a5 5 0 0 0 7.07 7.07L14 18.07" />
-                  </svg>
-                </span>
-                <label className={`res-field${heightInvalid ? " res-field--invalid" : ""}`}>
-                  <span className="res-key">H</span>
-                  <input
-                    className="res-input"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={heightStr}
-                    onChange={(e) => onDimChange(widthStr, e.target.value)}
-                    aria-invalid={heightInvalid}
-                    aria-label={t("高度")}
-                  />
-                </label>
-              </div>
-              <div className="media-hint">{t("宽和高都必须能被 16 整除，总像素不能低于 655360，宽高比不能超过 1:3 或 3:1")}</div>
-              {error && <div className="media-hint media-hint--error">{t(error)}</div>}
-            </>
-          ) : (
-            <div className="media-hint">{t("当前模型不支持自定义分辨率")}</div>
-          )}
           <div className="media-section-title">{t("质量")}</div>
           <div className="seg-track">
             {IMAGE_QUALITIES.map((q) => (
@@ -301,6 +287,71 @@ export function ImageSettingsPicker({
               </button>
             ))}
           </div>
+          {onModelChange && (
+            <>
+              <div className="media-section-title">{t("模型")}</div>
+              {models.length ? (
+                <div className="image-model-grid">
+                  {models.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className={`image-model-card ${model.id === selectedModel ? "active" : ""}`}
+                      onClick={() => onModelChange(model.id)}
+                      aria-pressed={model.id === selectedModel}
+                      title={model.description ? t(model.description) : undefined}
+                    >
+                      {t(model.label ?? model.id)}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="media-hint">{t("暂无模型")}</div>
+              )}
+            </>
+          )}
+          <div className="media-section-title">{t("图片比例")}</div>
+          <div className="seg-track image-ratio-grid">
+            {[IMAGE_AUTO_RATIO, ...IMAGE_RATIOS].map((value) => {
+              const [w, h] = value === IMAGE_AUTO_RATIO ? [1, 1] : value.split(":").map(Number);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  className={`seg seg--stack ${value === ratio ? "active" : ""}`}
+                  onClick={() => pickRatio(value)}
+                >
+                  <span className="image-ratio-icon" aria-hidden>
+                    {value === IMAGE_AUTO_RATIO ? <AutoRatioIcon /> : <RatioGlyph w={w} h={h} size={18} />}
+                  </span>
+                  <span>{value === IMAGE_AUTO_RATIO ? t("智能") : value}</span>
+                </button>
+              );
+            })}
+          </div>
+          {ratio === IMAGE_AUTO_RATIO && <div className="media-hint">{t("有参考图时跟随第一张参考图的比例，否则为 1:1")}</div>}
+          {allowCount && (
+            <>
+              <div className="media-section-title">{t("图片张数")}</div>
+              <div className="image-count">
+                <input
+                  type="range"
+                  min={1}
+                  max={IMAGE_MAX_COUNT}
+                  step={1}
+                  value={n}
+                  onChange={(e) => pickN(Number(e.target.value))}
+                  aria-label={t("图片张数")}
+                  style={{ "--fill": `${((n - 1) / (IMAGE_MAX_COUNT - 1)) * 100}%` } as CSSProperties}
+                />
+                <div className="image-count-ticks" aria-hidden>
+                  {Array.from({ length: IMAGE_MAX_COUNT }, (_, i) => (
+                    <span key={i} className={i + 1 === n ? "active" : ""}>{i + 1}</span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

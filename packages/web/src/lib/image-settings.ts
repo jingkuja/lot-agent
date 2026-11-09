@@ -27,10 +27,41 @@ export const IMAGE_MIN_PIXELS = 655_360;
 export const IMAGE_MAX_PIXELS = 8_294_400;
 export const IMAGE_MAX_EDGE = 3840;
 
+/** Clarity tiers. The server turns a tier + ratio into a standard pixel size. */
+export const IMAGE_RESOLUTIONS = ["1K", "2K", "4K"] as const;
+export const DEFAULT_IMAGE_RESOLUTION = "1K";
+
+/** `auto` (智能) follows the first reference image, else 1:1; it is resolved before sending. */
+export const IMAGE_AUTO_RATIO = "auto";
+export const IMAGE_RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"] as const;
+export const DEFAULT_IMAGE_RATIO = "1:1";
+export const IMAGE_MAX_COUNT = 4;
+
 export interface ImageSettings {
-  size: string;
+  /** 1K / 2K / 4K; sent with `ratio` instead of a pixel size. */
+  resolution?: string;
+  ratio?: string;
+  /** Pixel size, kept only for settings stored before tiers existed. */
+  size?: string;
   n: number;
   quality: string;
+}
+
+/** The listed ratio closest to a width × height (compared on a log scale). */
+export function nearestImageRatio(width: number, height: number): string {
+  if (!(width > 0 && height > 0)) return DEFAULT_IMAGE_RATIO;
+  const target = Math.log(width / height);
+  let best: string = DEFAULT_IMAGE_RATIO;
+  let bestDistance = Infinity;
+  for (const ratio of IMAGE_RATIOS) {
+    const [w, h] = ratio.split(":").map(Number);
+    const distance = Math.abs(Math.log(w / h) - target);
+    if (distance < bestDistance) {
+      best = ratio;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }
 
 /** Positive integer from a width/height field. Rejects decimals and signs. */

@@ -139,8 +139,6 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
 
   const submit = async () => {
     if (!canSubmit) return;
-    const imageError = composerRef.current?.getImageSettingsError();
-    if (assetType === "poster" && imageError) { setError(imageError); return; }
     const missing = composerRef.current?.getMissingMentions() ?? [];
     if (missing.length) { setError(`当前提示词尚未写出 ${missing.join("、")}`); return; }
     setCreating(true); setError(null);
@@ -228,6 +226,7 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
                 knowledgeBases={assetType === "copy" ? knowledgeBases : []}
                 onKnowledgeBasesChange={setKnowledgeBases}
                 videoDurations={assetType === "video" ? ACQUISITION_VIDEO_DURATIONS : undefined}
+                imageCount={false}
                 placeholder={
                   assetType === "copy" ? copyBlocked ? t("平台暂未返回可用的 LLM 模型，请稍后重试或联系管理员") : t("例如：为下周线上分享会生成一套朋友圈文案，强调部署简单，语气专业克制，不使用未确认性能数字。") : assetType === "poster" ? t("描述海报画面、主标题和行动号召，可上传参考图。") : t("描述视频画面与节奏，可上传参考图、参考视频或首尾帧。")
                 }
@@ -256,12 +255,14 @@ function composerPayload(
   }
   if (assetType === "poster") {
     const imageSettings = settings as ImageSettings | undefined;
-    // Prefer higher poster defaults when the composer still has generic image presets.
-    const size = imageSettings?.size === "1024x1024" || !imageSettings?.size ? "1536x1024" : imageSettings.size;
+    // Posters keep one image; the server turns the tier + ratio into a pixel size.
     const quality = !imageSettings?.quality || imageSettings.quality === "auto" ? "high" : imageSettings.quality;
+    const tier = imageSettings?.resolution && imageSettings.ratio
+      ? { resolution: imageSettings.resolution, ratio: imageSettings.ratio }
+      : { size: "1536x1024" };
     return {
       attachments: uploaded.map((item) => item.uploaded),
-      mediaSettings: { size, n: imageSettings?.n ?? 1, quality },
+      mediaSettings: { ...tier, n: 1, quality },
     };
   }
   const videoSettings = settings as VideoSettings | undefined;

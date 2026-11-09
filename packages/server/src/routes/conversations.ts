@@ -779,6 +779,9 @@ export function createGenerationRoutes(service: AgentService) {
     const meta = msg.metadata;
     const metaStatus = (meta.status as string | undefined) ?? msg.status;
     const sourceUrl = meta.sourceUrl as string | undefined;
+    // Multi-image generations keep every vendor url; older messages have only `sourceUrl`.
+    const sourceUrls = Array.isArray(meta.sourceUrls) && meta.sourceUrls.every((url) => typeof url === "string" && url)
+      ? { sourceUrls: meta.sourceUrls as string[] } : {};
     if (meta.kind !== "generation" || metaStatus !== "download_failed" || !sourceUrl) {
       return c.json({ error: "No failed download to retry" }, 409);
     }
@@ -794,7 +797,7 @@ export function createGenerationRoutes(service: AgentService) {
     // Identity fields spread LAST so nothing stored in settings can override them.
     const taskId = await service.jobQueue.enqueue(
       "generation.redownload",
-      { ...settings, mediaType, sourceUrl, prompt, conversationId, assistantMessageId: messageId },
+      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, conversationId, assistantMessageId: messageId },
       userId
     );
     const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating", taskId };

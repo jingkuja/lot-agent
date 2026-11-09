@@ -5,8 +5,20 @@ import {
   IMAGE_PRESET_SIZES,
   IMAGE_QUALITY_VALUES,
   imageSizeError,
+  nearestImageRatio,
   parseImageSize,
 } from "./image-settings.js";
+
+describe("nearestImageRatio", () => {
+  it("picks the listed ratio closest to a reference image", () => {
+    expect(nearestImageRatio(1920, 1080)).toBe("16:9");
+    expect(nearestImageRatio(1080, 1350)).toBe("4:5");
+    expect(nearestImageRatio(3000, 2000)).toBe("3:2");
+    expect(nearestImageRatio(500, 510)).toBe("1:1");
+    expect(nearestImageRatio(2560, 1080)).toBe("21:9");
+    expect(nearestImageRatio(0, 0)).toBe("1:1");
+  });
+});
 
 describe("image size presets", () => {
   it("offers the three default resolutions", () => {
