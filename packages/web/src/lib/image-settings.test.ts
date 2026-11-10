@@ -93,7 +93,7 @@ describe("image sets", () => {
   it("starts 产品套图 at 4 images and 主副图 at 2, and leaves the other types alone", async () => {
     const { IMAGE_SCENES } = await import("./image-settings.js");
     const counts = Object.fromEntries(IMAGE_SCENES.map((scene) => [scene.value, scene.count]));
-    expect(counts).toEqual({ free: undefined, product_set: 4, main_images: 2, white_background: undefined });
+    expect(counts).toEqual({ free: undefined, product_set: 4, main_images: 2, white_background: undefined, product_scene: undefined });
   });
 
   it("names each image of a set and nothing else", async () => {
@@ -121,5 +121,25 @@ describe("generationRedo", () => {
     expect(generationRedo({ status: "failed", indexes: [0], error: "boom" })).toEqual({ status: "failed", indexes: [0], error: "boom" });
     expect(generationRedo({ status: "done", indexes: [0] })).toBeUndefined();
     expect(generationRedo(null)).toBeUndefined();
+  });
+});
+
+describe("white-background checks and export presets", () => {
+  it("reads stored checks and drops unknown issues", async () => {
+    const { whiteBackgroundChecks } = await import("./image-settings.js");
+    expect(whiteBackgroundChecks([{ corrected: true, issues: ["small_subject", "spooky"] }, null]))
+      .toEqual([{ corrected: true, issues: ["small_subject"] }, { corrected: false, issues: [] }]);
+    expect(whiteBackgroundChecks(undefined)).toBeUndefined();
+  });
+
+  it("lists the export presets the server knows, original first", async () => {
+    const { EXPORT_PRESETS } = await import("./image-settings.js");
+    // Must match server/generation/image-export.ts IMAGE_EXPORT_PRESETS.
+    expect(EXPORT_PRESETS.map((preset) => preset.value)).toEqual(["original", "taobao", "pinduoduo", "douyin", "shopee", "tiktok"]);
+  });
+
+  it("only 换场景 requires a product photo", async () => {
+    const { IMAGE_SCENES } = await import("./image-settings.js");
+    expect(IMAGE_SCENES.filter((scene) => scene.needsReference).map((scene) => scene.value)).toEqual(["product_scene"]);
   });
 });

@@ -5,6 +5,7 @@ describe("image scenes", () => {
   it("defaults to free creation and rejects unknown scenes", () => {
     expect(parseImageScene(undefined)).toBe("free");
     expect(parseImageScene("white_background")).toBe("white_background");
+    expect(parseImageScene("product_scene")).toBe("product_scene");
     expect(parseImageScene("poster")).toBeNull();
   });
 
@@ -50,5 +51,17 @@ describe("image scenes", () => {
     expect(reason('{"fits": true, "prompts": ["a "broken" quote"]}', 1)).toBe("not_json");
     expect(reason('{"fits": true}', 1)).toBe("bad_shape");
     expect(reason('{"fits": true, "prompts": ["only one"]}', 2)).toBe("few_prompts");
+  });
+});
+
+describe("product_scene", () => {
+  it("needs the user's product photo and keeps it while changing only the scene", async () => {
+    const { imageSceneNeedsReference } = await import("./image-scene.js");
+    expect(imageSceneNeedsReference("product_scene")).toBe(true);
+    expect(imageSceneNeedsReference("white_background")).toBe(false);
+    const prompt = imageSceneSystemPrompt("product_scene", 2, 1);
+    expect(prompt).toContain("product photo placed in a new scene");
+    expect(prompt).toContain("keep the product from the reference image exactly");
+    expect(prompt).toContain("Write exactly 1 prompt.");
   });
 });

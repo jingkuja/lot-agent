@@ -36,6 +36,8 @@ import {
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
+import { ProductPickerDialog } from "./ProductPickerDialog.js";
+import { productPromptText, withProductText } from "../lib/product-reference.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -278,6 +280,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   const consumedAttachment = useRef("");
   const [attachmentError, setAttachmentError] = useState("");
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [productNotice, setProductNotice] = useState("");
   const [checkingMedia, setCheckingMedia] = useState(false);
   const checkingMediaRef = useRef(false);
   const addReferenceMedia = useCallback(async (picked: File[], kind: "video" | "audio") => {
@@ -517,6 +521,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     }
     const hasFiles = picked.length > 0;
     if ((!trimmed && !hasFiles) || disabled || !onSend) return;
+    // 换场景 works on the user's own product photo; say so here instead of sending a request the server refuses.
+    if (activeScene?.needsReference && files.length === 0) {
+      setAttachmentError("请先上传产品图，再描述想换的场景");
+      return;
+    }
     onSend(trimmed, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setPromptValue("");
     setUploadLimitNotice(false);
@@ -531,7 +540,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, currentImageSettings, setPromptValue]);
+  }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, currentImageSettings, setPromptValue,
+    activeScene, files.length]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -586,6 +596,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       {activeScene?.note && <p className="input-modal-hint image-scene-hint image-scene-note">{t(activeScene.note)}</p>}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
+      {productNotice && <p className="input-modal-hint" role="status">{t(productNotice)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
         <div className="input-modal-hint" role="note">
           <span aria-hidden>🖼️</span>
@@ -861,6 +872,34 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 <path d="M18.5 16.5v5M16 19h5" />
               </svg>
               {t("参考图")}</button>
+          )}
+          {sceneTabs && (
+            <button type="button" className="btn-reference" disabled={disabled} onClick={() => { setProductNotice(""); setProductPickerOpen(true); }}
+              title={t("从「获客宝」的产品资料里选，产品图和卖点自动带入")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+                <circle cx="7.5" cy="7.5" r="1.5" />
+              </svg>
+              {t("选产品")}</button>
+          )}
+          {productPickerOpen && (
+            <ProductPickerDialog
+              room={MAX_IMAGE_REFERENCE_IMAGES - files.length}
+              onClose={() => setProductPickerOpen(false)}
+              onPick={(product, images, failedImages) => {
+                setProductPickerOpen(false);
+                if (images.length) addFiles(images);
+                setPromptValue(withProductText(promptValue, productPromptText(product)));
+                setAttachmentError("");
+                const room = MAX_IMAGE_REFERENCE_IMAGES - files.length;
+                setProductNotice(
+                  failedImages > 0 ? "有产品图读取失败，已带入能读取的图片和产品说明"
+                    : !(product.images ?? []).length ? "这个产品还没有图片，只带入了产品说明；可以再上传产品图"
+                    : (product.images ?? []).length > room ? "参考图已到上限，只带入了部分产品图"
+                    : ""
+                );
+              }}
+            />
           )}
           {videoMode && (
             <>

@@ -5,7 +5,7 @@ import { useEffect, useId, useRef } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
 import { DigitalPresenterStudio } from "../modules/digital-presenter/DigitalPresenterStudio.js";
 import { GenerationCard } from "./GenerationCard.js";
-import type { ComposeLayout, RedoRequest } from "../lib/image-settings.js";
+import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
@@ -49,6 +49,7 @@ interface ChatPanelProps {
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
   onComposeGeneration?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
+  onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
   onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;
   knowledgeBases?: KnowledgeBaseRef[];
@@ -160,6 +161,7 @@ export function ChatPanel({
   onRedownloadGeneration,
   onComposeGeneration,
   onRedoGeneration,
+  onExportGeneration,
   onEditImage,
   knowledgeBases,
   onKnowledgeBasesChange,
@@ -324,6 +326,7 @@ export function ChatPanel({
               onRedownloadGeneration={onRedownloadGeneration}
               onComposeGeneration={readOnly ? undefined : onComposeGeneration}
               onRedoGeneration={readOnly ? undefined : onRedoGeneration}
+              onExportGeneration={onExportGeneration}
               onEditImage={editImage}
             />
           );

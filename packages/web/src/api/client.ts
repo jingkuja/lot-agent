@@ -1,5 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
-import type { ComposeLayout, GenerationComposite, GenerationRedo, RedoRequest } from "../lib/image-settings.js";
+import type { ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, RedoRequest } from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
 
@@ -603,6 +603,25 @@ export const api = {
       `/conversations/${conversationId}/generations/${messageId}/redownload`,
       { method: "POST" }
     ),
+
+  /** 打包下载: the zip itself (not JSON); errors come back as the usual ApiClientError. */
+  exportGeneration: async (
+    conversationId: string, messageId: string, body: { preset: ExportPreset; names: string[]; compositeNames: string[] },
+  ): Promise<Blob> => {
+    const res = await fetch(`${BASE}/conversations/${conversationId}/generations/${messageId}/export`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body),
+    });
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event("lot:unauthorized"));
+      throw new Error("Unauthorized");
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
+    }
+    return res.blob();
+  },
 
   redoGeneration: (conversationId: string, messageId: string, body: RedoRequest) =>
     request<{ taskId: string; redo: GenerationRedo }>(

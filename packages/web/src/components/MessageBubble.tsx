@@ -10,7 +10,7 @@ import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
-import type { ComposeLayout, RedoRequest } from "../lib/image-settings.js";
+import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { FileLink } from "./FileLink.js";
 import { OutlineCard } from "./OutlineCard.js";
@@ -45,6 +45,8 @@ interface MessageBubbleProps {
   onComposeGeneration?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   /** 重做套图中的一张或补齐缺少的图（按张计费）；返回错误文案。 */
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
+  /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
+  onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
 }
 
 export function MessageBubble({
@@ -59,6 +61,7 @@ export function MessageBubble({
   onEditImage,
   onComposeGeneration,
   onRedoGeneration,
+  onExportGeneration,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -72,6 +75,7 @@ export function MessageBubble({
             onEditImage={onEditImage}
             onCompose={onComposeGeneration}
             onRedo={onRedoGeneration}
+            onExport={onExportGeneration}
           />
         </div>
       </div>

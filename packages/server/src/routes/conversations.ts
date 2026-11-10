@@ -11,11 +11,12 @@ import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
-import { ImageSceneError, imageSceneUsesSet, parseImageScene, planImageScene } from "../generation/image-scene.js";
+import { ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene } from "../generation/image-scene.js";
 import {
   composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
 } from "../generation/compose.js";
 import { IMAGE_REDO_TASK } from "../generation/run-job.js";
+import { buildExportZip, parseExportPreset, safeExportName, type ExportSource } from "../generation/image-export.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
   downshiftMiniprogramImageSize,
@@ -702,6 +703,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       // E-commerce scenes: check the request fits and rewrite it before anything is paid for or stored.
       // A failed or off-topic check sends no image request; the user simply sends again.
       let modelPrompts: string[] = [prompt];
+      if (imageSceneNeedsReference(scene) && !media?.some((item) => item?.type === "reference_image")) {
+        return c.json({ error: "请先上传产品图，再描述想换的场景", code: "IMAGE_SCENE_NEEDS_PRODUCT" }, 422);
+      }
       if (scene !== "free") {
         let plan;
         try {
@@ -902,6 +906,61 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "只有已完成的图片可以合成" }, 409);
     }
     return c.json({ composite });
+  });
+
+  // POST /:id/generations/:messageId/export — 打包下载: this generation's images and composites in one zip, as stored
+  // (`original`) or resized for a selling platform. Names come from the card (roles / layouts) and are sanitized here.
+  // Local work only: no model request, nothing metered.
+  app.post("/:id/generations/:messageId/export", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as { preset?: unknown; names?: unknown; compositeNames?: unknown } | null;
+    const preset = parseExportPreset(body?.preset);
+    if (!preset) return c.json({ error: "unknown export preset" }, 400);
+    if (!deps.assets) return c.json({ error: "打包下载暂不可用" }, 503);
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const assets = Array.isArray(meta.assets) ? meta.assets as { url?: unknown; mime?: unknown }[] : [];
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || !assets.length
+      || assets.some((asset) => typeof asset?.mime !== "string" || !asset.mime.startsWith("image/"))) {
+      return c.json({ error: "只有已完成的图片可以打包下载" }, 409);
+    }
+    const names = Array.isArray(body?.names) ? body.names : [];
+    const compositeNames = Array.isArray(body?.compositeNames) ? body.compositeNames : [];
+    const wanted = [
+      ...assets.map((asset, index) => ({
+        url: asset.url, name: safeExportName(names[index], `图片_${String(index + 1).padStart(2, "0")}`), detail: false,
+      })),
+      ...storedComposites(meta.composites).map((item, index) => ({
+        url: item.url, name: safeExportName(compositeNames[index], `合成_${index + 1}`), detail: item.layout === "vertical",
+      })),
+    ];
+    // Every file must be this user's own stored output; the URLs in the message are never fetched.
+    const sources: ExportSource[] = [];
+    for (const item of wanted) {
+      const key = outputStorageKey(item.url);
+      const stored = key ? await service.db.getGeneratedByStorageKey(key) : null;
+      if (!key || !stored || stored.user_id !== userId || !await deps.assets.exists(key)) {
+        return c.json({ error: "原图已不存在，无法打包" }, 409);
+      }
+      sources.push({ name: item.name, body: await deps.assets.get(key), ext: key.split(".").pop() || "png", detail: item.detail });
+    }
+    let zip: Buffer;
+    try {
+      zip = await buildExportZip(sources, preset);
+    } catch (error) {
+      console.warn("[image.export] failed", { messageId, preset, errorType: (error as Error)?.name });
+      return c.json({ error: "打包失败，请稍后重试" }, 500);
+    }
+    return new Response(new Uint8Array(zip), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${preset === "original" ? "images" : preset}.zip"`,
+        "Cache-Control": "no-store",
+      },
+    });
   });
 
   // POST /:id/generations/:messageId/redo — 重做 one image of a finished set ({ index }) or 补齐 the images the set is

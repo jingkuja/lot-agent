@@ -967,3 +967,29 @@ describe("image set redo", () => {
     expect(state.metadata).toEqual({ status: "completed", assets: [a, b] });
   });
 });
+
+describe("white-background check", () => {
+  it("stores the 白底图 with a pure white background and records the check on the message", async () => {
+    const grey = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#f0efed" } })
+      .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 3, background: "#c0392b" } }).png().toBuffer(), left: 12, top: 12 }])
+      .png().toBuffer();
+    const provider = setProvider();
+    const { deps, calls } = fakeDeps(provider, { urlToBytes: vi.fn(async () => ({ body: grey, mime: "image/png" })), extFor: () => "png" });
+    const put = vi.mocked(deps.storage.put);
+    const out = await runGenerationJob(deps, { ...job, input: { ...job.input, scene: "white_background", n: 1 } }, "image");
+    const stored = put.mock.calls[0][0].body as Buffer;
+    const { data } = await sharp(stored).raw().toBuffer({ resolveWithObject: true });
+    expect(Array.from(data.subarray(0, 3))).toEqual([255, 255, 255]);
+    expect(out.whiteChecks).toEqual([{ corrected: true, issues: [] }]);
+    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", whiteChecks: [{ corrected: true, issues: [] }] });
+  });
+
+  it("leaves other image types exactly as the model made them", async () => {
+    const image = await png();
+    const provider = setProvider();
+    const { deps } = fakeDeps(provider, { urlToBytes: vi.fn(async () => ({ body: image, mime: "image/png" })) });
+    const out = await runGenerationJob(deps, { ...job, input: { ...job.input, n: 1 } }, "image");
+    expect((vi.mocked(deps.storage.put).mock.calls[0][0].body as Buffer).equals(image)).toBe(true);
+    expect(out.whiteChecks).toBeUndefined();
+  });
+});

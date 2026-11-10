@@ -4675,6 +4675,39 @@ html, body, #root {
 }
 @keyframes gen-set-spin { to { transform: rotate(360deg); } }
 .gen-set-stage { position: relative; }
+.gen-export .gen-compose-toggle svg { width: 15px; height: 15px; }
+/* 白底图自动检查：校正结果和仍可能不过审的原因 */
+.gen-white-notes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; color: var(--text-secondary); font-size: 13px; }
+.gen-white-notes p { margin: 0; }
+.gen-white-notes .gen-white-issue { color: var(--accent); }
+.gen-set .gen-white-notes { margin-top: 0; }
+/* 选产品 */
+.product-picker { width: min(560px, calc(100vw - 32px)); }
+.product-picker-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.product-picker-search {
+  padding: 8px 12px; border: 1px solid var(--border-input); border-radius: 10px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 14px;
+}
+.product-picker-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.product-picker-list { display: flex; flex-direction: column; gap: 8px; min-height: 120px; max-height: min(50vh, 420px); overflow-y: auto; }
+.product-picker-empty { margin: 24px 0; color: var(--text-secondary); font-size: 13px; text-align: center; }
+.product-picker-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px; text-align: left;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); color: var(--text); font: inherit; cursor: pointer;
+}
+.product-picker-item:hover:not(:disabled) { border-color: var(--accent); background: var(--gen-card-from); }
+.product-picker-item:disabled { cursor: default; opacity: 0.7; }
+.product-picker-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.product-picker-thumbs { display: flex; gap: 4px; flex: none; }
+.product-picker-thumbs img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--bg-tool); }
+.product-picker-noimage {
+  display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+  border-radius: 8px; background: var(--bg-tool); color: var(--text-secondary); font-size: 12px;
+}
+.product-picker-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.product-picker-text strong { font-size: 14px; }
+.product-picker-text span { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-picker-loading { flex: none; color: var(--accent); font-size: 12px; }
 .gen-set-busy--stage { z-index: 2; border-radius: 12px; font-size: 14px; }
 .gen-set-tile--missing {
   display: flex; align-items: center; justify-content: center;

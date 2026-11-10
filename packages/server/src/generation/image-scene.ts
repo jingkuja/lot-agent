@@ -5,13 +5,18 @@
  * skips this step and sends the user's text unchanged.
  */
 
-export const IMAGE_SCENES = ["free", "white_background", "main_images", "product_set"] as const;
+export const IMAGE_SCENES = ["free", "white_background", "main_images", "product_set", "product_scene"] as const;
 export type ImageScene = typeof IMAGE_SCENES[number];
 export type GuidedImageScene = Exclude<ImageScene, "free">;
 
 export function parseImageScene(value: unknown): ImageScene | null {
   if (value === undefined || value === null || value === "") return "free";
   return IMAGE_SCENES.includes(value as ImageScene) ? value as ImageScene : null;
+}
+
+/** Scenes that only work on the user's own product photo: without a reference image nothing is sent. */
+export function imageSceneNeedsReference(scene: ImageScene): boolean {
+  return scene === "product_scene";
 }
 
 /** Scenes whose images each play a different role, so every image gets its own prompt. */
@@ -28,6 +33,16 @@ const SCENE_BRIEFS: Record<GuidedImageScene, { name: string; fits: string; style
       "The product centered, filling about 80-85% of the frame, shot as a professional studio packshot.",
       "Soft, even softbox lighting, accurate true-to-life color and material, crisp clean edges,",
       "and only a faint natural contact shadow under the product. Every image is the same product in the same white-background style.",
+    ].join(" "),
+  },
+  product_scene: {
+    name: "product photo placed in a new scene (产品图换场景)",
+    fits: "the user's own product photo, to be shown in a new background, setting or lifestyle scene",
+    style: [
+      "Photorealistic commercial product photography. The product is the one in the reference image, unchanged; only the background",
+      "and surroundings are new. Blend it in naturally: matching perspective and scale, consistent light direction and color temperature,",
+      "realistic contact shadows and reflections. Props and setting support the product and never cover or outshine it.",
+      "No text, logo or watermark unless the user asks for it.",
     ].join(" "),
   },
   main_images: {

@@ -1,4 +1,4 @@
-import type { GenerationComposite, GenerationRedo } from "../lib/image-settings.js";
+import type { GenerationComposite, GenerationRedo, WhiteBackgroundCheck } from "../lib/image-settings.js";
 
 export interface GenerationView {
   mediaType: "image" | "video";
@@ -25,6 +25,8 @@ export interface GenerationView {
   missing?: number;
   /** 重做 / 补齐 in progress on this set, or why the last one made nothing. */
   redo?: GenerationRedo;
+  /** 白底图: per image, whether the background was corrected and what may still fail a listing check. */
+  whiteChecks?: WhiteBackgroundCheck[];
 }
 
 /** Later updates of a generation (ids, progress, final state) carry only what changed; what the card already knew stays. */

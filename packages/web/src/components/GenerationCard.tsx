@@ -6,7 +6,8 @@ import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { ImageEditDialog } from "./ImageEditDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
 import {
-  COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, imageSetRole, type ComposeLayout, type GenerationComposite, type RedoRequest,
+  COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, EXPORT_PRESETS, imageSetRole, WHITE_BACKGROUND_ISSUES,
+  type ComposeLayout, type ExportPreset, type GenerationComposite, type RedoRequest, type WhiteBackgroundCheck,
 } from "../lib/image-settings.js";
 import { useConfirm } from "../modules/marketing-video/ConfirmDialog.js";
 
@@ -138,11 +139,12 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: RedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo }: {
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
   generation: GenerationView;
   assets: Asset[];
   onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
   onCompose?: ComposeHandler;
+  onExport?: ExportHandler;
   /** Only for sets with a role per image (产品套图 / 主副图). */
   onRedo?: RedoHandler;
 }) {
@@ -166,6 +168,11 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo }: {
     return { url: asset.url, label, name: `${label ?? "生成结果"}_${number}.${fileExtension(asset.url, "png")}` };
   });
   const edit = onEdit ? (index: number) => { setViewing(null); setEditing(index); } : undefined;
+  const exportAll = onExport && ((preset: ExportPreset) => onExport(
+    preset,
+    images.map((image) => image.name.replace(/\.[^.]+$/, "")),
+    (generation.composites ?? []).map((item) => compositeLabel(t, item)),
+  ));
   const start = async (request: RedoRequest, count: number) => {
     if (!onRedo || starting || running) return;
     const single = "index" in request;
@@ -219,6 +226,8 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo }: {
         <ComposePanel count={assets.length} composites={generation.composites ?? []} onCompose={onCompose} disabled={running}
           onComposingChange={setComposing} />
       )}
+      <WhiteCheckNotes checks={generation.whiteChecks} />
+      {exportAll && !running && <ExportMenu onExport={exportAll} />}
       {viewing !== null && (
         <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit} />
       )}
@@ -227,6 +236,81 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo }: {
           onSubmit={(prompt) => onEdit(assets[editing].url, prompt, generation.settings)} onClose={() => setEditing(null)} />
       )}
       {confirmDialog}
+    </div>
+  );
+}
+
+/** File name of a single exported image, by image type. */
+const SINGLE_EXPORT_NAMES: Record<string, string> = { white_background: "白底图", product_scene: "场景图" };
+
+type ExportHandler = (preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
+
+/** The name a composite shows and downloads under: its layout, plus 留白 when it has gaps. */
+function compositeLabel(t: (key: string) => string, item: GenerationComposite): string {
+  const name = t(COMPOSE_LAYOUTS.find((option) => option.value === item.layout)?.label ?? "合成");
+  return item.gap ? `${name} · ${t("留白")}` : name;
+}
+
+/** 打包下载: every image (and composite) in one zip, as made or sized for a selling platform. Free; done on the server. */
+function ExportMenu({ onExport }: { onExport: (preset: ExportPreset) => Promise<string | undefined> }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<ExportPreset | null>(null);
+  const [error, setError] = useState<string>();
+  const run = async (preset: ExportPreset) => {
+    if (busy) return;
+    setBusy(preset);
+    setError(undefined);
+    let failure: string | undefined;
+    try {
+      failure = await onExport(preset);
+    } catch {
+      failure = "打包失败，请稍后重试";
+    } finally {
+      setBusy(null);
+    }
+    if (failure) setError(failure);
+  };
+  return (
+    <div className="gen-compose gen-export">
+      <button type="button" className="gen-compose-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        {DOWNLOAD_ICON}
+        {t("打包下载")}
+      </button>
+      {open && (
+        <div className="gen-compose-panel">
+          <div className="gen-compose-layouts" role="group" aria-label={t("打包下载")}>
+            {EXPORT_PRESETS.map((preset) => (
+              <button key={preset.value} type="button" className={`gen-compose-layout${busy === preset.value ? " active" : ""}`}
+                disabled={!!busy} onClick={() => run(preset.value)}>
+                {busy === preset.value ? t("打包中…") : t(preset.label)}
+              </button>
+            ))}
+          </div>
+          <p className="gen-compose-hint">{t("选平台后按该平台的主图尺寸放进白色方图并压到大小限制以内，长图按详情页宽度缩放；不扣积分。")}</p>
+          {error && <p className="gen-compose-error" role="alert">{t(error)}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 白底图: what the automatic check found, per image. Nothing is shown for an image that passed as it was. */
+function WhiteCheckNotes({ checks }: { checks?: WhiteBackgroundCheck[] }) {
+  const { t } = useI18n();
+  if (!checks?.length) return null;
+  const many = checks.length > 1;
+  const issues = checks.flatMap((check, index) => check.issues.map((issue) => ({ index, issue })));
+  const corrected = checks.some((check) => check.corrected);
+  if (!issues.length && !corrected) return null;
+  return (
+    <div className="gen-white-notes" role="status">
+      {corrected && <p>{t("背景已自动校正为纯白。")}</p>}
+      {issues.map(({ index, issue }) => (
+        <p key={`${index}-${issue}`} className="gen-white-issue">
+          {many ? `${t("第 {0} 张", [index + 1])}：` : ""}{t(WHITE_BACKGROUND_ISSUES[issue])}
+        </p>
+      ))}
     </div>
   );
 }
@@ -247,10 +331,7 @@ function ComposePanel({ count, composites, onCompose, disabled, onComposingChang
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const active = layouts.find((item) => item.value === layout) ?? layouts[0];
-  const labelOf = (item: GenerationComposite) => {
-    const name = t(COMPOSE_LAYOUTS.find((option) => option.value === item.layout)?.label ?? "合成");
-    return item.gap ? `${name} · ${t("留白")}` : name;
-  };
+  const labelOf = (item: GenerationComposite) => compositeLabel(t, item);
   const [viewing, setViewing] = useState<number | null>(null);
   const composed: ViewerImage[] = composites.map((item) => ({
     url: item.url, label: labelOf(item), name: `${labelOf(item)}.${fileExtension(item.url, "jpg")}`,
@@ -346,9 +427,12 @@ export function GenerationCard({
   onEditImage,
   onCompose,
   onRedo,
+  onExport,
 }: {
   generation: GenerationView;
   messageId?: string;
+  /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
+  onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
   onRedo?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   /** Join this generation's images into one picture; resolves to an error text. Undefined hides 合成. */
@@ -372,9 +456,11 @@ export function GenerationCard({
       return (
         <ImageSet generation={generation} assets={assets} onEdit={onEditImage}
           onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
-          onRedo={messageId && onRedo && imageSet ? (request) => onRedo(messageId, request) : undefined} />
+          onRedo={messageId && onRedo && imageSet ? (request) => onRedo(messageId, request) : undefined}
+          onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
       );
     }
+    const singleImage = mediaType === "image" && assets.length === 1 && assets[0].mime.startsWith("image/");
     return (
       <>
         <div className="gen-card-assets">
@@ -384,6 +470,10 @@ export function GenerationCard({
           ))}
         </div>
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
+        {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} />}
+        {singleImage && messageId && onExport && (
+          <ExportMenu onExport={(preset) => onExport(messageId, preset, [`${SINGLE_EXPORT_NAMES[generation.scene ?? ""] ?? "生成结果"}_01`], [])} />
+        )}
       </>
     );
   }

@@ -43,25 +43,33 @@ export const IMAGE_MAX_COUNT = 4;
  * in the order the server writes its prompts (`server/generation/image-scene.ts`); `note` explains what a set costs and
  * the cheaper one-image route through 自由创作. */
 export const IMAGE_SCENES = [
-  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined, note: undefined, count: undefined, roles: undefined },
   {
-    value: "product_set", label: "产品套图", count: 4, roles: ["封面", "卖点", "使用场景", "细节"],
+    value: "free", label: "自由创作", placeholder: undefined, hint: undefined, note: undefined, count: undefined, roles: undefined,
+    needsReference: false,
+  },
+  {
+    value: "product_set", label: "产品套图", count: 4, roles: ["封面", "卖点", "使用场景", "细节"], needsReference: false,
     placeholder: "输入产品名和卖点，可上传产品图；如：保温杯，316 不锈钢，12 小时保温，适合通勤",
     hint: "按「图片参数」里的张数依次生成：封面主图、卖点图、使用场景图、细节图",
     note: "每张图单独生成，可再合成为一张，比在一张图里画多格更清晰；按生成张数计费（默认 4 张）。不需要高清时，"
       + "可在「自由创作」里写明“在一张图里拼成四宫格产品套图”，只按 1 张计费。",
   },
   {
-    value: "main_images", label: "主副图", count: 2, roles: ["主图", "其他角度", "细节", "使用场景"],
+    value: "main_images", label: "主副图", count: 2, roles: ["主图", "其他角度", "细节", "使用场景"], needsReference: false,
     placeholder: "输入产品名、特点或想要的风格，可上传产品图；如：白色无线耳机，简约科技风",
     hint: "第 1 张是主图，其余是多角度、细节和使用场景副图；张数在「图片参数」里选择",
     note: "每张图单独生成，可再合成为一张，比在一张图里画多格更清晰；按生成张数计费（默认 2 张）。不需要高清时，"
       + "可在「自由创作」里写明“在一张图里左右拼出主图和副图”，只按 1 张计费。",
   },
   {
-    value: "white_background", label: "白底图", count: undefined, roles: undefined, note: undefined,
+    value: "white_background", label: "白底图", count: undefined, roles: undefined, note: undefined, needsReference: false,
     placeholder: "上传产品图或输入产品名，生成纯白背景的商品图；如：红色运动鞋，侧面 45 度",
-    hint: "纯白背景、产品居中、柔和棚拍光，适合电商平台上架",
+    hint: "纯白背景、产品居中、柔和棚拍光，适合电商平台上架；出图后自动把背景校正为纯白，并检查商品大小和是否贴边",
+  },
+  {
+    value: "product_scene", label: "换场景", count: undefined, roles: undefined, note: undefined, needsReference: true,
+    placeholder: "上传产品实拍图，再写想要的场景；如：放在清晨的木质餐桌上，旁边有咖啡和绿植，自然光",
+    hint: "保留你上传的产品，只换背景和场景，适合把实拍图变成场景图；需要先上传产品图",
   },
 ] as const;
 export type ImageScene = typeof IMAGE_SCENES[number]["value"];
@@ -80,6 +88,37 @@ export const COMPOSE_LAYOUTS = [
 ] as const;
 export type ComposeLayout = typeof COMPOSE_LAYOUTS[number]["value"];
 export const COMPOSE_MIN_IMAGES = 2;
+
+/** 打包下载 targets. Sizes and file limits live on the server (`server/generation/image-export.ts`); ids must match. */
+export const EXPORT_PRESETS = [
+  { value: "original", label: "原图" },
+  { value: "taobao", label: "淘宝 / 天猫" },
+  { value: "pinduoduo", label: "拼多多" },
+  { value: "douyin", label: "抖音小店" },
+  { value: "shopee", label: "Shopee" },
+  { value: "tiktok", label: "TikTok Shop" },
+] as const;
+export type ExportPreset = typeof EXPORT_PRESETS[number]["value"];
+
+/** 白底图 check per image: whether the background was made pure white, and what may still fail a listing check. */
+export type WhiteBackgroundIssue = "busy_background" | "small_subject" | "cropped";
+export interface WhiteBackgroundCheck { corrected: boolean; issues: WhiteBackgroundIssue[] }
+
+export const WHITE_BACKGROUND_ISSUES: Record<WhiteBackgroundIssue, string> = {
+  busy_background: "背景不是纯白，没能完全校正，平台审核可能不通过，建议重新生成",
+  small_subject: "商品在画面中偏小，部分平台要求商品占画面大部分",
+  cropped: "商品贴到了画面边缘，可能被裁切",
+};
+
+/** White-background checks stored on a message, dropping anything malformed. */
+export function whiteBackgroundChecks(raw: unknown): WhiteBackgroundCheck[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.map((item) => {
+    const { corrected, issues } = (item ?? {}) as Record<string, unknown>;
+    const known = Array.isArray(issues) ? issues.filter((issue): issue is WhiteBackgroundIssue => issue in WHITE_BACKGROUND_ISSUES) : [];
+    return { corrected: corrected === true, issues: known };
+  });
+}
 
 /** 重做 one image of a set, or 补齐 the images it is missing. */
 export type RedoRequest = { index: number } | { missing: true };

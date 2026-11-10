@@ -748,6 +748,20 @@ describe("POST /conversations/:id/generations image scenes", () => {
     expect(service.jobQueue.enqueue.mock.calls[0][1].prompts).toBeUndefined();
   });
 
+  it("asks for a product photo before checking or sending a 换场景 request", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn();
+    const res = await send(service, { prompt: "放在海边", scene: "product_scene" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ code: "IMAGE_SCENE_NEEDS_PRODUCT" });
+    expect(service.imageSceneText).not.toHaveBeenCalled();
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    service.imageSceneText = vi.fn(async () => '{"fits": true, "prompts": ["the cup on a beach"]}');
+    const ok = await send(service, { prompt: "放在海边", scene: "product_scene", media: [{ type: "reference_image", url: "/static/uploads/cup.png" }] });
+    expect(ok.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls[0][1]).toMatchObject({ prompt: "the cup on a beach", scene: "product_scene" });
+  });
+
   it("rejects an unknown scene", async () => {
     const res = await send(fakeService(), { prompt: "菊花", scene: "poster" });
     expect(res.status).toBe(400);
@@ -926,5 +940,52 @@ describe("POST /conversations/:id/generations/:messageId/redo", () => {
     service.jobQueue.enqueue = vi.fn(async () => { throw new Error("redis down"); });
     expect((await redo({ index: 1 })).status).toBe(500);
     expect(meta().redo).toBeUndefined();
+  });
+});
+
+describe("POST /conversations/:id/generations/:messageId/export", () => {
+  async function setup(metadata: Record<string, unknown> = {}) {
+    const { default: sharp } = await import("sharp");
+    const png = await sharp({ create: { width: 40, height: 40, channels: 3, background: "#3388cc" } }).png().toBuffer();
+    const service = fakeService();
+    service.db.getGenerationMessage = vi.fn(async () => ({
+      status: "completed",
+      metadata: {
+        kind: "generation", mediaType: "image", status: "completed",
+        assets: [{ url: "/static/assets/a.png", mime: "image/png" }, { url: "/static/assets/b.png", mime: "image/png" }],
+        composites: [{ url: "/static/assets/long.jpg", mime: "image/jpeg", layout: "vertical", gap: false }],
+        ...metadata,
+      },
+    }));
+    service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => ({ user_id: key === "other.png" ? "u2" : "u1", storage_key: key }));
+    const assets = { exists: vi.fn(async () => true), get: vi.fn(async () => png), put: vi.fn() };
+    const a = new Hono<{ Variables: { userId: string } }>();
+    a.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    a.route("/conversations", createGenerationRoutes(service, { assets: assets as any }));
+    const exportZip = (body: unknown) => a.request("/conversations/c1/generations/m1/export", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, assets, exportZip };
+  }
+
+  it("returns a zip of the images and composites under the card's names, without metering", async () => {
+    const { default: JSZip } = await import("jszip");
+    const { service, exportZip } = await setup();
+    const res = await exportZip({ preset: "taobao", names: ["主图_01", "其他/角度_02"], compositeNames: ["长图"] });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/zip");
+    const zip = await JSZip.loadAsync(await res.arrayBuffer());
+    expect(Object.keys(zip.files)).toEqual(["主图_01.jpg", "其他角度_02.jpg", "长图.jpg"]);
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("refuses files that are not this user's stored output, unknown presets and unfinished generations", async () => {
+    const foreign = await setup({ assets: [{ url: "/static/assets/other.png", mime: "image/png" }] });
+    expect((await foreign.exportZip({ preset: "original" })).status).toBe(409);
+    const external = await setup({ assets: [{ url: "https://vendor.example/a.png", mime: "image/png" }] });
+    expect((await external.exportZip({ preset: "original" })).status).toBe(409);
+    expect((await (await setup()).exportZip({ preset: "amazon" })).status).toBe(400);
+    expect((await (await setup({ status: "generating" })).exportZip({ preset: "original" })).status).toBe(409);
   });
 });

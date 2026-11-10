@@ -5,6 +5,7 @@ import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import { referenceDataUrl } from "./compose.js";
+import { whitenBackground, type WhiteBackgroundCheck } from "./white-background.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -106,6 +107,8 @@ type GenOut = {
   assetIds: string[]; assets: GenAssets; downloadFailed?: boolean; sourceUrl?: string; sourceUrls?: string[]; error?: string;
   /** Image-set requests that produced no image (the rest of the set was kept). */
   missing?: number;
+  /** 白底图: per image, whether the background was made pure white and what may still fail a listing check. */
+  whiteChecks?: WhiteBackgroundCheck[];
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -237,7 +240,21 @@ async function downloadAndFinalize(
     const durationSec = mediaType === "video" ? billedVideoSeconds(job.input.durationSec) : undefined;
     const assetIds: string[] = [];
     const assets: GenAssets = [];
-    for (const { body, mime } of files) {
+    const whiteBackground = mediaType === "image" && job.input.scene === "white_background";
+    const whiteChecks: WhiteBackgroundCheck[] = [];
+    for (const file of files) {
+      let { body, mime } = file;
+      if (whiteBackground) {
+        // Best effort: an image that cannot be checked is stored as the model made it.
+        try {
+          const fixed = await whitenBackground(body);
+          ({ body, mime } = fixed);
+          whiteChecks.push(fixed.check);
+        } catch (err) {
+          console.warn("[image.white_background] check failed", { taskId: job.id, errorType: (err as Error)?.name });
+          whiteChecks.push({ corrected: false, issues: [] });
+        }
+      }
       const assetId = randomUUID();
       const key = `${assetId}.${deps.extFor(mime)}`;
       const { url } = await deps.storage.put({ key, body, contentType: mime });
@@ -249,9 +266,9 @@ async function downloadAndFinalize(
     }
     const outputCount = mediaType === "video" ? (durationSec ?? 1) : files.length;
     await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount } });
-    const out: GenOut = { assetIds, assets };
+    const out: GenOut = { assetIds, assets, ...(whiteChecks.length ? { whiteChecks } : {}) };
     if (cacheKey) await deps.cache.set(cacheKey, out);
-    await setMsg("completed", { assets });
+    await setMsg("completed", { assets, ...(whiteChecks.length ? { whiteChecks } : {}) });
     await deps.updateProgress(job.id, 100);
     return out;
   } catch (err) {
@@ -337,7 +354,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     const cached = await deps.cache.get(cacheKey) as GenOut | null;
     const cachedAssets = cached ? await Promise.all(cached.assetIds.map((id) => deps.db.getAsset(id))) : [];
     if (cached && cachedAssets.length > 0 && cachedAssets.every((asset) => asset?.user_id === job.userId)) {
-      await setMsg("completed", { assets: cached.assets });
+      await setMsg("completed", { assets: cached.assets, ...(cached.whiteChecks ? { whiteChecks: cached.whiteChecks } : {}) });
       await deps.updateProgress(job.id, 100);
       return cached;
     }

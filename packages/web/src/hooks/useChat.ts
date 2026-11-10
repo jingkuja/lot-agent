@@ -3,7 +3,9 @@ import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
-import { generationComposites, generationRedo, type ComposeLayout, type RedoRequest } from "../lib/image-settings.js";
+import {
+  generationComposites, generationRedo, whiteBackgroundChecks, type ComposeLayout, type ExportPreset, type RedoRequest,
+} from "../lib/image-settings.js";
 import {
   chatReducer,
   initialChatState,
@@ -108,6 +110,7 @@ export function useChat(
                 assets: out?.assets,
                 error: downloadFailed ? (out?.error as string | undefined) : t.error,
                 ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing), missing: out.missing } : {}),
+                whiteChecks: whiteBackgroundChecks(out?.whiteChecks),
                 taskId,
               },
             });
@@ -183,6 +186,7 @@ export function useChat(
               scene: sceneOf(parsedMeta),
               composites: generationComposites(parsedMeta.composites),
               redo: generationRedo(parsedMeta.redo),
+              whiteChecks: whiteBackgroundChecks(parsedMeta.whiteChecks),
             }
           : undefined;
       return {
@@ -682,6 +686,28 @@ export function useChat(
     }
   }, [pollRedo]);
 
+  // 打包下载: the server zips (and resizes) the set; the browser saves it. Resolves to an error text to show.
+  const exportGeneration = useCallback(async (
+    messageId: string, preset: ExportPreset, names: string[], compositeNames: string[],
+  ): Promise<string | undefined> => {
+    const cid = cidRef.current;
+    if (!cid) return "打包失败，请稍后重试";
+    try {
+      const blob = await api.exportGeneration(cid, messageId, { preset, names, compositeNames });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${names[0]?.replace(/_\d+$/, "") || "images"}_${preset}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "打包失败，请稍后重试";
+    }
+  }, []);
+
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
   const composeGeneration = useCallback(async (messageId: string, layout: ComposeLayout, gap: boolean): Promise<string | undefined> => {
     const cid = cidRef.current;
@@ -734,5 +760,6 @@ export function useChat(
     redownloadGeneration,
     composeGeneration,
     redoGenerationImages,
+    exportGeneration,
   };
 }
