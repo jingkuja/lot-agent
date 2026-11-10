@@ -6,35 +6,42 @@
 .deployment-pending { background: var(--overlay-raise); color: var(--text-muted); }
 .deployment-deployed { background: color-mix(in srgb, var(--success) 12%, var(--bg-card)); color: var(--success); }
 
-:root {
-  /* Light theme — canal stone / mist paper. Accent is 灵渠 water, not AI purple. */
-  --bg: #f3f5f7;
-  --bg-sidebar: #f7f8fa;
+:root,
+.workspace-sidebar :is(.account-dialog-overlay, .agent-center-overlay, .de-modal-backdrop, dialog) {
+  /* Light theme: 青绿山水. Mist-white ground, 石绿 jade accent, 石青 azurite as its
+     partner in gradients, 泥金 gold for points and value. The sidebar is always the
+     ink zone (see the dark block below). */
+  --bg: #eef3f1;
+  --bg-sidebar: #f4f7f6;
   --bg-card: #ffffff;
-  --bg-user-msg: #e7f2f3;
+  --bg-user-msg: #0f2f37;
   --bg-assistant-msg: transparent;
   --bg-input: #ffffff;
-  --bg-hover: #eef1f4;
-  --bg-active: #e4eef0;
-  --bg-tool: #f2f4f6;
+  --bg-hover: #e9f0ee;
+  --bg-active: #dcebe6;
+  --bg-tool: #f1f5f4;
 
-  --text: #1a2430;
-  --text-secondary: #5c6672;
-  --text-muted: #8a929c;
-  --text-user: #1a2430;
+  --text: #10262b;
+  --text-secondary: #4c6066;
+  --text-muted: #7d8d91;
+  --text-user: #f2f8f6;
   --text-on-accent: #ffffff;
   /* Captions drawn over a video preview look like the burned ones in every theme. */
   --video-caption: #ffffff;
   --video-caption-outline: #000000;
 
-  --border: #e3e7ec;
-  --border-input: #d5dce3;
+  --border: #dde6e3;
+  --border-input: #cdd9d5;
 
-  --accent: #0e7c8b;
-  --accent-hover: #0a6b78;
-  --error: #e0342a;
-  --success: #2faa55;
-  --warning: #bd7621;
+  --accent: #0a7d62;
+  --accent-hover: #076a53;
+  --accent-2: #1a6fae;
+  --gold: #d9a441;
+  --gold-strong: #8f6307;
+  --on-gold: #2b1d02;
+  --error: #d93a2b;
+  --success: #2a9d58;
+  --warning: #b8731c;
   --de-accent: #0f8f83;
   --de-accent-strong: #087166;
   --de-accent-soft: #e4f5f1;
@@ -42,96 +49,121 @@
   --de-warning: #bd7621;
 
   /* Elevation overlays (theme-aware so light/dark both read correctly) */
-  --overlay-raise: rgba(16,24,40,0.04);
-  --overlay-sink: rgba(16,24,40,0.03);
+  --overlay-raise: rgba(12,38,43,0.04);
+  --overlay-sink: rgba(12,38,43,0.03);
   --code-inline-bg: color-mix(in srgb, var(--accent) 12%, transparent);
-  --code-block-bg: #f2f4f6;
+  --code-block-bg: #f1f5f4;
 
   /* Agent tags (one hue per agent; bg is a translucent wash of the fg) */
-  --tag-general-fg: #5c6672;  --tag-general-bg: rgba(92,102,114,0.12);
-  --tag-copy-fg:    #2563d9;  --tag-copy-bg:    rgba(37,99,217,0.12);
-  --tag-image-fg:   #7c3aed;  --tag-image-bg:   rgba(124,58,237,0.12);
-  --tag-video-fg:   #d97706;  --tag-video-bg:   rgba(217,119,6,0.13);
+  --tag-general-fg: #4c6066;  --tag-general-bg: rgba(76,96,102,0.12);
+  --tag-copy-fg:    #1f63b0;  --tag-copy-bg:    rgba(31,99,176,0.12);
+  --tag-image-fg:   #5b4fc4;  --tag-image-bg:   rgba(91,79,196,0.12);
+  --tag-video-fg:   #b8731c;  --tag-video-bg:   rgba(184,115,28,0.13);
 
-  /* Agent switcher: colored icon badges. White glyph reads on every badge. */
+  /* Agent icons take the mineral pigments of 青绿 painting: 石绿, 石青, 花青,
+     朱砂, 藤黄, 墨, 胭脂. White glyph reads on every badge. */
   --icon-on-grad: #ffffff;
-  --agent-icon-general: linear-gradient(160deg, #1a9aa8, #0e7c8b);
-  --agent-icon-digital_employee: linear-gradient(160deg, #0ea5e9, #14b8a6);
-  --agent-icon-image:   linear-gradient(160deg, #6366f1, #3b82f6);
-  --agent-icon-video:   linear-gradient(160deg, #10b981, #22c55e);
-  --agent-icon-ppt:      linear-gradient(160deg, #f59e0b, #f97316);
-  --agent-icon-contract: linear-gradient(160deg, #64748b, #475569);
-  --agent-icon-digital_presenter: linear-gradient(160deg, #ec4899, #f43f5e);
-  --accent-grad: linear-gradient(180deg, #1a9aa8, #0e7c8b);
+  --agent-icon-general: linear-gradient(160deg, #1fae8a, #0a7d62);
+  --agent-icon-digital_employee: linear-gradient(160deg, #1f8fc9, #14a085);
+  --agent-icon-image:   linear-gradient(160deg, #3c8ad8, #1c5fa6);
+  --agent-icon-video:   linear-gradient(160deg, #e2694a, #c2452d);
+  --agent-icon-ppt:      linear-gradient(160deg, #e3a83a, #c77d1c);
+  --agent-icon-contract: linear-gradient(160deg, #60757c, #3d5158);
+  --agent-icon-digital_presenter: linear-gradient(160deg, #d2557c, #a8355f);
+  --accent-grad: linear-gradient(135deg, #12a47c, #1a6fae);
+  --gold-grad: linear-gradient(135deg, #f0c869, #d39a2e);
   --gen-card-from: color-mix(in srgb, var(--accent) 14%, transparent);
-  --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
+  --gen-card-to: color-mix(in srgb, var(--accent-2) 8%, transparent);
 
-
-  /* Brand wordmark — solid canal cyan, not a rainbow clip. */
+  /* Brand wordmark */
   --brand-logo-plate: #ffffff;
-  --brand-grad-from: #0e7c8b;  --brand-grad-to: #128fa0;
+  --brand-grad-from: #12a47c;  --brand-grad-to: #1a6fae;
   --brand-card-from: transparent;  --brand-card-to: transparent;
   --logo-grad: linear-gradient(180deg, var(--brand-grad-from), var(--brand-grad-to));
   --logo-glow: 0 0 40px color-mix(in srgb, var(--accent) 18%, transparent);
 
+  /* Ink zone: the sidebar and the login showcase, the same in both themes. */
+  --ink: #0a2229;
+  --ink-deep: #06161b;
+
+  /* Landscape backdrop (components/LandscapeBackdrop.tsx): far, middle and near
+     peaks, the water below them and the sun behind. */
+  --peak-far: color-mix(in srgb, var(--accent-2) 26%, var(--zone-chat-bg));
+  --peak-mid: color-mix(in srgb, var(--accent) 34%, var(--zone-chat-bg));
+  --peak-near: color-mix(in srgb, var(--accent) 52%, var(--zone-chat-bg));
+  --peak-mist: var(--zone-chat-bg);
+  --peak-sun: var(--gold);
+
   /* Login landing page */
-  --login-hero: #0b1c22;
-  --login-hero-text: #f4fbfc;
-  --login-hero-muted: #9db8bd;
+  --login-hero: #0a2229;
+  --login-hero-text: #f2f8f6;
+  --login-hero-muted: #a3bcb8;
   --login-hero-soft: rgba(255,255,255,0.08);
-  --login-hero-line: rgba(255,255,255,0.12);
-  --login-surface: #fbfcfd;
-  --login-surface-muted: #6f7890;
-  --login-field-bg: #f3f6f7;
+  --login-hero-line: rgba(255,255,255,0.14);
+  --login-surface: #fbfcfc;
+  --login-surface-muted: #66787d;
+  --login-field-bg: #f1f5f4;
   --login-field-focus: color-mix(in srgb, var(--accent) 16%, transparent);
-  --login-hero-grad: linear-gradient(160deg, #0b1c22 0%, #12353c 52%, #0f5964 100%);
-  --login-glow-one: rgba(14, 124, 139, 0.38);
-  --login-glow-two: rgba(18, 143, 160, 0.22);
-  --login-grid: rgba(180, 214, 220, 0.12);
+  --login-hero-foot: #0c3b3c;
+  --login-hero-grad: linear-gradient(180deg, #06161b 0%, #0a2a31 52%, var(--login-hero-foot) 100%);
+
+  /* Headlines only. System Song faces, so nothing is downloaded: Songti SC on macOS,
+     思源宋体 where installed, 华文中宋 (ships with Office) or 宋体 on Windows. */
+  --font-display: "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", Georgia, "STZhongsong", "SimSun", serif;
 
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 16px;
+  --radius-xl: 20px;
 
-  --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
-  --shadow-md: 0 8px 24px rgba(16,24,40,0.08);
-  --shadow-lg: 0 16px 40px rgba(16,24,40,0.12);
+  --shadow-sm: 0 1px 2px rgba(12,38,43,0.06);
+  --shadow-md: 0 10px 28px -8px rgba(12,38,43,0.14);
+  --shadow-lg: 0 24px 56px -16px rgba(12,38,43,0.22);
 
   /* Kept for existing call sites; depth is now a hairline, not neumorphism. */
-  --neu-raise: 0 1px 2px rgba(16,24,40,0.05);
-  --neu-raise-sm: 0 1px 1px rgba(16,24,40,0.04);
+  --neu-raise: 0 1px 2px rgba(12,38,43,0.05);
+  --neu-raise-sm: 0 1px 1px rgba(12,38,43,0.04);
   --neu-sink: none;
   --neu-pop: 0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent);
-  --zone-sidebar-bg: var(--bg-sidebar);
-  --zone-chat-bg: var(--bg-card);
+  --zone-sidebar-bg:
+    radial-gradient(120% 46% at 0% 0%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--ink) 0%, var(--ink-deep) 100%);
+  --zone-chat-bg: #f7faf9;
 }
 
-[data-theme="dark"] {
-  /* Dark theme — night water, same canal cyan as light. */
-  --bg: #0b1012;
-  --bg-sidebar: #101618;
-  --bg-card: #151c1e;
-  --bg-user-msg: #1a2c30;
+[data-theme="dark"],
+.workspace-sidebar,
+.login-showcase,
+[data-theme="dark"] .workspace-sidebar :is(.account-dialog-overlay, .agent-center-overlay, .de-modal-backdrop, dialog) {
+  /* Dark theme: the same landscape at night. The sidebar uses these values in the
+     light theme too, so the ink zone looks the same everywhere. */
+  --bg: #071317;
+  --bg-sidebar: #06161b;
+  --bg-card: #10262c;
+  --bg-user-msg: #173b3a;
   --bg-assistant-msg: transparent;
-  --bg-input: #12181a;
-  --bg-hover: #1a2225;
-  --bg-active: #1e2c30;
-  --bg-tool: #12181a;
+  --bg-input: #0d2126;
+  --bg-hover: #153037;
+  --bg-active: #1a3d40;
+  --bg-tool: #0d2126;
 
-  --text: #edf2f3;
-  --text-secondary: #a6b2b5;
-  --text-muted: #6c787b;
+  --text: #eaf3f0;
+  --text-secondary: #a9bdb9;
+  --text-muted: #71888a;
   --text-user: #ffffff;
-  --text-on-accent: #052228;
+  --text-on-accent: #04221b;
 
-  --border: #243033;
-  --border-input: #334145;
+  --border: #1e3a40;
+  --border-input: #2c4b50;
 
-  --accent: #2fd0e0;
-  --accent-hover: #5adbe8;
-  --error: #ff5a52;
-  --success: #34c759;
+  --accent: #3fdcaa;
+  --accent-hover: #6ae7bf;
+  --accent-2: #58b6f2;
+  --gold: #ecc266;
+  --gold-strong: #ecc266;
+  --on-gold: #2b1d02;
+  --error: #ff6a5c;
+  --success: #3fcf7c;
   --warning: #f0ad55;
   --de-accent: #38d7c3;
   --de-accent-strong: #7ce7d9;
@@ -144,53 +176,54 @@
   --code-inline-bg: rgba(255,255,255,0.08);
   --code-block-bg: rgba(0,0,0,0.35);
 
-  --tag-general-fg: #9aa0ad;  --tag-general-bg: rgba(154,160,173,0.15);
-  --tag-copy-fg:    #6ea8ff;  --tag-copy-bg:    rgba(110,168,255,0.15);
-  --tag-image-fg:   #b794ff;  --tag-image-bg:   rgba(183,148,255,0.15);
+  --tag-general-fg: #9aaeb0;  --tag-general-bg: rgba(154,174,176,0.15);
+  --tag-copy-fg:    #6eb0ff;  --tag-copy-bg:    rgba(110,176,255,0.15);
+  --tag-image-fg:   #a79bff;  --tag-image-bg:   rgba(167,155,255,0.15);
   --tag-video-fg:   #f0b35e;  --tag-video-bg:   rgba(240,179,94,0.15);
 
   --icon-on-grad: #ffffff;
-  --agent-icon-general: linear-gradient(160deg, #2dd4bf, #22d3ee);
-  --agent-icon-digital_employee: linear-gradient(160deg, #38bdf8, #2dd4bf);
-  --agent-icon-image:   linear-gradient(160deg, #818cf8, #60a5fa);
-  --agent-icon-video:   linear-gradient(160deg, #34d399, #4ade80);
-  --agent-icon-ppt:      linear-gradient(160deg, #fbbf24, #fb923c);
-  --agent-icon-contract: linear-gradient(160deg, #94a3b8, #64748b);
-  --agent-icon-digital_presenter: linear-gradient(160deg, #f472b6, #fb7185);
-  --accent-grad: linear-gradient(180deg, #5eead4, #22d3ee);
+  --agent-icon-general: linear-gradient(160deg, #2bbf98, #10876b);
+  --agent-icon-digital_employee: linear-gradient(160deg, #2f9fd8, #1aab90);
+  --agent-icon-image:   linear-gradient(160deg, #4c98e4, #2469b2);
+  --agent-icon-video:   linear-gradient(160deg, #ea7757, #c94c33);
+  --agent-icon-ppt:      linear-gradient(160deg, #ebb548, #cc8421);
+  --agent-icon-contract: linear-gradient(160deg, #6f858c, #485d64);
+  --agent-icon-digital_presenter: linear-gradient(160deg, #dc6389, #b23c67);
+  --accent-grad: linear-gradient(135deg, #46e0b0, #58b6f2);
+  --gold-grad: linear-gradient(135deg, #f5d27d, #dba63a);
   --gen-card-from: color-mix(in srgb, var(--accent) 16%, transparent);
-  --gen-card-to: color-mix(in srgb, var(--accent) 8%, transparent);
-
+  --gen-card-to: color-mix(in srgb, var(--accent-2) 8%, transparent);
 
   --brand-logo-plate: #ffffff;
-  --brand-grad-from: #5eead4;  --brand-grad-to: #22d3ee;
+  --brand-grad-from: #46e0b0;  --brand-grad-to: #58b6f2;
   --brand-card-from: transparent;  --brand-card-to: transparent;
   --logo-glow: 0 0 40px color-mix(in srgb, var(--accent) 22%, transparent);
 
-  --login-hero: #071216;
-  --login-hero-text: #f0f7f8;
-  --login-hero-muted: #9db8bd;
-  --login-hero-soft: rgba(255,255,255,0.07);
-  --login-hero-line: rgba(255,255,255,0.11);
-  --login-surface: #12181a;
-  --login-surface-muted: #9ba3b9;
-  --login-field-bg: #1a2225;
-  --login-field-focus: color-mix(in srgb, var(--accent) 16%, transparent);
-  --login-hero-grad: linear-gradient(160deg, #071216 0%, #0f2a30 52%, #0e4a52 100%);
-  --login-glow-one: rgba(47, 208, 224, 0.28);
-  --login-glow-two: rgba(45, 212, 191, 0.18);
-  --login-grid: rgba(180, 214, 220, 0.10);
+  --peak-far: color-mix(in srgb, var(--accent-2) 20%, var(--zone-chat-bg));
+  --peak-mid: color-mix(in srgb, var(--accent) 24%, var(--zone-chat-bg));
+  --peak-near: color-mix(in srgb, var(--accent) 34%, var(--zone-chat-bg));
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.24);
-  --shadow-md: 0 8px 24px rgba(0,0,0,0.32);
-  --shadow-lg: 0 16px 40px rgba(0,0,0,0.4);
+  --login-hero: #06161b;
+  --login-hero-text: #f0f7f5;
+  --login-hero-muted: #a3bcb8;
+  --login-hero-soft: rgba(255,255,255,0.07);
+  --login-hero-line: rgba(255,255,255,0.12);
+  --login-surface: #0d2126;
+  --login-surface-muted: #9aaeb0;
+  --login-field-bg: #153037;
+  --login-field-focus: color-mix(in srgb, var(--accent) 16%, transparent);
+  --login-hero-foot: #0a3334;
+  --login-hero-grad: linear-gradient(180deg, #040f12 0%, #08242a 52%, var(--login-hero-foot) 100%);
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.28);
+  --shadow-md: 0 10px 28px -8px rgba(0,0,0,0.45);
+  --shadow-lg: 0 24px 56px -16px rgba(0,0,0,0.6);
 
   --neu-raise: 0 1px 2px rgba(0,0,0,0.28);
   --neu-raise-sm: 0 1px 1px rgba(0,0,0,0.22);
   --neu-sink: none;
   --neu-pop: 0 1px 2px color-mix(in srgb, var(--accent) 28%, transparent);
-  --zone-sidebar-bg: var(--bg-sidebar);
-  --zone-chat-bg: var(--bg-card);
+  --zone-chat-bg: #0b1c21;
 }
 
 html, body, #root {
@@ -422,7 +455,7 @@ html, body, #root {
   display: inline-block;
   background: var(--bg-user-msg);
   color: var(--text-user);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   border-top-right-radius: 4px;
   box-shadow: none;
   padding: 10px 16px;
@@ -627,7 +660,7 @@ html, body, #root {
   padding: 4px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   border-radius: 999px;
-  background: var(--bg-user-msg);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   color: inherit;
   font: inherit;
   font-size: 13px;
@@ -687,21 +720,27 @@ html, body, #root {
 }
 .mini-program-close:hover { background: var(--bg-hover); color: var(--text); }
 
+/* The composer is the one raised surface on the page. Its border is a second
+   background layer, so focus can turn it into the 青绿 gradient without a jump. */
 .input-box {
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-lg);
-  background: var(--bg-input);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
+    linear-gradient(var(--border-input), var(--border-input)) border-box;
   padding: 14px 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: none;
-  transition: border-color 0.16s, box-shadow 0.16s;
+  box-shadow: var(--shadow-sm), 0 18px 40px -22px color-mix(in srgb, var(--accent) 38%, transparent);
+  transition: box-shadow 0.16s;
 }
 
 .input-box:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-input));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  background:
+    linear-gradient(var(--bg-input), var(--bg-input)) padding-box,
+    var(--accent-grad) border-box;
+  box-shadow: var(--shadow-sm), 0 20px 44px -20px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .input-box textarea {
@@ -1156,9 +1195,9 @@ html, body, #root {
 }
 
 .btn-send {
-  background: var(--accent);
+  background: var(--accent-grad);
   color: var(--text-on-accent);
-  box-shadow: none;
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 .btn-send:disabled {
@@ -1169,7 +1208,7 @@ html, body, #root {
 }
 
 .btn-send:hover:not(:disabled) {
-  background: var(--accent-hover);
+  filter: brightness(1.08);
 }
 
 .btn-send:active:not(:disabled) {
@@ -1937,43 +1976,19 @@ html, body, #root {
   background: var(--login-hero-grad);
 }
 
-.login-showcase-glow {
+/* The same landscape as the empty conversation, at night. */
+.login-showcase {
+  --peak-far: color-mix(in srgb, var(--accent-2) 24%, var(--login-hero-foot));
+  --peak-mid: color-mix(in srgb, var(--accent) 26%, var(--login-hero-foot));
+  --peak-near: color-mix(in srgb, var(--accent) 44%, var(--login-hero-foot));
+  --peak-mist: var(--login-hero-foot);
+}
+.login-landscape {
   position: absolute;
   z-index: -1;
-  border-radius: 50%;
-  filter: blur(4px);
-  pointer-events: none;
-}
-
-.login-showcase-glow-one {
-  width: 580px;
-  height: 580px;
-  top: -270px;
-  right: -180px;
-  background: var(--login-glow-one);
-  opacity: 0.78;
-}
-
-.login-showcase-glow-two {
-  width: 400px;
-  height: 400px;
-  bottom: -225px;
-  left: 9%;
-  background: var(--login-glow-two);
-  opacity: 0.72;
-}
-
-.login-showcase-grid {
-  position: absolute;
-  z-index: -1;
-  width: 580px;
-  height: 580px;
-  right: -220px;
-  bottom: -350px;
-  border: 1px solid var(--login-grid);
-  border-radius: 50%;
-  box-shadow: 0 0 0 86px var(--login-grid), 0 0 0 172px var(--login-grid), 0 0 0 258px var(--login-grid);
-  opacity: 0.38;
+  inset: auto 0 0 0;
+  width: 100%;
+  height: min(46%, 380px);
 }
 
 .login-brand {
@@ -2003,162 +2018,58 @@ html, body, #root {
 .login-showcase-content {
   align-self: center;
   width: min(590px, calc(100% - 136px));
-  margin: 14px auto 0;
-}
-
-.login-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 21px;
-  color: var(--login-hero-muted);
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.14em;
-}
-
-.login-eyebrow span {
-  width: 25px;
-  height: 1px;
-  background: var(--brand-grad-to);
+  margin: 0 auto clamp(90px, 22vh, 220px);
 }
 
 .login-showcase-content h1 {
-  max-width: 520px;
+  max-width: 560px;
   color: var(--login-hero-text);
-  font-size: clamp(39px, 4vw, 62px);
-  font-weight: 680;
-  letter-spacing: -0.065em;
-  line-height: 1.16;
-}
-
-.login-showcase-content h1 em {
-  color: var(--brand-grad-to);
-  font-style: normal;
-  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: clamp(40px, 4.2vw, 64px);
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1.22;
 }
 
 .login-showcase-copy {
   max-width: 455px;
-  margin-top: 22px;
+  margin-top: 24px;
   color: var(--login-hero-muted);
   font-size: 15px;
   line-height: 1.8;
 }
 
-.login-agent-stage {
-  position: relative;
-  height: 230px;
-  max-width: 485px;
-  margin-top: 22px;
-}
-
-.login-orbit {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  border: 1px solid var(--login-hero-line);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.login-orbit-large {
-  width: 344px;
-  height: 174px;
-  transform: translate(-50%, -50%) rotate(-12deg);
-}
-
-.login-orbit-small {
-  width: 255px;
-  height: 125px;
-  border-style: dashed;
-  opacity: 0.72;
-  animation: login-orbit-spin 20s linear infinite;
-}
-
-.login-agent-core {
-  position: absolute;
-  left: 50%;
-  top: 50%;
+/* What the workspace can do: one row, each item marked with its agent's pigment. */
+.login-agents {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 88px;
-  height: 88px;
-  color: var(--login-hero);
-  background: var(--brand-grad-to);
-  border: 7px solid var(--login-hero-soft);
-  border-radius: 28px;
-  box-shadow: 0 0 0 1px var(--login-hero-line), 0 18px 45px var(--login-glow-one);
-  transform: translate(-50%, -50%) rotate(-8deg);
-}
-
-.login-agent-core span {
-  font-size: 23px;
-  font-weight: 800;
-  letter-spacing: -0.08em;
-}
-
-.login-agent-core small {
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.login-agent-pill {
-  position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 12px;
+  flex-wrap: wrap;
+  gap: 12px 26px;
+  margin-top: 30px;
+  list-style: none;
   color: var(--login-hero-text);
-  background: var(--login-hero-soft);
-  border: 1px solid var(--login-hero-line);
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 550;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(10px);
-  box-shadow: var(--neu-raise-sm);
-}
-
-.login-agent-pill span {
-  color: var(--brand-grad-to);
   font-size: 14px;
+  font-weight: 550;
 }
-
-.login-agent-pill-copy { top: 18px; left: 17%; }
-.login-agent-pill-image { top: 46px; right: 0; }
-.login-agent-pill-ppt { bottom: 12px; left: 7%; }
-.login-agent-pill-video { bottom: 34px; right: 7%; }
+.login-agents li { display: inline-flex; align-items: center; gap: 9px; }
+.login-agents li::before { content: ""; width: 9px; height: 9px; border-radius: 3px; background: var(--agent-icon-general); }
+.login-agents li:nth-child(2)::before { background: var(--agent-icon-image); }
+.login-agents li:nth-child(3)::before { background: var(--agent-icon-video); }
+.login-agents li:nth-child(4)::before { background: var(--agent-icon-ppt); }
 
 .login-showcase-points {
   display: flex;
   flex-wrap: wrap;
-  gap: 11px 25px;
-  margin-top: 5px;
+  gap: 8px 26px;
+  margin-top: 14px;
   color: var(--login-hero-muted);
-  font-size: 12px;
-}
-
-.login-showcase-points span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.login-showcase-points i {
-  color: var(--brand-grad-to);
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 700;
+  font-size: 13px;
 }
 
 .login-showcase-note {
   position: absolute;
-  left: clamp(34px, 6vw, 88px);
-  bottom: clamp(26px, 4vh, 46px);
+  top: clamp(28px, 5vh, 54px);
+  right: clamp(34px, 6vw, 88px);
+  line-height: 40px;
   color: var(--login-hero-muted);
   font-size: 12px;
   letter-spacing: 0.12em;
@@ -2189,19 +2100,12 @@ html, body, #root {
   margin-bottom: 36px;
 }
 
-.login-card-kicker {
-  margin-bottom: 12px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.16em;
-}
-
 .login-card-heading h2 {
   color: var(--text);
-  font-size: 30px;
-  font-weight: 690;
-  letter-spacing: -0.045em;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .login-card-heading > p:last-child {
@@ -2422,15 +2326,15 @@ html, body, #root {
   margin-top: 6px;
   padding: 12px 16px;
   color: var(--text-on-accent);
-  background: var(--accent);
+  background: var(--accent-grad);
   border: none;
-  border-radius: 10px;
-  box-shadow: none;
+  border-radius: 12px;
+  box-shadow: 0 12px 24px -14px color-mix(in srgb, var(--accent) 80%, transparent);
   cursor: pointer;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
-  transition: background 0.16s ease, filter 0.16s ease;
+  transition: filter 0.16s ease, transform 0.16s ease;
 }
 
 .login-btn span {
@@ -2800,27 +2704,10 @@ html, body, #root {
     font-size: 39px;
   }
 
-  .login-agent-stage {
-    transform: scale(0.86);
-    transform-origin: left center;
-    margin-bottom: -25px;
-  }
-
   .login-access {
     min-width: 340px;
     padding: 48px 34px;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .login-orbit-small {
-    animation: none;
-  }
-}
-
-@keyframes login-orbit-spin {
-  from { transform: translate(-50%, -50%) rotate(0deg); }
-  to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
 /* ── Server settings modal (desktop) ── */
@@ -3199,12 +3086,15 @@ html, body, #root {
   background: var(--bg);
 }
 
+/* The ink zone. It takes the dark theme's variables in both themes (see the theme
+   blocks at the top), so everything inside reads as light on ink. */
 .workspace-sidebar {
   display: flex;
   flex-direction: column;
   width: 272px;
   min-width: 272px;
   background: var(--zone-sidebar-bg);
+  color: var(--text);
   border-right: 1px solid var(--border);
   border-radius: 0;
   box-shadow: none;
@@ -3426,11 +3316,12 @@ html, body, #root {
 }
 
 .brand-title {
-  font-size: 17px;
+  font-family: var(--font-display);
+  font-size: 19px;
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.02em;
-  color: var(--accent);
+  letter-spacing: 0.01em;
+  color: var(--text);
   background: none;
   -webkit-text-fill-color: unset;
 }
@@ -4212,35 +4103,57 @@ html, body, #root {
 
 /* ── Centered empty state (new conversation) ── */
 .chat-panel--empty {
+  position: relative;
   justify-content: center;
 }
 
+/* Landscape backdrop: peaks along the bottom edge of an empty conversation. */
+.landscape { display: block; pointer-events: none; }
+.landscape-far { fill: var(--peak-far); }
+.landscape-mid { fill: var(--peak-mid); }
+.landscape-near { fill: var(--peak-near); }
+.landscape-sun { fill: var(--peak-sun); opacity: 0.5; }
+.landscape-mist-clear { stop-color: var(--peak-mist); stop-opacity: 0; }
+.landscape-mist-full { stop-color: var(--peak-mist); stop-opacity: 1; }
+.landscape-reflection { opacity: 0.42; }
+.landscape-ripples { fill: none; stroke: var(--peak-mist); stroke-width: 2.5; }
+.chat-empty-landscape {
+  position: absolute;
+  inset: auto 0 0 0;
+  width: 100%;
+  height: min(44%, 360px);
+}
+
 .chat-empty-hero {
+  position: relative;
   margin: auto;
   width: 100%;
   max-width: 760px;
-  padding: 24px;
+  padding: 24px 24px clamp(24px, 14vh, 150px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
 }
 
 .chat-empty-greeting {
-  font-family: inherit;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 3.4vw, 44px);
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  text-align: center;
   background: none;
   -webkit-text-fill-color: unset;
   color: var(--text);
 }
 
 .chat-empty-title {
+  margin-top: 4px;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0;
-  color: var(--text-secondary);
+  color: var(--accent);
 }
 
 .chat-empty-desc {
@@ -4254,9 +4167,10 @@ html, body, #root {
 .input-area--centered {
   width: 100%;
   max-width: 100%;
-  padding: 10px 0 0;
+  padding: 14px 0 0;
   margin: 0;
 }
+.input-area--centered .input-box textarea { min-height: 64px; }
 
 /* ── Digital employee home: customer-first, data-backed empty state ── */
 .chat-panel--digital-home {
@@ -4883,15 +4797,15 @@ html, body, #root {
 .brand-points-action {
   width: 100%; min-height: 43px; padding: 5px 8px 7px;
   display: grid; gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--gold) 34%, var(--border));
+  background: color-mix(in srgb, var(--gold) 9%, var(--bg-card));
   color: var(--text);
   box-shadow: var(--shadow-sm);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .brand-points-action:hover {
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  background: color-mix(in srgb, var(--gold) 14%, var(--bg-card));
   color: var(--text);
 }
 .brand-points-top {
@@ -4905,22 +4819,22 @@ html, body, #root {
 .brand-points-recharge {
   min-height: 29px; padding: 0 9px;
   display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border: 0;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 76%, var(--text)));
-  color: var(--text-on-accent); font: inherit; font-size: 11px; font-weight: 750;
+  background: var(--gold-grad);
+  color: var(--on-gold); font: inherit; font-size: 11px; font-weight: 750;
   cursor: pointer;
-  box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--gold) 25%, transparent);
   transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
 }
 .brand-points-recharge:hover {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--gold) 34%, transparent);
 }
 .brand-points-recharge:active { transform: translateY(0); }
 .brand-points-recharge:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--gold) 60%, transparent);
   outline-offset: 2px;
 }
 .brand-points-label {
@@ -4929,7 +4843,8 @@ html, body, #root {
   text-overflow: ellipsis; white-space: nowrap;
 }
 .brand-points-value {
-  flex-shrink: 0; color: var(--accent); font-size: 19px; font-weight: 800; line-height: 1;
+  flex-shrink: 0; color: var(--gold-strong); font-size: 19px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .brand-action-icon {
   width: 22px; height: 22px; flex: 0 0 22px;
@@ -4968,9 +4883,9 @@ html, body, #root {
 .brand-module-tab:hover { color: var(--text); }
 .brand-module-tab:active { background: var(--bg-active); }
 .brand-module-tab.active {
-  background: var(--bg-card);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
   color: var(--accent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ── Knowledge-base picker ────────────────────────────────────────── */
@@ -5374,7 +5289,7 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
 .agent-feishu-toggle { overflow-wrap: anywhere; }
 .agent-grid-toggle-icon {
   display: grid; place-items: center; width: 34px; height: 34px;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-hover);
 }
 .agent-grid-toggle:hover, .agent-grid-toggle.active { color: var(--accent); }
 .agent-grid-toggle:hover .agent-grid-toggle-icon, .agent-grid-toggle.active .agent-grid-toggle-icon { background: var(--bg-active); border-color: var(--accent); }

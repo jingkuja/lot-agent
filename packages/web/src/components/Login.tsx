@@ -5,6 +5,7 @@ import { api, setToken, type User } from "../api/client.js";
 import { encryptPassword } from "../lib/rsa.js";
 import { LegalModal } from "./LegalModal.js";
 import { PasswordReset } from "./PasswordReset.js";
+import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -188,9 +189,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
   return (
     <div className={`login-page login-page-${mode}`}>
       <section className="login-showcase" aria-label={t("借势智算产品介绍")}>
-        <div className="login-showcase-glow login-showcase-glow-one" aria-hidden />
-        <div className="login-showcase-glow login-showcase-glow-two" aria-hidden />
-        <div className="login-showcase-grid" aria-hidden />
+        <LandscapeBackdrop className="login-landscape" />
 
         <div className="login-brand">
           <span className="login-brand-mark" aria-hidden>
@@ -214,24 +213,20 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
         </div>
 
         <div className="login-showcase-content">
-          <p className="login-eyebrow"><span /> {t("AI 原生工作空间")}</p>
-          <h1>{t("让每一个想法")}<br />{t("都有一支")} <em>{t("AI 团队")}</em></h1>
+          <h1>{t("让每一个想法")}<br />{t("都有一支")} {t("AI 团队")}</h1>
           <p className="login-showcase-copy">
             {t("汇集创作、图像、视频与办公智能体，让复杂工作在一个流畅的工作空间里完成。")}</p>
 
-          <div className="login-agent-stage" aria-label={t("多智能体能力展示")}>
-            <div className="login-orbit login-orbit-large" aria-hidden />
-            <div className="login-orbit login-orbit-small" aria-hidden />
-            <div className="login-agent-core"><span>AI</span><small>{t("协作中")}</small></div>
-            <div className="login-agent-pill login-agent-pill-copy"><span>✦</span> {t("文案创作")}</div>
-            <div className="login-agent-pill login-agent-pill-image"><span>◈</span> {t("图片生成")}</div>
-            <div className="login-agent-pill login-agent-pill-ppt"><span>▤</span> {t("PPT 制作")}</div>
-            <div className="login-agent-pill login-agent-pill-video"><span>▷</span> {t("视频生成")}</div>
-          </div>
+          <ul className="login-agents" aria-label={t("多智能体能力展示")}>
+            <li>{t("文案创作")}</li>
+            <li>{t("图片生成")}</li>
+            <li>{t("视频生成")}</li>
+            <li>{t("PPT 制作")}</li>
+          </ul>
 
           <div className="login-showcase-points">
-            <span><i>01</i> {t("多模型，按需调用")}</span>
-            <span><i>02</i> {t("多智能体，协同交付")}</span>
+            <span>{t("多模型，按需调用")}</span>
+            <span>{t("多智能体，协同交付")}</span>
           </div>
         </div>
 
@@ -245,7 +240,6 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
         <div className="login-card">
           <LanguageSelect />
           <div className="login-card-heading">
-            <p className="login-card-kicker">{mode === "login" ? t("WELCOME BACK") : t("CREATE ACCOUNT")}</p>
             <h2>{mode === "login" ? t("欢迎回来") : t("创建账号")}</h2>
             <p>{mode === "login" ? t("登录后继续你的智能工作流") : t("注册后即可使用托管 AI 订阅")}</p>
           </div>

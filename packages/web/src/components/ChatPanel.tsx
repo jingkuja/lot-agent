@@ -10,6 +10,7 @@ import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
 import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
+import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
@@ -282,6 +283,7 @@ export function ChatPanel({
     }
     return (
       <div className="chat-panel chat-panel--empty">
+        <LandscapeBackdrop className="chat-empty-landscape" />
         <div className="chat-empty-hero">
           <p className="chat-empty-greeting">
             {t(timeGreeting())}
