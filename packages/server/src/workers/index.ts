@@ -18,7 +18,8 @@ import {
 } from "@lot-agent/core";
 import { loadLlmConfig } from "../config.js";
 import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, makeImageProvider, makeVideoProvider } from "../generation/config.js";
-import { runGenerationJob, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { IMAGE_REDO_TASK, runGenerationJob, runImageSetRedo, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
+import { outputStorageKey } from "../generation/compose.js";
 import { GenerationError } from "../generation/errors.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
@@ -256,6 +257,15 @@ async function main() {
         : meter,
       cache,
       updateProgress: (taskId, progress) => queue.updateProgress(taskId, progress),
+      readOwnOutput: async (url) => {
+        const key = outputStorageKey(url);
+        const asset = key ? await db.getGeneratedByStorageKey(key) : null;
+        if (!key || !asset || asset.user_id !== job.userId) throw new Error("set reference is not the owner's stored image");
+        const body = await storage.get(key);
+        const mime = imageMimeForUpload(key, body);
+        if (!mime) throw new Error("set reference is not a supported image");
+        return { body, mime };
+      },
       urlToBytes: async (url, o) => urlToBytes(await resolveMaterialReference(db, job.userId, url), maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
       modelId: mediaType === "video" ? model : base.modelId,
@@ -306,6 +316,11 @@ async function main() {
   queue.process("image.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
     return runGenerationJob(await genDeps("image", j, ctl.signal), j, "image");
+  });
+  // 重做 / 补齐 on a finished image set: the redone images go back into the same message.
+  queue.process(IMAGE_REDO_TASK, async (job, ctl) => {
+    const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };
+    return runImageSetRedo(await genDeps("image", j, ctl.signal), j);
   });
   queue.process("video.generate", async (job, ctl) => {
     const j = { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> };

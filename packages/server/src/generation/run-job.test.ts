@@ -1,8 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { HttpKlingVoiceProvider, HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
 import { KlingVoicePreparation } from "./kling-voices.js";
+import sharp from "sharp";
 import {
+  applyImageRedo,
   runGenerationJob,
+  runImageSetRedo,
+  settleImageRedo,
+  SET_REFERENCE_NOTE,
   redownloadGenerationJob,
   JobCancelledError,
   type RunJobDeps,
@@ -809,5 +814,156 @@ describe("runGenerationJob image sets", () => {
     expect(provider.create).not.toHaveBeenCalled();
     expect(provider.poll).toHaveBeenCalledTimes(2);
     expect(out.missing).toBe(1);
+  });
+});
+
+async function png(width = 64, height = 64): Promise<Buffer> {
+  return sharp({ create: { width, height, channels: 3, background: "#3388cc" } }).png().toBuffer();
+}
+
+function setProvider() {
+  let next = 0;
+  return {
+    create: vi.fn(async (_request: Parameters<JobGenerationProvider["create"]>[0]) => ({ taskId: `t${++next}`, status: "queued", progress: 0 })),
+    poll: vi.fn(async (id: string) => ({ status: "completed", progress: 100, url: `https://img.example/${id}.png` })),
+  } satisfies JobGenerationProvider;
+}
+
+describe("image set consistency", () => {
+  const setInput = { ...job.input, prompt: "cover", prompts: ["cover", "detail", "scene"], n: 3, scene: "product_set" };
+
+  it("without a user reference, sends the first image as the reference for the rest of the set", async () => {
+    const provider = setProvider();
+    const first = await png(2400, 1600);
+    const { deps } = fakeDeps(provider, { urlToBytes: vi.fn(async () => ({ body: first, mime: "image/png" })) });
+    await runGenerationJob(deps, { ...job, input: setInput }, "image");
+    const requests = provider.create.mock.calls.map(([request]) => request);
+    expect(requests[0]).toMatchObject({ prompt: "cover", media: undefined });
+    for (const request of requests.slice(1)) {
+      expect(request.prompt.startsWith(SET_REFERENCE_NOTE)).toBe(true);
+      expect(request.media).toHaveLength(1);
+      expect(request.media?.[0].type).toBe("reference_image");
+    }
+    expect(requests[1].prompt).toBe(SET_REFERENCE_NOTE + "detail");
+    // The reference is shrunk before it is sent.
+    const reference = Buffer.from(requests[1].media![0].url.split(",")[1], "base64");
+    expect(await sharp(reference).metadata()).toMatchObject({ format: "jpeg", width: 1536, height: 1024 });
+    // The first image is read once, not once per request.
+    expect(deps.urlToBytes).toHaveBeenCalledWith("https://img.example/t1.png", expect.anything());
+  });
+
+  it("keeps the user's own reference and adds nothing to the prompts", async () => {
+    const provider = setProvider();
+    const upload = await png();
+    const { deps } = fakeDeps(provider, { urlToBytes: vi.fn(async () => ({ body: upload, mime: "image/png" })) });
+    const media = [{ type: "reference_image", url: "/static/uploads/cup.png" }];
+    await runGenerationJob(deps, { ...job, input: { ...setInput, media } }, "image");
+    const requests = provider.create.mock.calls.map(([request]) => request);
+    expect(requests.map((request) => request.prompt)).toEqual(["cover", "detail", "scene"]);
+    expect(requests.every((request) => request.media?.[0].url.startsWith("data:image/png;base64,"))).toBe(true);
+  });
+
+  it("still makes the rest of the set when the first image cannot be read as a reference", async () => {
+    const provider = setProvider();
+    const { deps } = fakeDeps(provider, { urlToBytes: vi.fn(async () => ({ body: Buffer.from("not an image"), mime: "image/png" })) });
+    const out = await runGenerationJob(deps, { ...job, input: setInput }, "image");
+    expect(provider.create.mock.calls.map(([request]) => request.prompt)).toEqual(["cover", "detail", "scene"]);
+    expect(out.assets).toHaveLength(3);
+  });
+});
+
+describe("image set redo", () => {
+  const a = { url: "/static/assets/a.png", mime: "image/png" };
+  const b = { url: "/static/assets/b.png", mime: "image/png" };
+  const fresh = { url: "/static/assets/new.png", mime: "image/png" };
+
+  it("replaces a position, appends a missing one, and drops composites made from the old images", () => {
+    const meta = { status: "completed", assets: [a, b], missing: 2, composites: [{ url: "/c.jpg" }], redo: { status: "running", indexes: [1], taskId: "r1" } };
+    expect(applyImageRedo(meta, "r1", [1], [fresh])).toEqual({ status: "completed", assets: [a, fresh], missing: 2 });
+    const filled = applyImageRedo({ ...meta, redo: { status: "running", indexes: [2, 3] } }, "r1", [2], [fresh]);
+    expect(filled).toEqual({ status: "completed", assets: [a, b, fresh], missing: 1 });
+    expect(applyImageRedo({ ...meta, missing: 1 }, "r1", [2], [fresh])).not.toHaveProperty("missing");
+  });
+
+  it("leaves a set alone when the redo is no longer this job's", () => {
+    const meta = { assets: [a], redo: { status: "running", indexes: [0], taskId: "other" } };
+    expect(applyImageRedo(meta, "r1", [0], [fresh])).toBeNull();
+    expect(settleImageRedo(meta, "r1", "boom")).toBeNull();
+    expect(applyImageRedo({ assets: [a] }, "r1", [0], [fresh])).toBeNull();
+  });
+
+  it("keeps a failure on the card and clears a cancel", () => {
+    const meta = { assets: [a], redo: { status: "running", indexes: [0], taskId: "r1" } };
+    expect(settleImageRedo(meta, "r1", "vendor rejected")).toEqual({ assets: [a], redo: { status: "failed", taskId: "r1", indexes: [0], error: "vendor rejected" } });
+    expect(settleImageRedo(meta, "r1")).toEqual({ assets: [a] });
+  });
+
+  function redoDeps(provider: JobGenerationProvider, metadata: Record<string, unknown>, over: Partial<RunJobDeps> = {}) {
+    const state = { metadata };
+    const { deps, calls } = fakeDeps(provider, over);
+    deps.db.updateGenerationMetadata = vi.fn(async (_id, _owner, update) => {
+      const next = update(state.metadata);
+      if (next) state.metadata = next;
+      return !!next;
+    });
+    return { deps, calls, state };
+  }
+  const redoJob = (input: Record<string, unknown>) => ({
+    id: "r1", userId: "u1",
+    input: { redoMessageId: "m1", conversationId: "c1", size: "1024x1024", quality: "auto", ...input },
+  });
+
+  it("makes the image again with its original prompt and puts it back in place, using another image of the set", async () => {
+    const provider = setProvider();
+    const metadata = { status: "completed", assets: [a, b], redo: { status: "running", indexes: [1], taskId: "r1" } };
+    const readOwnOutput = vi.fn(async () => ({ body: await png(), mime: "image/png" }));
+    const { deps, state } = redoDeps(provider, metadata, { readOwnOutput, extFor: () => "png" });
+    const out = await runImageSetRedo(deps, redoJob({ indexes: [1], prompts: ["other angle"], setReference: a.url }));
+    expect(readOwnOutput).toHaveBeenCalledWith(a.url);
+    const [request] = provider.create.mock.calls[0];
+    expect(request).toMatchObject({ prompt: SET_REFERENCE_NOTE + "other angle", n: 1, size: "1024x1024" });
+    expect(request.media?.[0].url).toMatch(/^data:image\/jpeg;base64,/);
+    expect(out.assets).toHaveLength(1);
+    expect(state.metadata.assets).toEqual([a, out.assets[0]]);
+    expect(state.metadata.redo).toBeUndefined();
+    expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ taskId: "r1", usage: { inputCount: 0, outputCount: 1 } }));
+  });
+
+  it("fills missing images in order and keeps what was made when a later one fails", async () => {
+    let next = 0;
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => {
+        if (++next === 2) throw new Error("vendor rejected");
+        return { taskId: `t${next}`, status: "queued", progress: 0 };
+      }),
+      poll: vi.fn(async (id: string) => ({ status: "completed", progress: 100, url: `https://img.example/${id}.png` })),
+    };
+    const metadata = { status: "completed", assets: [a, b], missing: 2, redo: { status: "running", indexes: [2, 3], taskId: "r1" } };
+    const { deps, state } = redoDeps(provider, metadata);
+    const out = await runImageSetRedo(deps, redoJob({ indexes: [2, 3], prompts: ["scene", "detail"] }));
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(out.missing).toBe(1);
+    expect(state.metadata).toMatchObject({ missing: 1 });
+    expect((state.metadata.assets as unknown[]).length).toBe(3);
+    expect(state.metadata.redo).toBeUndefined();
+  });
+
+  it("records why a redo made nothing, and leaves the set's images as they were", async () => {
+    const provider: JobGenerationProvider = { create: vi.fn(async () => { throw new Error("vendor rejected"); }), poll: vi.fn() };
+    const metadata = { status: "completed", assets: [a, b], redo: { status: "running", indexes: [0], taskId: "r1" } };
+    const { deps, state } = redoDeps(provider, metadata);
+    await expect(runImageSetRedo(deps, redoJob({ indexes: [0], prompts: ["main"] }))).rejects.toThrow("vendor rejected");
+    expect(state.metadata).toMatchObject({ assets: [a, b], redo: { status: "failed", error: "vendor rejected", indexes: [0] } });
+    expect(deps.meter.record).not.toHaveBeenCalled();
+  });
+
+  it("clears the redo mark when cancelled", async () => {
+    const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
+    const metadata = { status: "completed", assets: [a, b], redo: { status: "running", indexes: [0], taskId: "r1" } };
+    const { deps, state } = redoDeps(provider, metadata);
+    vi.mocked(deps.db.getTaskStatus).mockResolvedValue("cancelled");
+    await expect(runImageSetRedo(deps, redoJob({ indexes: [0], prompts: ["main"] }))).rejects.toBeInstanceOf(JobCancelledError);
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(state.metadata).toEqual({ status: "completed", assets: [a, b] });
   });
 });

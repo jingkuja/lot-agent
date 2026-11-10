@@ -50,6 +50,24 @@ describe("POST /tasks/:id/cancel", () => {
     });
   });
 
+  it("clears an image redo from its set without cancelling the set itself", async () => {
+    const service = fakeService({
+      id: "task-1", userId: "u1", status: "running", type: "image.set_redo",
+      input: { redoMessageId: "m1", conversationId: "c1" },
+    });
+    let metadata: Record<string, unknown> = { status: "completed", assets: [{ url: "/a.png" }], redo: { status: "running", indexes: [0], taskId: "task-1" } };
+    type Update = (m: Record<string, unknown>) => Record<string, unknown> | null;
+    service.db.updateGenerationMetadata = vi.fn(async (_id: string, _owner: unknown, update: Update) => {
+      const next = update(metadata);
+      if (next) metadata = next;
+      return !!next;
+    });
+    await cancel(app(service));
+    expect(service.db.updateGenerationMetadata).toHaveBeenCalledWith("m1", { conversationId: "c1", userId: "u1" }, expect.any(Function));
+    expect(metadata).toEqual({ status: "completed", assets: [{ url: "/a.png" }] });
+    expect(service.db.markMessageGenerationCancelled).not.toHaveBeenCalled();
+  });
+
   it("404s for another user's task", async () => {
     const service = fakeService({ id: "task-1", userId: "other", status: "running", input: {} });
     const res = await cancel(app(service));

@@ -113,3 +113,13 @@ describe("image sets", () => {
     expect(generationComposites([])).toBeUndefined();
   });
 });
+
+describe("generationRedo", () => {
+  it("reads a running or failed redo and drops anything else", async () => {
+    const { generationRedo } = await import("./image-settings.js");
+    expect(generationRedo({ status: "running", indexes: [1, "x", -1], taskId: "r1" })).toEqual({ status: "running", indexes: [1], taskId: "r1" });
+    expect(generationRedo({ status: "failed", indexes: [0], error: "boom" })).toEqual({ status: "failed", indexes: [0], error: "boom" });
+    expect(generationRedo({ status: "done", indexes: [0] })).toBeUndefined();
+    expect(generationRedo(null)).toBeUndefined();
+  });
+});

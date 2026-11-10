@@ -297,6 +297,21 @@ describe("chatReducer — generation lifecycle", () => {
     expect(generation?.composites?.map((item) => item.url)).toEqual(["/2.jpg", "/3.jpg"]);
   });
 
+  it("marks a redo on a finished set without touching its images", () => {
+    const s = run([
+      optimistic(),
+      {
+        type: "generation_finished",
+        messageId: "tmp-g",
+        generation: { mediaType: "image", status: "completed", assets: [{ url: "/a.png", mime: "image/png" }], missing: 1, scene: "main_images" },
+      },
+      { type: "generation_redo_changed", messageId: "tmp-g", redo: { status: "running", indexes: [1], taskId: "r1" } },
+    ]);
+    expect(s.messages.find((m) => m.id === "tmp-g")?.generation).toMatchObject({
+      assets: [{ url: "/a.png" }], missing: 1, redo: { status: "running", indexes: [1], taskId: "r1" },
+    });
+  });
+
   it("cancelled terminal state replaces the generation view wholesale", () => {
     const s = run([
       optimistic(),

@@ -5,7 +5,10 @@ import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { ImageEditDialog } from "./ImageEditDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
-import { COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, imageSetRole, type ComposeLayout, type GenerationComposite } from "../lib/image-settings.js";
+import {
+  COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, imageSetRole, type ComposeLayout, type GenerationComposite, type RedoRequest,
+} from "../lib/image-settings.js";
+import { useConfirm } from "../modules/marketing-video/ConfirmDialog.js";
 
 const LABELS = {
   image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消", downloadFail: "图片下载失败" },
@@ -77,8 +80,19 @@ function fileExtension(url: string, fallback: string): string {
   return (url.split("?")[0].split(".").pop() || fallback).toLowerCase();
 }
 
-/** One image inside a set frame: click to enlarge, with its own download (and 编辑 when available). */
-function SetTile({ image, onOpen, onEdit }: { image: ViewerImage; onOpen: () => void; onEdit?: () => void }) {
+const DOWNLOAD_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v12" />
+    <path d="m7 11 5 5 5-5" />
+    <path d="M5 21h14" />
+  </svg>
+);
+
+/** One image inside a set frame: click to enlarge, its own download, 编辑 and 重做. While it is being redone the
+ * old image stays visible under a 重做中 cover. */
+function SetTile({ image, busy, onOpen, onEdit, onRedo }: {
+  image: ViewerImage; busy?: boolean; onOpen: () => void; onEdit?: () => void; onRedo?: () => void;
+}) {
   const { t } = useI18n();
   const [errored, setErrored] = useState(false);
   return (
@@ -93,43 +107,118 @@ function SetTile({ image, onOpen, onEdit }: { image: ViewerImage; onOpen: () => 
       {image.label && <span className="gen-asset-role">{image.label}</span>}
       <a className="gen-set-download" href={image.url} download={image.name} target="_blank" rel="noreferrer"
         aria-label={`${t("下载")} ${image.label ?? image.name}`} title={t("下载")}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 3v12" />
-          <path d="m7 11 5 5 5-5" />
-          <path d="M5 21h14" />
-        </svg>
+        {DOWNLOAD_ICON}
       </a>
-      {onEdit && !errored && <button type="button" className="gen-asset-edit gen-set-edit" onClick={onEdit}>{t("编辑")}</button>}
+      {busy ? (
+        <div className="gen-set-busy" role="status"><span className="gen-set-spinner" aria-hidden />{t("重做中…")}</div>
+      ) : (
+        <div className="gen-set-tile-actions">
+          {onEdit && !errored && <button type="button" className="gen-set-action" onClick={onEdit}>{t("编辑")}</button>}
+          {onRedo && <button type="button" className="gen-set-action" onClick={onRedo}>{t("重做")}</button>}
+        </div>
+      )}
     </div>
   );
 }
 
-/** Several images from one generation in a single frame: a grid of tiles, an enlarged view, and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose }: {
+/** A position of the set that has no image: waiting for 补齐, or being made now. */
+function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ratio?: string }) {
+  const { t } = useI18n();
+  const [w, h] = (ratio ?? "1:1").split(":").map(Number);
+  return (
+    <div className="gen-set-tile gen-set-tile--missing" style={{ aspectRatio: w > 0 && h > 0 ? `${w} / ${h}` : "1 / 1" }}>
+      {label && <span className="gen-asset-role">{label}</span>}
+      {busy
+        ? <div className="gen-set-busy" role="status"><span className="gen-set-spinner" aria-hidden />{t("生成中…")}</div>
+        : <span className="gen-set-missing-text">{t("未生成")}</span>}
+    </div>
+  );
+}
+
+type RedoHandler = (request: RedoRequest) => Promise<string | undefined>;
+
+/** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo }: {
   generation: GenerationView;
   assets: Asset[];
   onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
   onCompose?: ComposeHandler;
+  /** Only for sets with a role per image (产品套图 / 主副图). */
+  onRedo?: RedoHandler;
 }) {
   const { t } = useI18n();
   const [viewing, setViewing] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
-  const images: ViewerImage[] = assets.map((asset, index) => {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string>();
+  const [confirmDialog, confirm] = useConfirm();
+  const [composing, setComposing] = useState(false);
+  const missing = generation.missing ?? 0;
+  const redo = generation.redo;
+  const running = redo?.status === "running";
+  const labelAt = (index: number) => {
     const role = imageSetRole(generation.scene, index);
-    const label = role ? t(role) : undefined;
+    return role ? t(role) : undefined;
+  };
+  const images: ViewerImage[] = assets.map((asset, index) => {
+    const label = labelAt(index);
     const number = String(index + 1).padStart(2, "0");
     return { url: asset.url, label, name: `${label ?? "生成结果"}_${number}.${fileExtension(asset.url, "png")}` };
   });
   const edit = onEdit ? (index: number) => { setViewing(null); setEditing(index); } : undefined;
+  const start = async (request: RedoRequest, count: number) => {
+    if (!onRedo || starting || running) return;
+    const single = "index" in request;
+    const ok = await confirm({
+      title: single ? "重做这张图片" : "补齐缺少的图片",
+      message: single ? "按原来的描述重新生成这一张，扣除 1 张图片的积分。" : "按原来的描述生成缺少的 {0} 张，扣除 {0} 张图片的积分。",
+      values: [count],
+      confirm: single ? "重做" : "补齐",
+    });
+    if (!ok) return;
+    setStarting(true);
+    setError(undefined);
+    const failure = await onRedo(request);
+    setStarting(false);
+    if (failure) setError(failure);
+  };
+  const canRedo = !!onRedo && !running && !starting;
   return (
     <div className="gen-set">
-      <div className="gen-set-grid">
-        {images.map((image, index) => (
-          <SetTile key={index} image={image} onOpen={() => setViewing(index)} onEdit={edit && (() => edit(index))} />
-        ))}
+      <div className="gen-set-stage" aria-busy={composing}>
+        <div className="gen-set-grid">
+          {images.map((image, index) => (
+            <SetTile key={index} image={image} busy={running && redo.indexes.includes(index)} onOpen={() => setViewing(index)}
+              onEdit={edit && (() => edit(index))} onRedo={canRedo ? () => start({ index }, 1) : undefined} />
+          ))}
+          {Array.from({ length: missing }, (_, i) => assets.length + i).map((index) => (
+            <MissingTile key={`missing-${index}`} label={labelAt(index)} busy={running && redo.indexes.includes(index)}
+              ratio={generation.settings?.ratio} />
+          ))}
+        </div>
+        {/* While composing, the set is covered so nothing is clicked mid-way; it lifts when the picture is back. */}
+        {composing && (
+          <div className="gen-set-busy gen-set-busy--stage" role="status"><span className="gen-set-spinner" aria-hidden />{t("合成中…")}</div>
+        )}
       </div>
-      {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
-      {onCompose && <ComposePanel count={assets.length} composites={generation.composites ?? []} onCompose={onCompose} />}
+      {missing > 0 && !running && (
+        <div className="gen-set-fill">
+          <p className="gen-card-notice" role="status">{t(generation.notice ?? "套图中有 {0} 张未生成成功", [missing])}</p>
+          {canRedo && (
+            <button type="button" className="gen-compose-toggle" onClick={() => start({ missing: true }, missing)}>
+              {t("补齐 {0} 张", [missing])}
+            </button>
+          )}
+        </div>
+      )}
+      {redo?.status === "failed" && !error && (
+        <p className="gen-compose-error" role="alert" title={redo.error}>{t("上次重做没有生成图片，可以再试一次。")}</p>
+      )}
+      {error && <p className="gen-compose-error" role="alert">{t(error)}</p>}
+      {onCompose && assets.length >= COMPOSE_MIN_IMAGES && (
+        <ComposePanel count={assets.length} composites={generation.composites ?? []} onCompose={onCompose} disabled={running}
+          onComposingChange={setComposing} />
+      )}
       {viewing !== null && (
         <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit} />
       )}
@@ -137,6 +226,7 @@ function ImageSet({ generation, assets, onEdit, onCompose }: {
         <ImageEditDialog imageUrl={assets[editing].url} size={generation.settings?.size}
           onSubmit={(prompt) => onEdit(assets[editing].url, prompt, generation.settings)} onClose={() => setEditing(null)} />
       )}
+      {confirmDialog}
     </div>
   );
 }
@@ -144,7 +234,11 @@ function ImageSet({ generation, assets, onEdit, onCompose }: {
 type ComposeHandler = (layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
 
 /** 合成：join the images of one generation into a single picture. Done on the server without a model request. */
-function ComposePanel({ count, composites, onCompose }: { count: number; composites: GenerationComposite[]; onCompose: ComposeHandler }) {
+function ComposePanel({ count, composites, onCompose, disabled, onComposingChange }: {
+  count: number; composites: GenerationComposite[]; onCompose: ComposeHandler; disabled?: boolean;
+  /** Told when a composite request starts and ends, so the set can be covered meanwhile. */
+  onComposingChange?: (composing: boolean) => void;
+}) {
   const { t } = useI18n();
   const layouts = COMPOSE_LAYOUTS.filter((item) => count >= item.min);
   const [open, setOpen] = useState(false);
@@ -164,16 +258,24 @@ function ComposePanel({ count, composites, onCompose }: { count: number; composi
   const submit = async () => {
     if (busy) return;
     setBusy(true);
+    onComposingChange?.(true);
     setError(undefined);
-    const failure = await onCompose(active.value, gap);
-    setBusy(false);
+    let failure: string | undefined;
+    try {
+      failure = await onCompose(active.value, gap);
+    } catch {
+      failure = "合成失败，请稍后重试";
+    } finally {
+      setBusy(false);
+      onComposingChange?.(false);
+    }
     if (failure) setError(failure);
     else setOpen(false);
   };
 
   return (
     <div className="gen-compose">
-      <button type="button" className="gen-compose-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="gen-compose-toggle" aria-expanded={open} disabled={disabled} onClick={() => setOpen((value) => !value)}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="3" y="3" width="8" height="8" rx="1.5" />
           <rect x="13" y="3" width="8" height="8" rx="1.5" />
@@ -181,7 +283,7 @@ function ComposePanel({ count, composites, onCompose }: { count: number; composi
         </svg>
         {t("合成")}
       </button>
-      {open && (
+      {open && !disabled && (
         <div className="gen-compose-panel">
           <div className="gen-compose-layouts" role="radiogroup" aria-label={t("合成版式")}>
             {layouts.map((item) => (
@@ -243,9 +345,12 @@ export function GenerationCard({
   onRedownload,
   onEditImage,
   onCompose,
+  onRedo,
 }: {
   generation: GenerationView;
   messageId?: string;
+  /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
+  onRedo?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   /** Join this generation's images into one picture; resolves to an error text. Undefined hides 合成. */
   onCompose?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   /** Edit a generated image: image-to-image with it as the reference and this
@@ -260,11 +365,14 @@ export function GenerationCard({
   const [cancelRequested, setCancelRequested] = useState(false);
 
   if (status === "completed" && assets && assets.length > 0) {
-    // Several images from one generation share one frame; a single image or a video keeps its own card.
-    if (mediaType === "image" && assets.length >= COMPOSE_MIN_IMAGES && assets.every((a) => a.mime.startsWith("image/"))) {
+    // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
+    // keep their own card.
+    const imageSet = !!imageSetRole(generation.scene, 0);
+    if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
       return (
         <ImageSet generation={generation} assets={assets} onEdit={onEditImage}
-          onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined} />
+          onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
+          onRedo={messageId && onRedo && imageSet ? (request) => onRedo(messageId, request) : undefined} />
       );
     }
     return (

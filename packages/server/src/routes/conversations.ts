@@ -15,6 +15,7 @@ import { ImageSceneError, imageSceneUsesSet, parseImageScene, planImageScene } f
 import {
   composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
 } from "../generation/compose.js";
+import { IMAGE_REDO_TASK } from "../generation/run-job.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
   downshiftMiniprogramImageSize,
@@ -867,6 +868,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || images.length !== assets.length) {
       return c.json({ error: "只有已完成的图片可以合成" }, 409);
     }
+    if ((meta.redo as { status?: unknown } | undefined)?.status === "running") return c.json({ error: "这组图正在重做，完成后再合成" }, 409);
     if (!composeLayoutFits(layout, images.length)) return c.json({ error: "这个版式不适用于当前图片数量" }, 400);
     const existing = storedComposites(meta.composites).find((item) => item.layout === layout && item.gap === gap);
     if (existing) return c.json({ composite: existing });
@@ -900,6 +902,83 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "只有已完成的图片可以合成" }, 409);
     }
     return c.json({ composite });
+  });
+
+  // POST /:id/generations/:messageId/redo — 重做 one image of a finished set ({ index }) or 补齐 the images the set is
+  // missing ({ missing: true }). Uses the original prompts and settings; the result goes back into the same message.
+  // Started only by the user and billed like any image; nothing is ever sent again on its own.
+  app.post("/:id/generations/:messageId/redo", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as { index?: unknown; missing?: unknown } | null;
+    const owner = { conversationId, userId };
+
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const scene = parseImageScene(meta.scene);
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || !scene || !imageSceneUsesSet(scene)) {
+      return c.json({ error: "只有已完成的产品套图和主副图可以重做" }, 409);
+    }
+    if ((meta.redo as { status?: unknown } | undefined)?.status === "running") return c.json({ error: "这组图正在重做，请稍候" }, 409);
+    const task = typeof meta.taskId === "string" ? await service.db.getTask(meta.taskId) : null;
+    const input = task && task.user_id === userId && task.input && typeof task.input === "object" ? task.input as Record<string, unknown> : null;
+    const prompts = Array.isArray(input?.prompts) && input.prompts.every((p) => typeof p === "string" && p)
+      ? input.prompts as string[]
+      : typeof input?.prompt === "string" && input.prompt ? [input.prompt] : [];
+    if (!input || !prompts.length) return c.json({ error: "原始任务已不存在，无法重做" }, 409);
+    const assets = Array.isArray(meta.assets) ? meta.assets as { url?: unknown }[] : [];
+
+    let indexes: number[];
+    if (body?.missing === true) {
+      indexes = Array.from({ length: Math.max(0, prompts.length - assets.length) }, (_, i) => assets.length + i);
+      if (!indexes.length) return c.json({ error: "这组图没有缺少的图片" }, 409);
+    } else if (Number.isInteger(body?.index) && (body?.index as number) >= 0 && (body?.index as number) < Math.min(assets.length, prompts.length)) {
+      indexes = [body?.index as number];
+    } else {
+      return c.json({ error: "index or missing is required" }, 400);
+    }
+
+    const cfg = makePricingLookup((id) => service.modelRegistry.getConfig(id), service.modelCatalog, "image")("gpt-image-2");
+    const estimatedCost = cfg ? estimateCost(cfg, { outputCount: indexes.length }) : 0;
+    const quota = await service.usageMeter.checkQuota(userId, estimatedCost);
+    if (!quota.ok) return c.json({ error: quota.reason, code: quota.code, estimatedCost }, 402);
+
+    // The user's own reference keeps the product; without one, another image of the set does.
+    const media = Array.isArray(input.media) ? (input.media as { type?: unknown; url?: unknown }[]).filter((m) => m?.type === "reference_image") : [];
+    const keep = assets.find((asset, index) => !indexes.includes(index) && typeof asset?.url === "string");
+    const setReference = !media.length && typeof keep?.url === "string" ? keep.url : undefined;
+
+    const claimed = await service.db.updateGenerationMetadata(messageId, owner, (current) =>
+      current.status === "completed" && (current.redo as { status?: unknown } | undefined)?.status !== "running"
+        ? { ...current, redo: { status: "running", indexes } } : null);
+    if (!claimed) return c.json({ error: "这组图正在重做，请稍候" }, 409);
+    let taskId: string;
+    try {
+      // Identity fields spread LAST: only the server writes them.
+      taskId = await service.jobQueue.enqueue(IMAGE_REDO_TASK, {
+        ...Object.fromEntries(["size", "quality", "ratio", "resolution", "modelId", "requireUserModelKey"].map((key) => [key, input[key]])),
+        n: 1,
+        ...(media.length ? { media } : {}),
+        ...(setReference ? { setReference } : {}),
+        prompts: indexes.map((index) => prompts[index]),
+        indexes,
+        redoMessageId: messageId,
+        conversationId,
+      }, userId);
+    } catch (error) {
+      await service.db.updateGenerationMetadata(messageId, owner, (current) => {
+        const { redo: _redo, ...rest } = current;
+        return rest;
+      });
+      throw error;
+    }
+    const redo = { status: "running", indexes, taskId };
+    await service.db.updateGenerationMetadata(messageId, owner, (current) =>
+      (current.redo as { status?: unknown } | undefined)?.status === "running" && !(current.redo as { taskId?: unknown }).taskId
+        ? { ...current, redo } : null);
+    return c.json({ taskId, redo }, 202);
   });
 
   return app;

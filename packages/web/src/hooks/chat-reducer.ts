@@ -1,4 +1,4 @@
-import type { GenerationComposite } from "../lib/image-settings.js";
+import type { GenerationComposite, GenerationRedo } from "../lib/image-settings.js";
 
 export interface GenerationView {
   mediaType: "image" | "video";
@@ -21,6 +21,10 @@ export interface GenerationView {
   scene?: string;
   /** Pictures joined from this generation's images (长图 / 宫格 / 一大多小). */
   composites?: GenerationComposite[];
+  /** Images of a set that were not made; 补齐 makes them. */
+  missing?: number;
+  /** 重做 / 补齐 in progress on this set, or why the last one made nothing. */
+  redo?: GenerationRedo;
 }
 
 /** Later updates of a generation (ids, progress, final state) carry only what changed; what the card already knew stays. */
@@ -140,7 +144,9 @@ export type ChatAction =
   /** Terminal generation state (completed/failed/cancelled) — also ends the streaming lock. */
   | { type: "generation_finished"; messageId: string; generation: GenerationView }
   /** A picture joined from a finished generation's images was stored. */
-  | { type: "generation_composited"; messageId: string; composite: GenerationComposite };
+  | { type: "generation_composited"; messageId: string; composite: GenerationComposite }
+  /** A redo was started on a finished set (the server reload brings its result). */
+  | { type: "generation_redo_changed"; messageId: string; redo?: GenerationRedo };
 
 /** Update the message with `message.id` in place, or append it if absent. */
 function upsert(messages: DisplayMessage[], message: DisplayMessage): DisplayMessage[] {
@@ -272,6 +278,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           m.id === action.messageId
             ? { ...m, generation: keepGenerationContext(action.generation, m.generation) }
             : m
+        ),
+      };
+
+    case "generation_redo_changed":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === action.messageId && m.generation ? { ...m, generation: { ...m.generation, redo: action.redo } } : m
         ),
       };
 

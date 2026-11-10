@@ -98,6 +98,17 @@ export async function composeImages(images: Buffer[], layout: ComposeLayout, opt
   return { body, mime: "image/jpeg", width: plan.width, height: plan.height };
 }
 
+/** Longest edge of an image sent back to the model as a reference: enough to keep the product's look, small enough to send. */
+export const REFERENCE_MAX_EDGE = 1536;
+
+/** An image as a JPEG data URL for an image-edit request, shrunk to `REFERENCE_MAX_EDGE` (never enlarged). */
+export async function referenceDataUrl(image: Buffer): Promise<string> {
+  const body = await sharp(image).rotate()
+    .resize(REFERENCE_MAX_EDGE, REFERENCE_MAX_EDGE, { fit: "inside", withoutEnlargement: true })
+    .flatten({ background: BACKGROUND }).jpeg({ quality: 90 }).toBuffer();
+  return `data:image/jpeg;base64,${body.toString("base64")}`;
+}
+
 const OUTPUT_URL = /\/static\/assets\/([^/?#]+)(?:[?#].*)?$/;
 
 /** Storage key of a generated file URL (`…/static/assets/<key>`), or null for anything else. */

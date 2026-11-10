@@ -1,5 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
-import type { ComposeLayout, GenerationComposite } from "../lib/image-settings.js";
+import type { ComposeLayout, GenerationComposite, GenerationRedo, RedoRequest } from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
 
@@ -602,6 +602,12 @@ export const api = {
     request<{ taskId: string }>(
       `/conversations/${conversationId}/generations/${messageId}/redownload`,
       { method: "POST" }
+    ),
+
+  redoGeneration: (conversationId: string, messageId: string, body: RedoRequest) =>
+    request<{ taskId: string; redo: GenerationRedo }>(
+      `/conversations/${conversationId}/generations/${messageId}/redo`,
+      { method: "POST", body: JSON.stringify(body) }
     ),
 
   composeGeneration: (conversationId: string, messageId: string, body: { layout: ComposeLayout; gap: boolean }) =>

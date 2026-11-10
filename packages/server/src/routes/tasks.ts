@@ -5,6 +5,7 @@ import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import type { AgentService } from "../services/agent-service.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import { IMAGE_REDO_TASK, settleImageRedo } from "../generation/run-job.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
 
@@ -125,12 +126,17 @@ export function createTaskRoutes(service: AgentService) {
       // Reflect the cancel on the linked chat message right away (a job that
       // never starts — cancelled while queued — has no worker to do it).
       // Ids come from the task input, which only the server writes.
-      const input = job.input as { assistantMessageId?: string; conversationId?: string };
+      const input = job.input as { assistantMessageId?: string; conversationId?: string; redoMessageId?: string };
       if (input?.assistantMessageId && input?.conversationId) {
         await service.db.markMessageGenerationCancelled(input.assistantMessageId, {
           conversationId: input.conversationId,
           userId,
         });
+      }
+      // An image redo leaves its finished set as it was: only the redo mark goes.
+      if (job.type === IMAGE_REDO_TASK && input?.redoMessageId && input?.conversationId) {
+        await service.db.updateGenerationMetadata(input.redoMessageId, { conversationId: input.conversationId, userId },
+          (metadata) => settleImageRedo(metadata, id));
       }
     }
     const current = changed ? "cancelled" : (await service.jobQueue.get(id))?.status ?? job.status;

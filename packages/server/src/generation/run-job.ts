@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
+import { referenceDataUrl } from "./compose.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -42,6 +43,8 @@ export interface RunJobDeps {
   prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
   /** Voice checkpoint owner when it is not this job: a marketing parent shares one voice per sample across its clips. */
   voiceScopeTaskId?: string;
+  /** Read one of this job owner's stored outputs (`/static/assets/<key>`), for using an image of a set as a reference. */
+  readOwnOutput?: (url: string) => Promise<{ body: Buffer; mime: string }>;
   storage: { put(a: { key: string; body: Buffer; contentType: string }): Promise<{ url: string }>;
     putStream(key: string, body: NodeJS.ReadableStream, contentType: string, sizeHint?: number): Promise<{ url: string }> };
   db: {
@@ -58,6 +61,12 @@ export interface RunJobDeps {
     /** Task-row status — the cross-process cancellation channel (server writes
      * 'cancelled', this worker observes it between polls). */
     getTaskStatus(id: string): Promise<string | null | undefined>;
+    /** Change a generation message's metadata under a row lock; `update` returns null to leave it unchanged. */
+    updateGenerationMetadata?(
+      messageId: string,
+      owner: { conversationId: string; userId: string },
+      update: (metadata: Record<string, unknown>) => Record<string, unknown> | null
+    ): Promise<boolean>;
   };
   meter: { record(r: Record<string, unknown>): Promise<unknown> };
   cache: { get(k: string): Promise<unknown>; set(k: string, v: unknown): Promise<void> };
@@ -458,27 +467,48 @@ async function pollToCompletion(deps: RunJobDeps, vendorTaskId: string, onProgre
  * submits an image again. A request that fails stops the set (it would most likely fail again); images
  * already made are still kept, and the card says how many are missing.
  */
-async function runImageSet(
+/**
+ * Added in front of a set prompt when an image of the same set is the reference: the planner wrote the prompt without
+ * a reference image, so say what the image is for and what not to copy from it.
+ */
+export const SET_REFERENCE_NOTE = "The attached reference image shows the product of this image set. Keep that product exactly "
+  + "as it is: shape, color, proportions, logo, printed text and material. Do not copy its background, camera angle or layout; "
+  + "follow the description below for those.\n\n";
+
+type SetRequest = { size?: string; quality: string; media?: ReferenceMedia[] };
+
+/**
+ * One single-image request per prompt, in order, stopping at the first failure. Vendor ids are written to the task
+ * before polling, so a re-delivered job only polls what it already paid for and never submits again.
+ * `nextReference`, asked once before the second request, supplies a reference for the rest of the set.
+ */
+async function submitEach(
   deps: RunJobDeps,
   job: JobLike,
   prompts: string[],
-  cacheKey: string | null,
-  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>,
+  request: SetRequest,
   assertNotCancelled: () => Promise<void>,
-  request: { size?: string; quality: string; media?: ReferenceMedia[] }
-): Promise<GenOut> {
+  nextReference?: (firstUrl: string) => Promise<ReferenceMedia[] | undefined>
+): Promise<{ sourceUrls: string[]; failure?: unknown }> {
   const persisted = parseSetVendorIds(await deps.db.getTaskVendorId(job.id));
   const vendorIds = persisted ?? [];
   const sourceUrls: string[] = [];
-  let failure: unknown;
+  let media = request.media;
+  let referenced = false;
   for (let index = 0; index < prompts.length; index++) {
     let vendorTaskId: string | undefined = vendorIds[index];
     try {
       if (!vendorTaskId) {
         if (persisted) break;
         await assertNotCancelled();
-        console.log("[image.generate] set request", JSON.stringify({ taskId: job.id, model: deps.vendorModel, index }));
-        const created = await deps.provider.create({ prompt: prompts[index], size: request.size, n: 1, quality: request.quality, media: request.media });
+        let prompt = prompts[index];
+        if (index > 0 && nextReference && !media?.length && !referenced) {
+          referenced = true;
+          media = await nextReference(sourceUrls[0]);
+        }
+        if (referenced && media?.length) prompt = SET_REFERENCE_NOTE + prompt;
+        console.log("[image.generate] set request", JSON.stringify({ taskId: job.id, model: deps.vendorModel, index, reference: !!media?.length }));
+        const created = await deps.provider.create({ prompt, size: request.size, n: 1, quality: request.quality, media });
         vendorTaskId = created.taskId;
         vendorIds.push(vendorTaskId);
         await deps.db.setTaskVendorId(job.id, JSON.stringify(vendorIds));
@@ -491,10 +521,39 @@ async function runImageSet(
       sourceUrls.push(url);
     } catch (err) {
       if (err instanceof JobCancelledError || deps.signal?.aborted) throw err;
-      failure = err;
-      break;
+      return { sourceUrls, failure: err };
     }
   }
+  return { sourceUrls };
+}
+
+/** An image as a reference for the rest of its set. Best effort: without it the set is still made, only less alike. */
+async function setReference(taskId: string, read: () => Promise<{ body: Buffer }>): Promise<ReferenceMedia[] | undefined> {
+  try {
+    const { body } = await read();
+    return [{ type: "reference_image", url: await referenceDataUrl(body) }];
+  } catch (err) {
+    if (err instanceof JobCancelledError) throw err;
+    console.warn("[image.generate] set reference unavailable", { taskId, errorType: (err as Error)?.name });
+    return undefined;
+  }
+}
+
+/**
+ * Image sets (主副图 / 产品套图): each image has its own prompt and request. Without a reference from the user, the
+ * first finished image becomes the reference for the rest, so every image shows the same product.
+ */
+async function runImageSet(
+  deps: RunJobDeps,
+  job: JobLike,
+  prompts: string[],
+  cacheKey: string | null,
+  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>,
+  assertNotCancelled: () => Promise<void>,
+  request: SetRequest
+): Promise<GenOut> {
+  const firstAsReference = (firstUrl: string) => setReference(job.id, () => fetchProduced(deps, job.id, firstUrl));
+  const { sourceUrls, failure } = await submitEach(deps, job, prompts, request, assertNotCancelled, firstAsReference);
   if (!sourceUrls.length) throw failure ?? new Error("generation completed without a url");
   const partial = sourceUrls.length < prompts.length;
   const finalize = partial
@@ -505,14 +564,128 @@ async function runImageSet(
   return partial && !out.downloadFailed ? { ...out, missing: prompts.length - sourceUrls.length } : out;
 }
 
+/** Queue job type of a 重做 / 补齐 request on a finished image set. */
+export const IMAGE_REDO_TASK = "image.set_redo";
+
+/** What a redo job changes on its set: which positions, with which prompts, and an image of the set to keep alike. */
+interface ImageRedoInput {
+  messageId: string;
+  conversationId: string;
+  indexes: number[];
+  prompts: string[];
+  /** Stored output URL of another image of the set; used only when the user gave no reference of their own. */
+  setReference?: string;
+}
+
+function parseImageRedoInput(input: Record<string, unknown>): ImageRedoInput {
+  const { redoMessageId, conversationId, indexes, prompts, setReference } = input;
+  const valid = typeof redoMessageId === "string" && !!redoMessageId && typeof conversationId === "string" && !!conversationId
+    && Array.isArray(indexes) && indexes.length > 0 && indexes.every((index) => Number.isInteger(index) && index >= 0)
+    && Array.isArray(prompts) && prompts.length === indexes.length && prompts.every((prompt) => typeof prompt === "string" && !!prompt);
+  if (!valid) throw new Error("invalid image redo input");
+  return {
+    messageId: redoMessageId as string, conversationId: conversationId as string, indexes: indexes as number[], prompts: prompts as string[],
+    ...(typeof setReference === "string" && setReference ? { setReference } : {}),
+  };
+}
+
+type StoredImage = { url: string; mime: string };
+
+/** A running redo belongs to this job; the route writes the task id just after queueing, so a missing one is ours too. */
+function ownsRedo(metadata: Record<string, unknown>, taskId: string): boolean {
+  const redo = metadata.redo as { status?: unknown; taskId?: unknown } | undefined;
+  return redo?.status === "running" && (redo.taskId === undefined || redo.taskId === taskId);
+}
+
 /**
- * Retry only the download step of a generation whose vendor media already
- * succeeded (message left in `download_failed`, `sourceUrl` re-supplied on the
- * job input). Skips the vendor create→poll entirely: no re-billing of the
- * generation, just a fresh attempt to pull the media into our storage. On
- * success the message flips to `completed`; a repeated download failure leaves
- * it `download_failed` again (retriable once more).
+ * Put redone images into a finished set: a position inside the set is replaced, the next position after it is
+ * appended (filling a missing image). Composites were made from the old images, so they are dropped.
+ * Returns null when this job no longer owns the set's redo (it was cancelled or replaced).
  */
+export function applyImageRedo(
+  metadata: Record<string, unknown>,
+  taskId: string,
+  indexes: number[],
+  images: StoredImage[]
+): Record<string, unknown> | null {
+  if (!ownsRedo(metadata, taskId)) return null;
+  const assets = Array.isArray(metadata.assets) ? [...metadata.assets] : [];
+  let appended = 0;
+  images.forEach((image, i) => {
+    const index = indexes[i];
+    if (index < assets.length) assets[index] = image;
+    else if (index === assets.length) {
+      assets.push(image);
+      appended++;
+    }
+  });
+  const { redo: _redo, composites: _composites, missing, ...rest } = metadata;
+  const left = Math.max(0, (typeof missing === "number" ? missing : 0) - appended);
+  return { ...rest, assets, ...(left > 0 ? { missing: left } : {}) };
+}
+
+/** End a redo that stored nothing: a failure stays on the card with its reason, a cancel just clears it. */
+export function settleImageRedo(metadata: Record<string, unknown>, taskId: string, error?: string): Record<string, unknown> | null {
+  if (!ownsRedo(metadata, taskId)) return null;
+  const redo = metadata.redo as { indexes?: unknown };
+  const { redo: _redo, ...rest } = metadata;
+  return error ? { ...rest, redo: { status: "failed", taskId, indexes: redo.indexes, error } } : rest;
+}
+
+/**
+ * 重做 / 补齐 for one finished image set: makes the images at `indexes` again with their original prompts and puts them
+ * into the same message, so the set stays one set (and can still be composed). Started only by the user; a failed
+ * image is never sent again on its own.
+ */
+export async function runImageSetRedo(deps: RunJobDeps, job: JobLike): Promise<GenOut> {
+  const input = job.input;
+  const redo = parseImageRedoInput(input);
+  const update = deps.db.updateGenerationMetadata;
+  if (!update) throw new Error("image redo needs updateGenerationMetadata");
+  const owner = { conversationId: redo.conversationId, userId: job.userId };
+  const change = (next: (metadata: Record<string, unknown>) => Record<string, unknown> | null) =>
+    update.call(deps.db, redo.messageId, owner, next);
+  const assertNotCancelled = async () => {
+    if (deps.signal?.aborted) throw new JobCancelledError();
+    if ((await deps.db.getTaskStatus(job.id)) === "cancelled") throw new JobCancelledError();
+  };
+  try {
+    await assertNotCancelled();
+    let media = await imageReferencesAsDataUrls(deps, input.media as ReferenceMedia[] | undefined);
+    let prompts = redo.prompts;
+    if (!media?.length && redo.setReference && deps.readOwnOutput) {
+      const read = deps.readOwnOutput;
+      media = await setReference(job.id, () => read(redo.setReference as string));
+      if (media?.length) prompts = prompts.map((prompt) => SET_REFERENCE_NOTE + prompt);
+    }
+    const request = { size: input.size as string | undefined, quality: (input.quality as string | undefined) ?? "auto", media };
+    const { sourceUrls, failure } = await submitEach(deps, job, prompts, request, assertNotCancelled);
+    if (!sourceUrls.length) throw failure ?? new Error("generation completed without a url");
+    const files = [];
+    for (const source of sourceUrls) files.push(await fetchProduced(deps, job.id, source));
+    const assetIds: string[] = [];
+    const images: StoredImage[] = [];
+    for (const { body, mime } of files) {
+      const assetId = randomUUID();
+      const key = `${assetId}.${deps.extFor(mime)}`;
+      const { url } = await deps.storage.put({ key, body, contentType: mime });
+      await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: "image", storageKey: key, url, mime, sizeBytes: body.byteLength });
+      assetIds.push(assetId);
+      images.push({ url, mime });
+    }
+    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: images.length } });
+    await change((metadata) => applyImageRedo(metadata, job.id, redo.indexes.slice(0, images.length), images));
+    await deps.updateProgress(job.id, 100);
+    const missing = redo.indexes.length - images.length;
+    return { assetIds, assets: images, ...(missing > 0 ? { missing } : {}) };
+  } catch (err) {
+    const cancelled = err instanceof JobCancelledError || !!deps.signal?.aborted;
+    const message = cancelled ? undefined : err instanceof Error ? err.message : String(err);
+    await change((metadata) => settleImageRedo(metadata, job.id, message));
+    throw cancelled ? new JobCancelledError() : err;
+  }
+}
+
 export async function redownloadGenerationJob(deps: RunJobDeps, job: JobLike, mediaType: MediaType): Promise<GenOut> {
   const input = job.input;
   const prompt = (input.prompt as string) ?? "";

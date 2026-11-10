@@ -723,6 +723,44 @@ export class DB {
     return { status: r.status, metadata };
   }
 
+  /**
+   * Change a generation message's metadata under a row lock, for edits that depend on what is there now (an image
+   * redo claiming the set, a worker putting redone images in place). `update` returns null to leave the row as it is.
+   * The message status column is never touched.
+   */
+  async updateGenerationMetadata(
+    messageId: string,
+    owner: { conversationId: string; userId: string },
+    update: (metadata: Record<string, unknown>) => Record<string, unknown> | null
+  ): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `SELECT m.metadata FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE m.id = $1 AND m.conversation_id = $2 AND c.user_id = $3
+         FOR UPDATE OF m`,
+        [messageId, owner.conversationId, owner.userId]
+      );
+      const current = rows[0]?.metadata;
+      const metadata = typeof current === "string" ? JSON.parse(current) : current;
+      const next = metadata && typeof metadata === "object" ? update(metadata as Record<string, unknown>) : null;
+      if (!next) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query("UPDATE messages SET metadata = $1 WHERE id = $2", [JSON.stringify(next), messageId]);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   /** Add one composed picture to a finished generation message; the append is atomic, so two requests keep both. */
   async appendGenerationComposite(
     messageId: string,
@@ -737,7 +775,8 @@ export class DB {
          AND m.conversation_id = $3
          AND c.id = m.conversation_id
          AND c.user_id = $4
-         AND m.metadata->>'status' = 'completed'`,
+         AND m.metadata->>'status' = 'completed'
+         AND COALESCE(m.metadata->'redo'->>'status', '') <> 'running'`,
       [JSON.stringify([composite]), messageId, owner.conversationId, owner.userId]
     );
     return (rowCount ?? 0) > 0;

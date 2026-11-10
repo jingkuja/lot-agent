@@ -583,6 +583,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     )}
     <div className={`input-box${embedded ? " input-box--embedded" : ""}${sceneTabs ? " input-box--scene" : ""}`}>
       {activeScene?.hint && <p className="input-modal-hint image-scene-hint">{t(activeScene.hint)}</p>}
+      {activeScene?.note && <p className="input-modal-hint image-scene-hint image-scene-note">{t(activeScene.note)}</p>}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (

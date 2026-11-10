@@ -40,21 +40,26 @@ export const IMAGE_MAX_COUNT = 4;
 /** Image types above the composer, in display order (自由创作 first). 自由创作 sends the text as written; the others
  * are checked against the scene and rewritten on the server before any image is paid for. `count` is the
  * image count a type starts with (the user's own choice per type wins afterwards); `roles` names each image of a set
- * in the order the server writes its prompts (`server/generation/image-scene.ts`). */
+ * in the order the server writes its prompts (`server/generation/image-scene.ts`); `note` explains what a set costs and
+ * the cheaper one-image route through 自由创作. */
 export const IMAGE_SCENES = [
-  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined, count: undefined, roles: undefined },
+  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined, note: undefined, count: undefined, roles: undefined },
   {
     value: "product_set", label: "产品套图", count: 4, roles: ["封面", "卖点", "使用场景", "细节"],
     placeholder: "输入产品名和卖点，可上传产品图；如：保温杯，316 不锈钢，12 小时保温，适合通勤",
     hint: "按「图片参数」里的张数依次生成：封面主图、卖点图、使用场景图、细节图",
+    note: "每张图单独生成，可再合成为一张，比在一张图里画多格更清晰；按生成张数计费（默认 4 张）。不需要高清时，"
+      + "可在「自由创作」里写明“在一张图里拼成四宫格产品套图”，只按 1 张计费。",
   },
   {
     value: "main_images", label: "主副图", count: 2, roles: ["主图", "其他角度", "细节", "使用场景"],
     placeholder: "输入产品名、特点或想要的风格，可上传产品图；如：白色无线耳机，简约科技风",
     hint: "第 1 张是主图，其余是多角度、细节和使用场景副图；张数在「图片参数」里选择",
+    note: "每张图单独生成，可再合成为一张，比在一张图里画多格更清晰；按生成张数计费（默认 2 张）。不需要高清时，"
+      + "可在「自由创作」里写明“在一张图里左右拼出主图和副图”，只按 1 张计费。",
   },
   {
-    value: "white_background", label: "白底图", count: undefined, roles: undefined,
+    value: "white_background", label: "白底图", count: undefined, roles: undefined, note: undefined,
     placeholder: "上传产品图或输入产品名，生成纯白背景的商品图；如：红色运动鞋，侧面 45 度",
     hint: "纯白背景、产品居中、柔和棚拍光，适合电商平台上架",
   },
@@ -75,6 +80,25 @@ export const COMPOSE_LAYOUTS = [
 ] as const;
 export type ComposeLayout = typeof COMPOSE_LAYOUTS[number]["value"];
 export const COMPOSE_MIN_IMAGES = 2;
+
+/** 重做 one image of a set, or 补齐 the images it is missing. */
+export type RedoRequest = { index: number } | { missing: true };
+
+/** A redo in progress on a set (`running`), or the reason the last one made nothing (`failed`). */
+export interface GenerationRedo { status: "running" | "failed"; indexes: number[]; taskId?: string; error?: string }
+
+/** The redo stored on a generation message, dropping anything malformed. */
+export function generationRedo(raw: unknown): GenerationRedo | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { status, indexes, taskId, error } = raw as Record<string, unknown>;
+  if (status !== "running" && status !== "failed") return undefined;
+  const list = Array.isArray(indexes) ? indexes.filter((index): index is number => Number.isInteger(index) && index >= 0) : [];
+  return {
+    status, indexes: list,
+    ...(typeof taskId === "string" && taskId ? { taskId } : {}),
+    ...(typeof error === "string" && error ? { error } : {}),
+  };
+}
 
 export interface GenerationComposite { url: string; mime: string; layout: ComposeLayout; gap: boolean }
 

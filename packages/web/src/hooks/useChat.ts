@@ -3,7 +3,7 @@ import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
-import { generationComposites, type ComposeLayout } from "../lib/image-settings.js";
+import { generationComposites, generationRedo, type ComposeLayout, type RedoRequest } from "../lib/image-settings.js";
 import {
   chatReducer,
   initialChatState,
@@ -46,6 +46,8 @@ export function useChat(
   // concurrent chat bleeds its reply into whatever conversation is displayed.
   const streamsRef = useRef<Map<string, AbortController>>(new Map());
   const genPollRef = useRef<{ cancelled: boolean } | null>(null);
+  /** Set below; loadMessages resumes watching redos through it. */
+  const pollRedoRef = useRef<((cid: string, taskId: string) => void) | null>(null);
   useEffect(() => {
     const beforeUpdate = (event: Event) => {
       if (streamsRef.current.size || (genPollRef.current && !genPollRef.current.cancelled)) event.preventDefault();
@@ -105,7 +107,7 @@ export function useChat(
                 progress: 100,
                 assets: out?.assets,
                 error: downloadFailed ? (out?.error as string | undefined) : t.error,
-                ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing) } : {}),
+                ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing), missing: out.missing } : {}),
                 taskId,
               },
             });
@@ -174,11 +176,13 @@ export function useChat(
               supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
               error: parsedMeta.error,
-              ...(typeof parsedMeta.missing === "number" && parsedMeta.missing > 0 ? { notice: missingNotice(parsedMeta.missing) } : {}),
+              ...(typeof parsedMeta.missing === "number" && parsedMeta.missing > 0
+                ? { notice: missingNotice(parsedMeta.missing), missing: parsedMeta.missing } : {}),
               taskId: parsedMeta.taskId as string | undefined,
               settings: parsedMeta.mediaType === "image" ? generationSettings(parsedMeta.settings) : undefined,
               scene: sceneOf(parsedMeta),
               composites: generationComposites(parsedMeta.composites),
+              redo: generationRedo(parsedMeta.redo),
             }
           : undefined;
       return {
@@ -249,6 +253,11 @@ export function useChat(
       (m) => m.generation?.status === "generating" && m.generation.taskId
     );
     const last = pending[pending.length - 1];
+    // A redo on a finished set runs beside the chat: watch it and reload the set when it ends.
+    for (const message of display) {
+      const redo = message.generation?.redo;
+      if (redo?.status === "running" && redo.taskId) pollRedoRef.current?.(convId, redo.taskId);
+    }
     if (last?.generation?.taskId) {
       if (genPollRef.current) genPollRef.current.cancelled = true;
       const token = { cancelled: false };
@@ -626,6 +635,53 @@ export function useChat(
     [state.isStreaming, pollGeneration]
   );
 
+  // 重做 / 补齐 run as their own task; when it ends the conversation is reloaded so the set shows the new images.
+  // A finished task is never watched twice, so a reload that still shows it running cannot loop.
+  const redoPollsRef = useRef<Map<string, { cancelled: boolean }>>(new Map());
+  const settledRedosRef = useRef<Set<string>>(new Set());
+  const loadMessagesRef = useRef(loadMessages);
+  loadMessagesRef.current = loadMessages;
+  const pollRedo = useCallback((cid: string, taskId: string) => {
+    if (redoPollsRef.current.has(taskId) || settledRedosRef.current.has(taskId)) return;
+    const token = { cancelled: false };
+    redoPollsRef.current.set(taskId, token);
+    let failures = 0;
+    const tick = async () => {
+      if (token.cancelled) return;
+      try {
+        const task = await api.getTask(taskId);
+        failures = 0;
+        if (task.status === "succeeded" || task.status === "failed" || task.status === "cancelled") {
+          redoPollsRef.current.delete(taskId);
+          settledRedosRef.current.add(taskId);
+          if (cidRef.current === cid && !token.cancelled) await loadMessagesRef.current(cid).catch(() => {});
+          return;
+        }
+      } catch {
+        if (++failures >= 15) {
+          redoPollsRef.current.delete(taskId);
+          return;
+        }
+      }
+      if (!token.cancelled) setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 3000);
+  }, []);
+  pollRedoRef.current = pollRedo;
+
+  const redoGenerationImages = useCallback(async (messageId: string, request: RedoRequest): Promise<string | undefined> => {
+    const cid = cidRef.current;
+    if (!cid) return "重做失败，请稍后重试";
+    try {
+      const { taskId, redo } = await api.redoGeneration(cid, messageId, request);
+      if (cidRef.current === cid) dispatch({ type: "generation_redo_changed", messageId, redo });
+      pollRedo(cid, taskId);
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "重做失败，请稍后重试";
+    }
+  }, [pollRedo]);
+
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
   const composeGeneration = useCallback(async (messageId: string, layout: ComposeLayout, gap: boolean): Promise<string | undefined> => {
     const cid = cidRef.current;
@@ -655,6 +711,8 @@ export function useChat(
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    for (const token of redoPollsRef.current.values()) token.cancelled = true;
+    redoPollsRef.current.clear();
     loadSeq.current++; setChannel(null); channelSnapshot.current = "";
     setConversationKnowledgeBases([]);
     dispatch({ type: "cleared" });
@@ -675,5 +733,6 @@ export function useChat(
     generateMedia,
     redownloadGeneration,
     composeGeneration,
+    redoGenerationImages,
   };
 }

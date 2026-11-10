@@ -195,7 +195,7 @@ export function Workspace({
 
   const {
     channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear,
-    regenerate, generateMedia, redownloadGeneration, composeGeneration,
+    regenerate, generateMedia, redownloadGeneration, composeGeneration, redoGenerationImages,
   } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
@@ -548,6 +548,7 @@ export function Workspace({
             onRegenerate={channel === "feishu" ? undefined : regenerate}
             onRedownloadGeneration={redownloadGeneration}
             onComposeGeneration={composeGeneration}
+            onRedoGeneration={redoGenerationImages}
             onEditImage={handleEditImage}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={

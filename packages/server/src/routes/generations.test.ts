@@ -826,9 +826,105 @@ describe("POST /conversations/:id/generations/:messageId/compose", () => {
     expect((await (await setup({ mediaType: "video" })).compose({ layout: "vertical" })).status).toBe(409);
   });
 
+  it("waits for a running redo before composing", async () => {
+    const { assets, compose } = await setup({ redo: { status: "running", indexes: [0], taskId: "r1" } });
+    expect((await compose({ layout: "vertical" })).status).toBe(409);
+    expect(assets.put).not.toHaveBeenCalled();
+  });
+
   it("answers 404 for a message the user does not own", async () => {
     const { service, compose } = await setup();
     service.db.getGenerationMessage = vi.fn(async () => null);
     expect((await compose({ layout: "vertical" })).status).toBe(404);
+  });
+});
+
+describe("POST /conversations/:id/generations/:messageId/redo", () => {
+  const a = { url: "/static/assets/a.png", mime: "image/png" };
+  const b = { url: "/static/assets/b.png", mime: "image/png" };
+  function setup(metadata: Record<string, unknown> = {}, taskInput: Record<string, unknown> = {}) {
+    const service = fakeService();
+    let meta: Record<string, unknown> = {
+      kind: "generation", mediaType: "image", status: "completed", scene: "main_images", taskId: "orig", assets: [a, b], ...metadata,
+    };
+    service.db.getGenerationMessage = vi.fn(async () => ({ status: "completed", metadata: meta }));
+    service.db.getTask = vi.fn(async () => ({
+      id: "orig", user_id: "u1",
+      input: { prompt: "main", prompts: ["main", "angle", "detail", "scene"], size: "1024x1024", quality: "high", ratio: "1:1", resolution: "1K",
+        modelId: "gpt-image-2", requireUserModelKey: false, conversationId: "c1", assistantMessageId: "m1", ...taskInput },
+    }));
+    type Update = (m: Record<string, unknown>) => Record<string, unknown> | null;
+    service.db.updateGenerationMetadata = vi.fn(async (_id: string, _owner: unknown, update: Update) => {
+      const next = update(meta);
+      if (next) meta = next;
+      return !!next;
+    });
+    service.jobQueue.enqueue = vi.fn(async () => "redo-1");
+    const redo = (body: unknown) => app(service).request("/conversations/c1/generations/m1/redo", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, redo, meta: () => meta };
+  }
+
+  it("redoes one image with its own prompt and the original settings, keeping it alike through another image of the set", async () => {
+    const { service, redo, meta } = setup();
+    const res = await redo({ index: 0 });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ taskId: "redo-1", redo: { status: "running", indexes: [0], taskId: "redo-1" } });
+    const [type, input, userId] = service.jobQueue.enqueue.mock.calls[0];
+    expect(type).toBe("image.set_redo");
+    expect(userId).toBe("u1");
+    expect(input).toMatchObject({
+      prompts: ["main"], indexes: [0], n: 1, size: "1024x1024", quality: "high", modelId: "gpt-image-2",
+      setReference: b.url, redoMessageId: "m1", conversationId: "c1",
+    });
+    // A redo must never be mistaken for the original generation message.
+    expect(input).not.toHaveProperty("assistantMessageId");
+    expect(meta().redo).toEqual({ status: "running", indexes: [0], taskId: "redo-1" });
+    expect(service.usageMeter.checkQuota).toHaveBeenCalled();
+  });
+
+  it("fills the missing images in order and uses the user's own reference when there was one", async () => {
+    const media = [{ type: "reference_image", url: "/static/uploads/cup.png" }];
+    const { service, redo } = setup({ missing: 2 }, { media });
+    const res = await redo({ missing: true });
+    expect(res.status).toBe(202);
+    const input = service.jobQueue.enqueue.mock.calls[0][1];
+    expect(input).toMatchObject({ indexes: [2, 3], prompts: ["detail", "scene"], media });
+    expect(input.setReference).toBeUndefined();
+  });
+
+  it("refuses a second redo while one is running, and a set with nothing missing", async () => {
+    const running = setup({ redo: { status: "running", indexes: [1], taskId: "x" } });
+    expect((await running.redo({ index: 0 })).status).toBe(409);
+    const full = setup({}, { prompts: ["main", "angle"] });
+    expect((await full.redo({ missing: true })).status).toBe(409);
+    expect(running.service.jobQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("only redoes finished 产品套图 / 主副图 the user owns, at a real position", async () => {
+    expect((await setup({ scene: undefined }).redo({ index: 0 })).status).toBe(409);
+    expect((await setup({ scene: "white_background" }).redo({ index: 0 })).status).toBe(409);
+    expect((await setup({ status: "generating" }).redo({ index: 0 })).status).toBe(409);
+    expect((await setup().redo({ index: 5 })).status).toBe(400);
+    expect((await setup().redo({})).status).toBe(400);
+    const foreign = setup();
+    foreign.service.db.getTask = vi.fn(async () => ({ id: "orig", user_id: "u2", input: { prompts: ["x", "y"] } }));
+    expect((await foreign.redo({ index: 0 })).status).toBe(409);
+  });
+
+  it("checks the quota before anything is queued", async () => {
+    const { service, redo, meta } = setup();
+    service.usageMeter.checkQuota.mockResolvedValue({ ok: false, reason: "daily limit", code: "DAILY_LIMIT_EXCEEDED" });
+    expect((await redo({ index: 1 })).status).toBe(402);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(meta().redo).toBeUndefined();
+  });
+
+  it("releases the set when queueing fails", async () => {
+    const { service, redo, meta } = setup();
+    service.jobQueue.enqueue = vi.fn(async () => { throw new Error("redis down"); });
+    expect((await redo({ index: 1 })).status).toBe(500);
+    expect(meta().redo).toBeUndefined();
   });
 });
