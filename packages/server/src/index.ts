@@ -44,6 +44,8 @@ import { loadServiceConfig } from "./services/service-config.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
+import { LocalStorage } from "@lot-agent/core";
+import { staticPrefix } from "./util/public-base.js";
 import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
 import { createRatingRoutes } from "./routes/ratings.js";
@@ -321,7 +323,7 @@ async function main() {
   app.route("/api/feishu", createFeishuRoutes(feishu, userId => feishuChannel?.abortUser(userId), appId => feishuChannel?.connectionStatus(appId) ?? "disabled"));
   app.route("/api/conversations", createDesktopToolRoutes(service));
   app.route("/api/conversations", createConversationRoutes(service));
-  app.route("/api/conversations", createGenerationRoutes(service));
+  app.route("/api/conversations", createGenerationRoutes(service, { assets: new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets")) }));
   app.route("/api/skills", createSkillRoutes(service));
   app.route("/api/traces", createTraceRoutes(service));
   app.route("/api/ratings", createRatingRoutes(service));

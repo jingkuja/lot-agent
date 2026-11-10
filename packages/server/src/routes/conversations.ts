@@ -1,7 +1,7 @@
 import { parseChatSourceTypes } from "@lot-agent/core";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
+import { estimateCost, MAX_IMAGE_EDIT_REFERENCES, type ObjectStorage } from "@lot-agent/core";
 import { activeMarketingVideoProfile } from "../marketing-video/model.js";
 import type { AgentService } from "../services/agent-service.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
@@ -12,6 +12,9 @@ import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
 import { ImageSceneError, imageSceneUsesSet, parseImageScene, planImageScene } from "../generation/image-scene.js";
+import {
+  composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
+} from "../generation/compose.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
   downshiftMiniprogramImageSize,
@@ -569,7 +572,7 @@ export function createConversationRoutes(service: AgentService) {
 
 type GenVariables = { userId: string };
 
-export function createGenerationRoutes(service: AgentService) {
+export function createGenerationRoutes(service: AgentService, deps: { assets?: ObjectStorage } = {}) {
   const app = new Hono<{ Variables: GenVariables }>();
 
   app.post("/:id/generations", async (c) => {
@@ -707,7 +710,10 @@ export function createGenerationRoutes(service: AgentService) {
             (system, user) => service.imageSceneText(system, user, userId, conv.agent_id, signal)
           );
         } catch (error) {
-          console.warn("[image.scene] plan failed", { scene, errorType: error instanceof ImageSceneError ? "invalid_plan" : (error as Error)?.name });
+          // The reason and reply length are enough to tell a broken reply from a failed model call; the text itself is not logged.
+          console.warn("[image.scene] plan failed", error instanceof ImageSceneError
+            ? { scene, count: Number(settings.n ?? 1), errorType: "invalid_plan", reason: error.reason, replyLength: error.replyLength }
+            : { scene, count: Number(settings.n ?? 1), errorType: (error as Error)?.name });
           return c.json({ error: "创作助手暂时无法整理这次描述，未提交出图，请稍后重试或改用自由创作", code: "IMAGE_SCENE_UNAVAILABLE" }, 503);
         }
         if (!plan.fits) return c.json({ error: plan.message, code: "IMAGE_SCENE_MISMATCH" }, 422);
@@ -823,19 +829,77 @@ export function createGenerationRoutes(service: AgentService) {
     const reopened = await service.db.resetGenerationForRedownload(messageId, { conversationId, userId });
     if (!reopened) return c.json({ error: "Retry already in progress" }, 409);
 
+    // The scene decides the role labels on the card, so it survives the retry.
+    const scene = typeof meta.scene === "string" && meta.scene ? { scene: meta.scene } : {};
     // Identity fields spread LAST so nothing stored in settings can override them.
     const taskId = await service.jobQueue.enqueue(
       "generation.redownload",
-      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, conversationId, assistantMessageId: messageId },
+      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, ...scene, conversationId, assistantMessageId: messageId },
       userId
     );
-    const metadata = { kind: "generation", mediaType, prompt, settings, status: "generating", taskId };
+    const metadata = { kind: "generation", mediaType, prompt, settings, ...scene, status: "generating", taskId };
     await service.db.updateMessageGeneration(
       messageId,
       { status: "generating", metadata },
       { conversationId, userId }
     );
     return c.json({ taskId }, 202);
+  });
+
+  // POST /:id/generations/:messageId/compose — join the images of one finished image generation into a single
+  // picture (长图 / 宫格 / 一大多小). Local work only: no model request, nothing metered. The picture is stored as a
+  // new image asset and listed on the message, so asking for the same layout again returns the stored one.
+  app.post("/:id/generations/:messageId/compose", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as { layout?: unknown; gap?: unknown } | null;
+    const layout = parseComposeLayout(body?.layout);
+    if (!layout) return c.json({ error: "unknown compose layout" }, 400);
+    const gap = body?.gap === true;
+    if (!deps.assets) return c.json({ error: "图片合成暂不可用" }, 503);
+
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const assets = Array.isArray(meta.assets) ? meta.assets as { url?: unknown; mime?: unknown }[] : [];
+    const images = assets.filter((asset) => typeof asset?.mime === "string" && asset.mime.startsWith("image/"));
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || images.length !== assets.length) {
+      return c.json({ error: "只有已完成的图片可以合成" }, 409);
+    }
+    if (!composeLayoutFits(layout, images.length)) return c.json({ error: "这个版式不适用于当前图片数量" }, 400);
+    const existing = storedComposites(meta.composites).find((item) => item.layout === layout && item.gap === gap);
+    if (existing) return c.json({ composite: existing });
+
+    // Every source must be this user's own stored output; the URL in the message is never fetched.
+    const sources: Buffer[] = [];
+    for (const image of images) {
+      const key = outputStorageKey(image.url);
+      const stored = key ? await service.db.getGeneratedByStorageKey(key) : null;
+      if (!key || !stored || stored.user_id !== userId || !await deps.assets.exists(key)) {
+        return c.json({ error: "原图已不存在，无法合成" }, 409);
+      }
+      sources.push(await deps.assets.get(key));
+    }
+    let composed;
+    try {
+      composed = await composeImages(sources, layout, { gap });
+    } catch (error) {
+      console.warn("[image.compose] failed", { messageId, layout, errorType: (error as Error)?.name });
+      return c.json({ error: "图片合成失败，请稍后重试" }, 500);
+    }
+    const assetId = randomUUID();
+    const key = `${assetId}.jpg`;
+    const { url } = await deps.assets.put({ key, body: composed.body, contentType: composed.mime });
+    await service.db.createAsset({
+      id: assetId, taskId: typeof meta.taskId === "string" ? meta.taskId : null, userId, type: "image", storageKey: key, url,
+      mime: composed.mime, sizeBytes: composed.body.byteLength, width: composed.width, height: composed.height,
+    });
+    const composite: GenerationComposite = { url, mime: composed.mime, layout, gap };
+    if (!await service.db.appendGenerationComposite(messageId, composite, { conversationId, userId })) {
+      return c.json({ error: "只有已完成的图片可以合成" }, 409);
+    }
+    return c.json({ composite });
   });
 
   return app;

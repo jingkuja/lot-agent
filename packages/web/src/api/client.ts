@@ -1,4 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
+import type { ComposeLayout, GenerationComposite } from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
 
@@ -601,6 +602,12 @@ export const api = {
     request<{ taskId: string }>(
       `/conversations/${conversationId}/generations/${messageId}/redownload`,
       { method: "POST" }
+    ),
+
+  composeGeneration: (conversationId: string, messageId: string, body: { layout: ComposeLayout; gap: boolean }) =>
+    request<{ composite: GenerationComposite }>(
+      `/conversations/${conversationId}/generations/${messageId}/compose`,
+      { method: "POST", body: JSON.stringify(body) }
     ),
 
   // ── Tasks ───────────────────────────────────────────────────────────────────

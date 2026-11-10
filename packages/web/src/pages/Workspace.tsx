@@ -193,7 +193,10 @@ export function Workspace({
     [updateTitle, defaultAgentId]
   );
 
-  const { channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear, regenerate, generateMedia, redownloadGeneration } =
+  const {
+    channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear,
+    regenerate, generateMedia, redownloadGeneration, composeGeneration,
+  } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
   const knowledgeUpdateSeq = useRef(0);
@@ -544,6 +547,7 @@ export function Workspace({
             readOnly={channel === "feishu"}
             onRegenerate={channel === "feishu" ? undefined : regenerate}
             onRedownloadGeneration={redownloadGeneration}
+            onComposeGeneration={composeGeneration}
             onEditImage={handleEditImage}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={

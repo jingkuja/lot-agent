@@ -723,6 +723,26 @@ export class DB {
     return { status: r.status, metadata };
   }
 
+  /** Add one composed picture to a finished generation message; the append is atomic, so two requests keep both. */
+  async appendGenerationComposite(
+    messageId: string,
+    composite: { url: string; mime: string; layout: string; gap: boolean },
+    owner: { conversationId: string; userId: string }
+  ): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE messages m
+       SET metadata = jsonb_set(m.metadata, '{composites}', COALESCE(m.metadata->'composites', '[]'::jsonb) || $1::jsonb)
+       FROM conversations c
+       WHERE m.id = $2
+         AND m.conversation_id = $3
+         AND c.id = m.conversation_id
+         AND c.user_id = $4
+         AND m.metadata->>'status' = 'completed'`,
+      [JSON.stringify([composite]), messageId, owner.conversationId, owner.userId]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
   /**
    * Reopen a 'download_failed' generation message for a download-only retry:
    * flip it back to 'generating' so the retry worker's finalize (guarded on

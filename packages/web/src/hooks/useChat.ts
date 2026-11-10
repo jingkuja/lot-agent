@@ -3,6 +3,7 @@ import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
+import { generationComposites, type ComposeLayout } from "../lib/image-settings.js";
 import {
   chatReducer,
   initialChatState,
@@ -176,6 +177,8 @@ export function useChat(
               ...(typeof parsedMeta.missing === "number" && parsedMeta.missing > 0 ? { notice: missingNotice(parsedMeta.missing) } : {}),
               taskId: parsedMeta.taskId as string | undefined,
               settings: parsedMeta.mediaType === "image" ? generationSettings(parsedMeta.settings) : undefined,
+              scene: sceneOf(parsedMeta),
+              composites: generationComposites(parsedMeta.composites),
             }
           : undefined;
       return {
@@ -511,7 +514,10 @@ export function useChat(
           id: tempGenId,
           role: "assistant",
           content: "",
-          generation: { mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined },
+          generation: {
+            mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined,
+            scene: mediaType === "image" ? sceneOf(settings) : undefined,
+          },
         },
       });
 
@@ -620,6 +626,19 @@ export function useChat(
     [state.isStreaming, pollGeneration]
   );
 
+  // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
+  const composeGeneration = useCallback(async (messageId: string, layout: ComposeLayout, gap: boolean): Promise<string | undefined> => {
+    const cid = cidRef.current;
+    if (!cid) return "合成失败，请稍后重试";
+    try {
+      const { composite } = await api.composeGeneration(cid, messageId, { layout, gap });
+      if (cidRef.current === cid) dispatch({ type: "generation_composited", messageId, composite });
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "合成失败，请稍后重试";
+    }
+  }, []);
+
   const stop = useCallback(() => {
     // Stop only the conversation on screen — a concurrent stream in another
     // conversation keeps running.
@@ -655,5 +674,6 @@ export function useChat(
     regenerate,
     generateMedia,
     redownloadGeneration,
+    composeGeneration,
   };
 }

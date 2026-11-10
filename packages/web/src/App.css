@@ -4581,6 +4581,112 @@ html, body, #root {
 .gen-asset-edit:active { transform: scale(0.97); }
 .gen-asset-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* 套图里每张图的用途（封面 / 卖点 …）和合成图的版式名 */
+.gen-asset-role {
+  position: absolute; left: 14px; top: 14px;
+  padding: 4px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--login-hero) 78%, transparent);
+  color: var(--login-hero-text); font-size: 12px; font-weight: 500; line-height: 1.5;
+  backdrop-filter: blur(6px); pointer-events: none;
+}
+
+/* 合成：把一次生成的多张图拼成一张 */
+.gen-compose { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-top: 14px; }
+.gen-compose-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border: 1.5px solid var(--accent); border-radius: 999px;
+  background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+  transition: background 0.12s;
+}
+.gen-compose-toggle:hover, .gen-compose-toggle[aria-expanded="true"] { background: var(--gen-card-from); }
+.gen-compose-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gen-compose-toggle svg { width: 15px; height: 15px; }
+.gen-compose-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(420px, 100%); padding: 14px 16px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); box-shadow: var(--shadow-sm);
+}
+.gen-compose-layouts { display: flex; flex-wrap: wrap; gap: 8px; }
+.gen-compose-layout {
+  padding: 6px 14px; border: 1.5px solid var(--border); border-radius: 999px;
+  background: var(--bg-card); color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer;
+}
+.gen-compose-layout:hover { border-color: var(--border-input); color: var(--text); }
+.gen-compose-layout.active { border-color: var(--accent); color: var(--accent); background: var(--gen-card-from); }
+.gen-compose-layout:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gen-compose-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.gen-compose-gap { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
+.gen-compose-gap input { accent-color: var(--accent); }
+.gen-compose-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.gen-compose-submit {
+  padding: 6px 18px; border: 1px solid var(--accent); border-radius: 999px;
+  background: var(--accent); color: var(--text-on-accent); font: inherit; font-size: 13px; cursor: pointer;
+}
+.gen-compose-submit:hover:not(:disabled) { opacity: 0.9; }
+.gen-compose-submit:disabled { opacity: 0.6; cursor: default; }
+.gen-compose-free { color: var(--text-secondary); font-size: 12px; }
+.gen-compose-error { margin: 0; color: var(--accent); font-size: 13px; overflow-wrap: anywhere; }
+
+/* 一次生成的多张图放在同一个框里：点图放大，每张单独下载 */
+.gen-set {
+  display: inline-flex; flex-direction: column; gap: 12px;
+  width: min(560px, 100%); padding: 12px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 20px; background: var(--bg-card); box-shadow: var(--shadow-md);
+}
+.gen-set .gen-compose { margin-top: 0; }
+.gen-set .gen-card-notice { margin: 0; }
+.gen-set-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
+.gen-set-tile { position: relative; border-radius: 12px; overflow: hidden; background: var(--bg-tool); }
+.gen-set-tile .gen-asset-fallback { width: 100%; border-radius: 0; }
+.gen-set-open { display: block; width: 100%; padding: 0; border: none; background: none; cursor: zoom-in; }
+.gen-set-open img { display: block; width: 100%; height: auto; transition: transform 0.2s; }
+.gen-set-open:hover img { transform: scale(1.03); }
+.gen-set-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gen-set-tile .gen-asset-role { left: 8px; top: 8px; padding: 3px 10px; }
+.gen-set-download {
+  position: absolute; right: 8px; top: 8px;
+  display: inline-flex; padding: 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--login-hero) 78%, transparent); color: var(--login-hero-text);
+  backdrop-filter: blur(6px); transition: background 0.12s;
+}
+.gen-set-download:hover { background: color-mix(in srgb, var(--login-hero) 92%, transparent); }
+.gen-set-download:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gen-set-download svg { width: 15px; height: 15px; }
+.gen-set-edit { left: 8px; bottom: 8px; padding: 5px 14px; font-size: 13px; }
+/* 长图很高：框里只露出上半部分，放大和下载的是完整图片 */
+.gen-compose-results .gen-set-open { max-height: 260px; overflow: hidden; }
+
+/* 放大查看 */
+.image-viewer {
+  width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 18px 20px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-lg);
+}
+.image-viewer[open] { display: flex; flex-direction: column; gap: 14px; }
+.image-viewer::backdrop { background: color-mix(in srgb, var(--login-hero) 55%, transparent); backdrop-filter: blur(4px); }
+.image-viewer-count { margin-left: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 400; }
+.image-viewer-stage {
+  position: relative; display: flex; justify-content: center; min-height: 0; overflow: hidden;
+  border-radius: var(--radius-lg); background: var(--bg-tool);
+}
+.image-viewer-stage img { display: block; max-width: 100%; max-height: calc(100vh - 190px); object-fit: contain; }
+.image-viewer-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 1;
+  display: inline-flex; padding: 8px; border: none; border-radius: 999px;
+  background: color-mix(in srgb, var(--login-hero) 78%, transparent); color: var(--login-hero-text); cursor: pointer;
+}
+.image-viewer-nav--prev { left: 10px; }
+.image-viewer-nav--next { right: 10px; }
+.image-viewer-nav:hover { background: color-mix(in srgb, var(--login-hero) 92%, transparent); }
+.image-viewer-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.image-viewer-nav svg { width: 20px; height: 20px; }
+.image-viewer-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.image-viewer-edit {
+  padding: 6px 18px; border: 1.5px solid var(--accent); border-radius: 999px;
+  background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+}
+.image-viewer-edit:hover { background: var(--gen-card-from); }
+
 .image-edit-dialog {
   width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 18px 20px 16px;
   border: 1px solid var(--border); border-radius: var(--radius-xl);

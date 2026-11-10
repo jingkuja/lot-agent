@@ -99,7 +99,8 @@ export function imageSceneSystemPrompt(scene: GuidedImageScene, count: number, r
     "(for example 小米, 华为 Mate 70, 老干妈, Indomie, Kopi Kenangan). Do not translate, transliterate, romanize or replace them with an",
     "English equivalent; only the surrounding description is in English.",
     "",
-    "Reply with JSON only, no code fence:",
+    "Reply with JSON only, no code fence and no text before or after it. Inside a prompt, put any text that appears in the image",
+    "in single quotes ('…'), never double quotes, so the JSON stays valid:",
     '{"fits": true, "prompts": ["..."]}',
     "or, when the request does not fit:",
     '{"fits": false, "message": "..."}',
@@ -110,33 +111,48 @@ export function imageSceneSystemPrompt(scene: GuidedImageScene, count: number, r
 
 export type ImageScenePlan = { fits: true; prompts: string[] } | { fits: false; message: string };
 
+/** Why a reply could not be used: empty, not JSON, JSON of the wrong shape, or fewer prompts than images. */
+export type ImageSceneFailure = "empty_reply" | "not_json" | "bad_shape" | "few_prompts";
+
 export class ImageSceneError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(readonly reason: ImageSceneFailure, readonly replyLength: number) {
+    super(`invalid image scene plan (${reason})`);
     this.name = "ImageSceneError";
   }
 }
 
+/** The reply as JSON. Models sometimes wrap it in a code fence or a sentence, so fall back to the outermost braces. */
+function replyJson(text: string): unknown {
+  const trimmed = text.trim();
+  const candidates = [trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")];
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next reading.
+    }
+  }
+  throw new ImageSceneError(trimmed ? "not_json" : "empty_reply", trimmed.length);
+}
+
 /** Parse the model's JSON. Anything malformed is an error: no paid image is sent from a broken plan. */
 export function parseImageScenePlan(text: string, expected: number): ImageScenePlan {
-  let value: unknown;
-  try {
-    value = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
-  } catch {
-    throw new ImageSceneError("invalid image scene plan");
-  }
-  const plan = value as { fits?: unknown; prompts?: unknown; message?: unknown };
-  if (!plan || typeof plan !== "object") throw new ImageSceneError("invalid image scene plan");
+  const plan = replyJson(text) as { fits?: unknown; prompts?: unknown; message?: unknown };
+  const fail = (reason: ImageSceneFailure) => new ImageSceneError(reason, text.trim().length);
+  if (!plan || typeof plan !== "object") throw fail("bad_shape");
   if (plan.fits === false) {
     const message = typeof plan.message === "string" ? plan.message.trim().slice(0, 300) : "";
-    if (!message) throw new ImageSceneError("invalid image scene plan");
+    if (!message) throw fail("bad_shape");
     return { fits: false, message };
   }
-  if (plan.fits !== true || !Array.isArray(plan.prompts)) throw new ImageSceneError("invalid image scene plan");
+  if (plan.fits !== true || !Array.isArray(plan.prompts)) throw fail("bad_shape");
   const prompts = plan.prompts
     .filter((prompt): prompt is string => typeof prompt === "string" && !!prompt.trim())
     .map((prompt) => prompt.trim().slice(0, 1500));
-  if (prompts.length < expected) throw new ImageSceneError("invalid image scene plan");
+  if (prompts.length < expected) throw fail("few_prompts");
   return { fits: true, prompts: prompts.slice(0, expected) };
 }
 

@@ -126,7 +126,8 @@ function ResBarIcon() {
 // conversation switches between its empty (hero) and message-list layouts (e.g.
 // on the first send), which would otherwise reset the picker to its default.
 const lastImage = {
-  n: 1,
+  /** Count per image type: each type starts from its own default and keeps the user's choice separately. */
+  counts: {} as Record<string, number>,
   quality: DEFAULT_IMAGE_QUALITY,
   ratio: DEFAULT_IMAGE_RATIO as string,
   resolution: DEFAULT_IMAGE_RESOLUTION as string,
@@ -174,6 +175,8 @@ export function ImageSettingsPicker({
   selectedModel,
   onModelChange,
   allowCount = true,
+  countKey = "free",
+  defaultCount = 1,
   onChange,
 }: {
   disabled?: boolean;
@@ -183,12 +186,16 @@ export function ImageSettingsPicker({
   onModelChange?: (id: string) => void;
   /** Hide the image count where only one image is kept (获客宝 posters). */
   allowCount?: boolean;
+  /** Image type the count belongs to; switching types switches to that type's remembered or default count. */
+  countKey?: string;
+  defaultCount?: number;
   onChange?: (s: ImageSettings) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
-  const [n, setN] = useState(() => lastImage.n);
+  const [counts, setCounts] = useState(() => ({ ...lastImage.counts }));
+  const n = counts[countKey] ?? defaultCount;
   const [quality, setQuality] = useState(() => lastImage.quality);
   const [ratio, setRatio] = useState(() => lastImage.ratio);
   const [resolution, setResolution] = useState(() => lastImage.resolution);
@@ -223,8 +230,8 @@ export function ImageSettingsPicker({
 
   const pickN = (value: number) => {
     const next = Math.min(IMAGE_MAX_COUNT, Math.max(1, Math.round(value) || 1));
-    lastImage.n = next;
-    setN(next);
+    lastImage.counts[countKey] = next;
+    setCounts((current) => ({ ...current, [countKey]: next }));
   };
   const pickQuality = (value: string) => {
     lastImage.quality = value;

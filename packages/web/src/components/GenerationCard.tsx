@@ -4,6 +4,8 @@ import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { ImageEditDialog } from "./ImageEditDialog.js";
+import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
+import { COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, imageSetRole, type ComposeLayout, type GenerationComposite } from "../lib/image-settings.js";
 
 const LABELS = {
   image: { loading: "图片生成中……", fail: "图片生成失败", cancelled: "图片生成已取消", downloadFail: "图片下载失败" },
@@ -71,6 +73,152 @@ function AssetView({ asset, mediaType, index, settings, onEdit }: {
   );
 }
 
+function fileExtension(url: string, fallback: string): string {
+  return (url.split("?")[0].split(".").pop() || fallback).toLowerCase();
+}
+
+/** One image inside a set frame: click to enlarge, with its own download (and 编辑 when available). */
+function SetTile({ image, onOpen, onEdit }: { image: ViewerImage; onOpen: () => void; onEdit?: () => void }) {
+  const { t } = useI18n();
+  const [errored, setErrored] = useState(false);
+  return (
+    <div className="gen-set-tile">
+      {errored ? (
+        <div className="gen-asset-fallback" title={image.url}><span>{t("结果文件（无法预览）")}</span></div>
+      ) : (
+        <button type="button" className="gen-set-open" onClick={onOpen} aria-label={`${t("放大查看")} ${image.label ?? image.name}`}>
+          <img src={image.url} alt={image.name} loading="lazy" onError={() => setErrored(true)} />
+        </button>
+      )}
+      {image.label && <span className="gen-asset-role">{image.label}</span>}
+      <a className="gen-set-download" href={image.url} download={image.name} target="_blank" rel="noreferrer"
+        aria-label={`${t("下载")} ${image.label ?? image.name}`} title={t("下载")}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12" />
+          <path d="m7 11 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+      </a>
+      {onEdit && !errored && <button type="button" className="gen-asset-edit gen-set-edit" onClick={onEdit}>{t("编辑")}</button>}
+    </div>
+  );
+}
+
+/** Several images from one generation in a single frame: a grid of tiles, an enlarged view, and 合成. */
+function ImageSet({ generation, assets, onEdit, onCompose }: {
+  generation: GenerationView;
+  assets: Asset[];
+  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  onCompose?: ComposeHandler;
+}) {
+  const { t } = useI18n();
+  const [viewing, setViewing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const images: ViewerImage[] = assets.map((asset, index) => {
+    const role = imageSetRole(generation.scene, index);
+    const label = role ? t(role) : undefined;
+    const number = String(index + 1).padStart(2, "0");
+    return { url: asset.url, label, name: `${label ?? "生成结果"}_${number}.${fileExtension(asset.url, "png")}` };
+  });
+  const edit = onEdit ? (index: number) => { setViewing(null); setEditing(index); } : undefined;
+  return (
+    <div className="gen-set">
+      <div className="gen-set-grid">
+        {images.map((image, index) => (
+          <SetTile key={index} image={image} onOpen={() => setViewing(index)} onEdit={edit && (() => edit(index))} />
+        ))}
+      </div>
+      {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
+      {onCompose && <ComposePanel count={assets.length} composites={generation.composites ?? []} onCompose={onCompose} />}
+      {viewing !== null && (
+        <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit} />
+      )}
+      {editing !== null && onEdit && (
+        <ImageEditDialog imageUrl={assets[editing].url} size={generation.settings?.size}
+          onSubmit={(prompt) => onEdit(assets[editing].url, prompt, generation.settings)} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+type ComposeHandler = (layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
+
+/** 合成：join the images of one generation into a single picture. Done on the server without a model request. */
+function ComposePanel({ count, composites, onCompose }: { count: number; composites: GenerationComposite[]; onCompose: ComposeHandler }) {
+  const { t } = useI18n();
+  const layouts = COMPOSE_LAYOUTS.filter((item) => count >= item.min);
+  const [open, setOpen] = useState(false);
+  const [layout, setLayout] = useState<ComposeLayout>(layouts[0].value);
+  const [gap, setGap] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const active = layouts.find((item) => item.value === layout) ?? layouts[0];
+  const labelOf = (item: GenerationComposite) => {
+    const name = t(COMPOSE_LAYOUTS.find((option) => option.value === item.layout)?.label ?? "合成");
+    return item.gap ? `${name} · ${t("留白")}` : name;
+  };
+  const [viewing, setViewing] = useState<number | null>(null);
+  const composed: ViewerImage[] = composites.map((item) => ({
+    url: item.url, label: labelOf(item), name: `${labelOf(item)}.${fileExtension(item.url, "jpg")}`,
+  }));
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    const failure = await onCompose(active.value, gap);
+    setBusy(false);
+    if (failure) setError(failure);
+    else setOpen(false);
+  };
+
+  return (
+    <div className="gen-compose">
+      <button type="button" className="gen-compose-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="3" width="8" height="8" rx="1.5" />
+          <rect x="13" y="3" width="8" height="8" rx="1.5" />
+          <rect x="3" y="13" width="18" height="8" rx="1.5" />
+        </svg>
+        {t("合成")}
+      </button>
+      {open && (
+        <div className="gen-compose-panel">
+          <div className="gen-compose-layouts" role="radiogroup" aria-label={t("合成版式")}>
+            {layouts.map((item) => (
+              <button key={item.value} type="button" role="radio" aria-checked={item.value === active.value}
+                className={`gen-compose-layout${item.value === active.value ? " active" : ""}`} onClick={() => setLayout(item.value)}>
+                {t(item.label)}
+              </button>
+            ))}
+          </div>
+          <p className="gen-compose-hint">{t(active.hint)}</p>
+          <label className="gen-compose-gap">
+            <input type="checkbox" checked={gap} onChange={(event) => setGap(event.target.checked)} />
+            {t("图片之间留白")}
+          </label>
+          <div className="gen-compose-actions">
+            <button type="button" className="gen-compose-submit" onClick={submit} disabled={busy}>
+              {busy ? t("合成中…") : t("生成合成图")}
+            </button>
+            <span className="gen-compose-free">{t("合成不扣积分")}</span>
+          </div>
+          {error && <p className="gen-compose-error" role="alert">{t(error)}</p>}
+        </div>
+      )}
+      {composed.length > 0 && (
+        <div className="gen-set-grid gen-compose-results">
+          {composed.map((item, index) => (
+            <SetTile key={item.url} image={item} onOpen={() => setViewing(index)} />
+          ))}
+        </div>
+      )}
+      {viewing !== null && composed[viewing] && (
+        <ImageViewerDialog images={composed} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} />
+      )}
+    </div>
+  );
+}
+
 function MediaIcon({ mediaType }: { mediaType: "image" | "video" }) {
   if (mediaType === "video") {
     return (
@@ -94,9 +242,12 @@ export function GenerationCard({
   messageId,
   onRedownload,
   onEditImage,
+  onCompose,
 }: {
   generation: GenerationView;
   messageId?: string;
+  /** Join this generation's images into one picture; resolves to an error text. Undefined hides 合成. */
+  onCompose?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   /** Edit a generated image: image-to-image with it as the reference and this
    * generation's settings. Returns an error to show in the editor; undefined hides the button. */
   onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
@@ -109,6 +260,13 @@ export function GenerationCard({
   const [cancelRequested, setCancelRequested] = useState(false);
 
   if (status === "completed" && assets && assets.length > 0) {
+    // Several images from one generation share one frame; a single image or a video keeps its own card.
+    if (mediaType === "image" && assets.length >= COMPOSE_MIN_IMAGES && assets.every((a) => a.mime.startsWith("image/"))) {
+      return (
+        <ImageSet generation={generation} assets={assets} onEdit={onEditImage}
+          onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined} />
+      );
+    }
     return (
       <>
         <div className="gen-card-assets">

@@ -1040,6 +1040,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               selectedModel={effectiveImageModel}
               onModelChange={onModelChange}
               allowCount={imageCount}
+              countKey={sceneTabs ? imageScene : undefined}
+              defaultCount={activeScene?.count}
               onChange={handleSettingsChange}
             />
           )}

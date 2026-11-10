@@ -10,6 +10,7 @@ import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
+import type { ComposeLayout } from "../lib/image-settings.js";
 import { AskUserCard } from "./AskUserCard.js";
 import { FileLink } from "./FileLink.js";
 import { OutlineCard } from "./OutlineCard.js";
@@ -40,6 +41,8 @@ interface MessageBubbleProps {
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
   /** 编辑生成的图片：以该图为参考图、沿用其生成设置发起图生图，返回错误时留在编辑框。 */
   onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  /** 把一次生成的多张图合成为一张（长图 / 宫格 / 一大多小），本地完成、不计费；返回错误文案。 */
+  onComposeGeneration?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
 }
 
 export function MessageBubble({
@@ -52,6 +55,7 @@ export function MessageBubble({
   failedToolNames,
   onRedownloadGeneration,
   onEditImage,
+  onComposeGeneration,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -63,6 +67,7 @@ export function MessageBubble({
             messageId={message.id}
             onRedownload={onRedownloadGeneration}
             onEditImage={onEditImage}
+            onCompose={onComposeGeneration}
           />
         </div>
       </div>

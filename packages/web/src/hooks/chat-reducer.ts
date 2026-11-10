@@ -1,3 +1,5 @@
+import type { GenerationComposite } from "../lib/image-settings.js";
+
 export interface GenerationView {
   mediaType: "image" | "video";
   /** `download_failed`: the vendor produced the media but the server-side
@@ -15,6 +17,20 @@ export interface GenerationView {
   taskId?: string;
   /** Image settings the server recorded for this generation; editing the image keeps them. */
   settings?: GenerationSettings;
+  /** E-commerce image type of this generation; names each image of a set on the card. */
+  scene?: string;
+  /** Pictures joined from this generation's images (长图 / 宫格 / 一大多小). */
+  composites?: GenerationComposite[];
+}
+
+/** Later updates of a generation (ids, progress, final state) carry only what changed; what the card already knew stays. */
+function keepGenerationContext(next: GenerationView, previous?: GenerationView): GenerationView {
+  return {
+    ...next,
+    settings: next.settings ?? previous?.settings,
+    scene: next.scene ?? previous?.scene,
+    composites: next.composites ?? previous?.composites,
+  };
 }
 
 export interface GenerationSettings {
@@ -122,7 +138,9 @@ export type ChatAction =
     }
   | { type: "generation_progress"; messageId: string; progress?: number }
   /** Terminal generation state (completed/failed/cancelled) — also ends the streaming lock. */
-  | { type: "generation_finished"; messageId: string; generation: GenerationView };
+  | { type: "generation_finished"; messageId: string; generation: GenerationView }
+  /** A picture joined from a finished generation's images was stored. */
+  | { type: "generation_composited"; messageId: string; composite: GenerationComposite };
 
 /** Update the message with `message.id` in place, or append it if absent. */
 function upsert(messages: DisplayMessage[], message: DisplayMessage): DisplayMessage[] {
@@ -227,7 +245,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
               ...m,
               id: action.assistantMessageId,
               dbId: action.assistantMessageId,
-              generation: { ...action.generation, settings: action.generation.settings ?? m.generation?.settings },
+              generation: keepGenerationContext(action.generation, m.generation),
             };
           return m;
         }),
@@ -252,9 +270,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isStreaming: false,
         messages: state.messages.map((m) =>
           m.id === action.messageId
-            ? { ...m, generation: { ...action.generation, settings: action.generation.settings ?? m.generation?.settings } }
+            ? { ...m, generation: keepGenerationContext(action.generation, m.generation) }
             : m
         ),
+      };
+
+    case "generation_composited":
+      return {
+        ...state,
+        messages: state.messages.map((m) => {
+          if (m.id !== action.messageId || !m.generation) return m;
+          const { layout, gap } = action.composite;
+          const others = (m.generation.composites ?? []).filter((item) => item.layout !== layout || item.gap !== gap);
+          return { ...m, generation: { ...m.generation, composites: [...others, action.composite] } };
+        }),
       };
   }
 }

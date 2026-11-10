@@ -532,6 +532,21 @@ describe("POST /conversations/:id/generations/:messageId/redownload", () => {
     );
   });
 
+  it("keeps the image type through the retry so the card still names each image", async () => {
+    const service = fakeService();
+    service.db.getGenerationMessage = vi.fn(async () => ({
+      status: "download_failed",
+      metadata: {
+        kind: "generation", mediaType: "image", status: "download_failed", scene: "product_set",
+        sourceUrl: "https://vendor.example/1.png", sourceUrls: ["https://vendor.example/1.png", "https://vendor.example/2.png"], prompt: "保温杯",
+      },
+    }));
+    const res = await app(service).request("/conversations/c1/generations/m1/redownload", { method: "POST" });
+    expect(res.status).toBe(202);
+    expect(service.jobQueue.enqueue.mock.calls[0][1]).toMatchObject({ scene: "product_set", assistantMessageId: "m1" });
+    expect(service.db.updateMessageGeneration.mock.calls[0][1].metadata).toMatchObject({ scene: "product_set", status: "generating" });
+  });
+
   it("404s when the message is not found / not owned by the user", async () => {
     const service = fakeService();
     service.db.getGenerationMessage = vi.fn(async () => null);
@@ -736,5 +751,84 @@ describe("POST /conversations/:id/generations image scenes", () => {
   it("rejects an unknown scene", async () => {
     const res = await send(fakeService(), { prompt: "菊花", scene: "poster" });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /conversations/:id/generations/:messageId/compose", () => {
+  async function png(background: string): Promise<Buffer> {
+    const { default: sharp } = await import("sharp");
+    return sharp({ create: { width: 32, height: 32, channels: 3, background } }).png().toBuffer();
+  }
+  async function setup(metadata: Record<string, unknown> = {}) {
+    const service = fakeService();
+    const files = new Map<string, Buffer>([["a.png", await png("#ff0000")], ["b.png", await png("#0000ff")]]);
+    const meta: Record<string, unknown> = {
+      kind: "generation", mediaType: "image", status: "completed", taskId: "task-1", scene: "main_images",
+      assets: [{ url: "/static/assets/a.png", mime: "image/png" }, { url: "/static/assets/b.png", mime: "image/png" }],
+      ...metadata,
+    };
+    service.db.getGenerationMessage = vi.fn(async () => ({ status: "completed", metadata: meta }));
+    service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => ({ user_id: key === "other.png" ? "u2" : "u1", storage_key: key }));
+    service.db.createAsset = vi.fn(async () => {});
+    service.db.appendGenerationComposite = vi.fn(async () => true);
+    const assets = {
+      exists: vi.fn(async (key: string) => files.has(key)),
+      get: vi.fn(async (key: string) => files.get(key)!),
+      put: vi.fn(async ({ key }: { key: string }) => ({ url: `/static/assets/${key}` })),
+    };
+    const a = new Hono<{ Variables: { userId: string } }>();
+    a.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    a.route("/conversations", createGenerationRoutes(service, { assets: assets as any }));
+    const compose = (body: unknown) => a.request("/conversations/c1/generations/m1/compose", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, assets, compose };
+  }
+
+  it("stores one joined picture as the user's image and lists it on the message", async () => {
+    const { service, assets, compose } = await setup();
+    const res = await compose({ layout: "vertical", gap: false });
+    expect(res.status).toBe(200);
+    const { composite } = await res.json() as any;
+    expect(composite).toMatchObject({ mime: "image/jpeg", layout: "vertical", gap: false });
+    expect(composite.url).toMatch(/^\/static\/assets\/[0-9a-f-]+\.jpg$/);
+    expect(assets.put).toHaveBeenCalledTimes(1);
+    expect(service.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "u1", type: "image", mime: "image/jpeg", taskId: "task-1", width: 32, height: 64,
+    }));
+    expect(service.db.appendGenerationComposite).toHaveBeenCalledWith("m1", composite, { conversationId: "c1", userId: "u1" });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+
+  it("returns the stored picture when the same layout is asked for again", async () => {
+    const stored = { url: "/static/assets/done.jpg", mime: "image/jpeg", layout: "grid", gap: true };
+    const { assets, compose } = await setup({ composites: [stored] });
+    const res = await compose({ layout: "grid", gap: true });
+    expect(await res.json()).toEqual({ composite: stored });
+    expect(assets.put).not.toHaveBeenCalled();
+  });
+
+  it("refuses images that are not this user's stored output", async () => {
+    const foreign = await setup({ assets: [{ url: "/static/assets/a.png", mime: "image/png" }, { url: "/static/assets/other.png", mime: "image/png" }] });
+    expect((await foreign.compose({ layout: "vertical" })).status).toBe(409);
+    const external = await setup({ assets: [{ url: "/static/assets/a.png", mime: "image/png" }, { url: "https://vendor.example/b.png", mime: "image/png" }] });
+    expect((await external.compose({ layout: "vertical" })).status).toBe(409);
+    expect(external.assets.get).not.toHaveBeenCalledWith(expect.stringContaining("vendor"));
+    expect(foreign.assets.put).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown layouts, layouts that need more images, and unfinished or video generations", async () => {
+    const ready = await setup();
+    expect((await ready.compose({ layout: "spiral" })).status).toBe(400);
+    expect((await ready.compose({ layout: "hero" })).status).toBe(400);
+    expect((await (await setup({ status: "generating" })).compose({ layout: "vertical" })).status).toBe(409);
+    expect((await (await setup({ mediaType: "video" })).compose({ layout: "vertical" })).status).toBe(409);
+  });
+
+  it("answers 404 for a message the user does not own", async () => {
+    const { service, compose } = await setup();
+    service.db.getGenerationMessage = vi.fn(async () => null);
+    expect((await compose({ layout: "vertical" })).status).toBe(404);
   });
 });

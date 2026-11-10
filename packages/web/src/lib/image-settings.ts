@@ -38,27 +38,56 @@ export const DEFAULT_IMAGE_RATIO = "1:1";
 export const IMAGE_MAX_COUNT = 4;
 
 /** Image types above the composer, in display order (自由创作 first). 自由创作 sends the text as written; the others
- * are checked against the scene and rewritten on the server before any image is paid for. */
+ * are checked against the scene and rewritten on the server before any image is paid for. `count` is the
+ * image count a type starts with (the user's own choice per type wins afterwards); `roles` names each image of a set
+ * in the order the server writes its prompts (`server/generation/image-scene.ts`). */
 export const IMAGE_SCENES = [
-  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined },
+  { value: "free", label: "自由创作", placeholder: undefined, hint: undefined, count: undefined, roles: undefined },
   {
-    value: "product_set", label: "产品套图",
+    value: "product_set", label: "产品套图", count: 4, roles: ["封面", "卖点", "使用场景", "细节"],
     placeholder: "输入产品名和卖点，可上传产品图；如：保温杯，316 不锈钢，12 小时保温，适合通勤",
     hint: "按「图片参数」里的张数依次生成：封面主图、卖点图、使用场景图、细节图",
   },
   {
-    value: "main_images", label: "主副图",
+    value: "main_images", label: "主副图", count: 2, roles: ["主图", "其他角度", "细节", "使用场景"],
     placeholder: "输入产品名、特点或想要的风格，可上传产品图；如：白色无线耳机，简约科技风",
     hint: "第 1 张是主图，其余是多角度、细节和使用场景副图；张数在「图片参数」里选择",
   },
   {
-    value: "white_background", label: "白底图",
+    value: "white_background", label: "白底图", count: undefined, roles: undefined,
     placeholder: "上传产品图或输入产品名，生成纯白背景的商品图；如：红色运动鞋，侧面 45 度",
     hint: "纯白背景、产品居中、柔和棚拍光，适合电商平台上架",
   },
 ] as const;
 export type ImageScene = typeof IMAGE_SCENES[number]["value"];
 export const DEFAULT_IMAGE_SCENE: ImageScene = "free";
+
+/** What image `index` of a set is for (封面 / 卖点 …); undefined for other scenes and for older messages. */
+export function imageSetRole(scene: string | undefined, index: number): string | undefined {
+  return IMAGE_SCENES.find((item) => item.value === scene)?.roles?.[index];
+}
+
+/** Ways to join one generation's images into a single picture, done on the server without a model request. */
+export const COMPOSE_LAYOUTS = [
+  { value: "vertical", label: "长图", hint: "上下拼接，适合详情页", min: 2 },
+  { value: "grid", label: "宫格", hint: "两列排列，适合朋友圈和社媒", min: 2 },
+  { value: "hero", label: "一大多小", hint: "第 1 张放大，其余排成一行", min: 3 },
+] as const;
+export type ComposeLayout = typeof COMPOSE_LAYOUTS[number]["value"];
+export const COMPOSE_MIN_IMAGES = 2;
+
+export interface GenerationComposite { url: string; mime: string; layout: ComposeLayout; gap: boolean }
+
+/** Composites stored in message metadata, dropping anything malformed. */
+export function generationComposites(raw: unknown): GenerationComposite[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw.flatMap((item) => {
+    const { url, mime, layout, gap } = (item ?? {}) as Record<string, unknown>;
+    const known = COMPOSE_LAYOUTS.find((option) => option.value === layout);
+    return typeof url === "string" && url && typeof mime === "string" && known ? [{ url, mime, layout: known.value, gap: gap === true }] : [];
+  });
+  return list.length ? list : undefined;
+}
 
 export interface ImageSettings {
   /** Only on a composer send; generated-image edits never carry a scene. */

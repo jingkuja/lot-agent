@@ -88,3 +88,28 @@ describe("imageSizeError", () => {
     expect(imageSizeError("x1024")).toBe("请输入有效的分辨率");
   });
 });
+
+describe("image sets", () => {
+  it("starts 产品套图 at 4 images and 主副图 at 2, and leaves the other types alone", async () => {
+    const { IMAGE_SCENES } = await import("./image-settings.js");
+    const counts = Object.fromEntries(IMAGE_SCENES.map((scene) => [scene.value, scene.count]));
+    expect(counts).toEqual({ free: undefined, product_set: 4, main_images: 2, white_background: undefined });
+  });
+
+  it("names each image of a set and nothing else", async () => {
+    const { imageSetRole } = await import("./image-settings.js");
+    expect([0, 1, 2, 3].map((index) => imageSetRole("product_set", index))).toEqual(["封面", "卖点", "使用场景", "细节"]);
+    expect([0, 1, 2, 3].map((index) => imageSetRole("main_images", index))).toEqual(["主图", "其他角度", "细节", "使用场景"]);
+    expect(imageSetRole("product_set", 4)).toBeUndefined();
+    expect(imageSetRole("white_background", 0)).toBeUndefined();
+    expect(imageSetRole(undefined, 0)).toBeUndefined();
+  });
+
+  it("reads stored composites and drops malformed ones", async () => {
+    const { generationComposites } = await import("./image-settings.js");
+    expect(generationComposites([{ url: "/a.jpg", mime: "image/jpeg", layout: "grid", gap: true }, { url: "/b.jpg", mime: "image/jpeg", layout: "spiral" }]))
+      .toEqual([{ url: "/a.jpg", mime: "image/jpeg", layout: "grid", gap: true }]);
+    expect(generationComposites(undefined)).toBeUndefined();
+    expect(generationComposites([])).toBeUndefined();
+  });
+});

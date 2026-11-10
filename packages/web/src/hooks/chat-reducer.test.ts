@@ -272,6 +272,31 @@ describe("chatReducer — generation lifecycle", () => {
     });
   });
 
+  it("keeps the image type through the final update and replaces a composite of the same layout", () => {
+    const s = run([
+      optimistic(),
+      {
+        type: "generation_ids_reconciled",
+        tempUserId: "tmp-u",
+        userMessageId: "u-db",
+        tempGenId: "tmp-g",
+        assistantMessageId: "g-db",
+        generation: { mediaType: "image", status: "generating", progress: 0, taskId: "t1", scene: "product_set" },
+      },
+      {
+        type: "generation_finished",
+        messageId: "g-db",
+        generation: { mediaType: "image", status: "completed", assets: [{ url: "/a.png", mime: "image/png" }, { url: "/b.png", mime: "image/png" }] },
+      },
+      { type: "generation_composited", messageId: "g-db", composite: { url: "/1.jpg", mime: "image/jpeg", layout: "vertical", gap: false } },
+      { type: "generation_composited", messageId: "g-db", composite: { url: "/2.jpg", mime: "image/jpeg", layout: "grid", gap: false } },
+      { type: "generation_composited", messageId: "g-db", composite: { url: "/3.jpg", mime: "image/jpeg", layout: "vertical", gap: false } },
+    ]);
+    const generation = s.messages.find((m) => m.id === "g-db")?.generation;
+    expect(generation?.scene).toBe("product_set");
+    expect(generation?.composites?.map((item) => item.url)).toEqual(["/2.jpg", "/3.jpg"]);
+  });
+
   it("cancelled terminal state replaces the generation view wholesale", () => {
     const s = run([
       optimistic(),

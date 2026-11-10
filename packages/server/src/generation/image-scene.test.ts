@@ -38,4 +38,17 @@ describe("image scenes", () => {
     expect(() => parseImageScenePlan('{"fits": true, "prompts": ["only one"]}', 2)).toThrow(ImageSceneError);
     expect(() => parseImageScenePlan('{"fits": false}', 1)).toThrow(ImageSceneError);
   });
+
+  it("reads a plan the model wrapped in a sentence or a fence, and says why a reply is unusable", () => {
+    const wrapped = 'Here is the plan:\n```json\n{"fits": true, "prompts": ["main", "side"]}\n```\nHope this helps.';
+    expect(parseImageScenePlan(wrapped, 2)).toEqual({ fits: true, prompts: ["main", "side"] });
+    const reason = (text: string, expected: number) => {
+      try { parseImageScenePlan(text, expected); } catch (error) { return (error as ImageSceneError).reason; }
+      return "parsed";
+    };
+    expect(reason("", 1)).toBe("empty_reply");
+    expect(reason('{"fits": true, "prompts": ["a "broken" quote"]}', 1)).toBe("not_json");
+    expect(reason('{"fits": true}', 1)).toBe("bad_shape");
+    expect(reason('{"fits": true, "prompts": ["only one"]}', 2)).toBe("few_prompts");
+  });
 });
