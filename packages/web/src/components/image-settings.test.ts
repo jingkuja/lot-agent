@@ -9,7 +9,7 @@ let root: Root | undefined;
 afterEach(() => { act(() => root?.unmount()); document.body.replaceChildren(); });
 
 function button(text: string): HTMLButtonElement {
-  const found = [...document.querySelectorAll("button")].find((item) => item.textContent?.trim() === text);
+  const found = [...document.querySelectorAll("button")].find((item) => item.getAttribute("aria-label") === text || item.textContent?.trim() === text);
   if (!found) throw new Error(`Button not found: ${text}`);
   return found;
 }
@@ -22,14 +22,23 @@ describe("image composer settings", () => {
     const ref = createRef<InputBoxHandle>();
     const changeModel = vi.fn();
     const props = {
-      ref, mode: "image" as const, selectedModel: "gpt-image-2.5-flare", onModelChange: changeModel,
+      ref, mode: "image" as const, selectedModel: null, onModelChange: changeModel,
       models: [
+        { id: "linqu-image", type: "image" as const, provider: "test" },
         { id: "gpt-image-2.5-flare", type: "image" as const, provider: "test" },
         { id: "gpt-image-2.5-sunburst", type: "image" as const, provider: "test" },
       ],
     };
     act(() => root!.render(createElement(InputBox, props)));
     act(() => button("图片参数").click());
+    expect(button("默认").getAttribute("aria-pressed")).toBe("true");
+    expect(button("电商爆款").getAttribute("aria-pressed")).toBe("false");
+    expect([...document.querySelectorAll(".image-model-card")].map((item) => item.getAttribute("aria-label"))).toEqual([
+      "电商爆款", "默认", "旗舰",
+    ]);
+    expect(button("电商爆款").querySelector("small")?.textContent).toBe("复刻爆款，模特出镜无限制。");
+    expect(button("默认").querySelector("small")?.textContent).toBe("快速高质量出图");
+    expect(button("旗舰").querySelector("small")?.textContent).toBe("追求更高品质的细节。");
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="宽度"]')).toBeNull();
     expect(document.querySelector('.input-box .model-picker')).toBeNull();
@@ -48,6 +57,8 @@ describe("image composer settings", () => {
     expect(ref.current?.prepareImageSend({ size: "1536x1024" })).toEqual({ settings: { size: "1536x1024", n: 1, quality: "auto" } });
     act(() => button("旗舰").click());
     expect(changeModel).toHaveBeenLastCalledWith("gpt-image-2.5-sunburst");
+    act(() => button("电商爆款").click());
+    expect(changeModel).toHaveBeenLastCalledWith("linqu-image");
     act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     act(() => root!.render(null));

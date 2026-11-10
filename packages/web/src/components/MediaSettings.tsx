@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useEffect, useLayoutEffect, type CSSProperties } from "react";
+import { imageModelDescription, isLingquImage } from "../lib/model-filter.js";
 import {
   DEFAULT_IMAGE_QUALITY,
   DEFAULT_IMAGE_RATIO,
@@ -177,10 +178,11 @@ export function ImageSettingsPicker({
   allowCount = true,
   countKey = "free",
   defaultCount = 1,
+  showSummary = false,
   onChange,
 }: {
   disabled?: boolean;
-  /** Visible image models (already labeled 默认 / 旗舰); the model row shows only with `onModelChange`. */
+  /** Visible image models (already labeled 默认 / 旗舰 / 电商爆款); shown only with `onModelChange`. */
   models?: ImageModelOption[];
   selectedModel?: string | null;
   onModelChange?: (id: string) => void;
@@ -189,6 +191,8 @@ export function ImageSettingsPicker({
   /** Image type the count belongs to; switching types switches to that type's remembered or default count. */
   countKey?: string;
   defaultCount?: number;
+  /** Show the live output specification on the image studio's settings button. */
+  showSummary?: boolean;
   onChange?: (s: ImageSettings) => void;
 }) {
   const { t } = useI18n();
@@ -201,7 +205,7 @@ export function ImageSettingsPicker({
   const [resolution, setResolution] = useState(() => lastImage.resolution);
   const count = allowCount ? n : 1;
   // Open upward unless the space above is short and below is roomier; never past the visible band.
-  const [placement, setPlacement] = useState<{ below: boolean; maxHeight: number } | null>(null);
+  const [placement, setPlacement] = useState<{ below: boolean; maxHeight: number; left: number } | null>(null);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -213,7 +217,9 @@ export function ImageSettingsPicker({
       const above = rect.top - band.top - POPUP_GAP - POPUP_EDGE;
       const below = band.bottom - rect.bottom - POPUP_GAP - POPUP_EDGE;
       const openBelow = above < 360 && below > above;
-      setPlacement({ below: openBelow, maxHeight: Math.max(160, Math.min(POPUP_MAX_HEIGHT, openBelow ? below : above)) });
+      const width = wrap.querySelector(".image-settings-popup")?.getBoundingClientRect().width ?? 0;
+      const left = Math.max(POPUP_EDGE, Math.min(rect.right - width, window.innerWidth - width - POPUP_EDGE)) - rect.left;
+      setPlacement({ below: openBelow, maxHeight: Math.max(160, Math.min(POPUP_MAX_HEIGHT, openBelow ? below : above)), left });
     };
     place();
     window.addEventListener("resize", place);
@@ -246,6 +252,7 @@ export function ImageSettingsPicker({
     setResolution(value);
   };
   const [rw, rh] = ratio === IMAGE_AUTO_RATIO ? [1, 1] : ratio.split(":").map(Number);
+  const modelOptions = [...models].sort((a, b) => Number(isLingquImage(b.id)) - Number(isLingquImage(a.id)));
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -256,15 +263,19 @@ export function ImageSettingsPicker({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={t("图片参数")}
       >
         <RatioGlyph w={rw} h={rh} size={14} />
         <span className="media-trigger-label">{t("图片参数")}</span>
+        {showSummary && <span className="image-settings-summary">
+          {resolution} · {ratio === IMAGE_AUTO_RATIO ? t("智能") : ratio} · {t("{0} 张", [count])}
+        </span>}
         <ChevronIcon />
       </button>
       {open && (
         <div
           className={`media-popup image-settings-popup${placement?.below ? " media-popup--below" : ""}`}
-          style={placement ? { maxHeight: placement.maxHeight } : undefined}
+          style={placement ? { maxHeight: placement.maxHeight, left: placement.left, right: "auto" } : undefined}
           role="dialog"
           aria-label={t("图片参数")}
         >
@@ -299,18 +310,24 @@ export function ImageSettingsPicker({
               <div className="media-section-title">{t("模型")}</div>
               {models.length ? (
                 <div className="image-model-grid">
-                  {models.map((model) => (
-                    <button
-                      key={model.id}
-                      type="button"
-                      className={`image-model-card ${model.id === selectedModel ? "active" : ""}`}
-                      onClick={() => onModelChange(model.id)}
-                      aria-pressed={model.id === selectedModel}
-                      title={model.description ? t(model.description) : undefined}
-                    >
-                      {t(model.label ?? model.id)}
-                    </button>
-                  ))}
+                  {modelOptions.map((model) => {
+                    const description = imageModelDescription(model.id) ?? model.description;
+                    const featured = isLingquImage(model.id) ? " image-model-card--featured" : "";
+                    return (
+                      <button
+                        key={model.id}
+                        type="button"
+                        className={`image-model-card${featured}${model.id === selectedModel ? " active" : ""}`}
+                        onClick={() => onModelChange(model.id)}
+                        aria-pressed={model.id === selectedModel}
+                        aria-label={t(model.label ?? model.id)}
+                        title={description ? t(description) : undefined}
+                      >
+                        <span>{t(model.label ?? model.id)}</span>
+                        {description && <small>{t(description)}</small>}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="media-hint">{t("暂无模型")}</div>

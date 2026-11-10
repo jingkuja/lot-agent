@@ -25,7 +25,7 @@ import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
 import { DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
-import { resolveMaterialReference } from "../generation/private-materials.js";
+import { resolveImageReferenceUrl, resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
 import { ProviderFactory } from "../models/provider-factory.js";
 import type { ModelCatalogConfig } from "../models/catalog.js";
@@ -238,6 +238,7 @@ async function main() {
     return {
       provider,
       resolveReferenceUrl: (url) => resolveMaterialReference(db, job.userId, url),
+      resolveImageReferenceUrl: (url) => resolveImageReferenceUrl(db, job.userId, url),
       prepareKlingVoices: realVideo
         ? async (input) => {
             const voices = new KlingVoicePreparation({

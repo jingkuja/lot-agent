@@ -47,6 +47,13 @@ describe("fillModelDefaults", () => {
 });
 
 describe("resolveImageSelection", () => {
+  it.each(["linqu-image", "lingqu-image"])("starts with 默认 and retains an explicit %s selection", (id) => {
+    const available = [m(id, "image"), ...catalog.image];
+    expect(resolveImageSelection(null, available)).toBe("gpt-image-2.5-flare");
+    expect(resolveImageSelection(id, available)).toBe(id);
+    expect(resolveImageSelection(null, [m(id, "image"), m("gpt-image-2", "image")])).toBe("gpt-image-2");
+  });
+
   it("keeps a visible image pick", () => {
     expect(resolveImageSelection("gpt-image-2.5-sunburst", catalog.image)).toBe("gpt-image-2.5-sunburst");
   });

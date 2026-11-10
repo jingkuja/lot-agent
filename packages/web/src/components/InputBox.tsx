@@ -38,6 +38,7 @@ import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
 import { ProductPickerDialog } from "./ProductPickerDialog.js";
 import { productPromptText, withProductText } from "../lib/product-reference.js";
+import { ImageComposerHeader, ImagePromptIdeas } from "./ImageComposer.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -567,31 +568,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     }
   }, []);
 
+  useEffect(() => { if (sceneTabs) handleInput(); }, [sceneTabs, promptValue, handleInput]);
+
   return (
     <>
-    {sceneTabs && (
-      // A console dock seated on the composer's top edge: the chosen image type lights up.
-      <div className="scene-dock" role="tablist" aria-label={t("创作类型")}>
-        <span className="scene-dock-stars" aria-hidden />
-        <div className="scene-dock-track">
-          {IMAGE_SCENES.map((scene) => (
-            <button
-              key={scene.value}
-              type="button"
-              role="tab"
-              aria-selected={imageScene === scene.value}
-              className={`scene-dock-tab${imageScene === scene.value ? " active" : ""}`}
-              onClick={() => setImageScene(scene.value)}
-              disabled={disabled}
-            >
-              {imageScene === scene.value && <span className="scene-dock-spark" aria-hidden>✦</span>}
-              {t(scene.label)}
-            </button>
-          ))}
-        </div>
-      </div>
-    )}
     <div className={`input-box${embedded ? " input-box--embedded" : ""}${sceneTabs ? " input-box--scene" : ""}`}>
+      {sceneTabs && <>
+        <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={disabled} />
+        <div className="image-prompt-heading">
+          <strong>{t("描述你的画面")}</strong>
+          <span>{t("主体、场景、风格，越具体越出彩")}</span>
+        </div>
+      </>}
       {activeScene?.hint && <p className="input-modal-hint image-scene-hint">{t(activeScene.hint)}</p>}
       {activeScene?.note && <p className="input-modal-hint image-scene-hint image-scene-note">{t(activeScene.note)}</p>}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
@@ -740,12 +728,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
         placeholder={
-          disabled && !embedded ? t("Agent 正在思考…") : t(activeScene?.placeholder ?? placeholder) ?? t("输入消息，Enter 发送，Shift+Enter 换行")
+          disabled && !embedded ? t(sceneTabs ? "正在生成画面…" : "Agent 正在思考…")
+            : t(activeScene?.placeholder ?? (sceneTabs ? "想创作什么？描述画面，或从下方选一个灵感开始…" : placeholder))
+              ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
+        aria-label={sceneTabs ? t("描述你的画面") : undefined}
         disabled={disabled}
         rows={1}
         autoFocus={autoFocus}
       />
+      {sceneTabs && !promptValue.trim() && !disabled && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
+        setPromptValue(prompt);
+        textareaRef.current?.focus();
+      }} />}
       <div className={`input-toolbar ${videoMode ? "input-toolbar--video" : ""}`}>
         <input
           ref={fileInputRef}
@@ -1082,6 +1077,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               allowCount={imageCount}
               countKey={sceneTabs ? imageScene : undefined}
               defaultCount={activeScene?.count}
+              showSummary={sceneTabs}
               onChange={handleSettingsChange}
             />
           )}
@@ -1101,6 +1097,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
+              {sceneTabs && <span>{t("停止生成")}</span>}
             </button>
           ) : (
             <button
@@ -1111,12 +1108,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
                 && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
               )}
-              title={t("发送")}
+              title={t(sceneTabs ? "生成图片" : "发送")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="19" x2="12" y2="5" />
                 <polyline points="5 12 12 5 19 12" />
               </svg>
+              {sceneTabs && <span>{t("生成图片")}</span>}
             </button>
           ))}
         </div>

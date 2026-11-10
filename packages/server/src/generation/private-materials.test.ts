@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretBox } from "../auth/secret-box.js";
 import { staticFileHandler } from "../static-files.js";
-import { createDocumentAccessGuard, createOutputAccessGuard, createUploadAccessGuard, documentAssetKey, parseFileUrl, resolveMaterialReference,
+import {
+  createDocumentAccessGuard, createOutputAccessGuard, createUploadAccessGuard, documentAssetKey, parseFileUrl,
+  resolveImageReferenceUrl, resolveMaterialReference,
   signPrivateFile, signPrivateMaterial, signPrivateOutput,
   type PrivateMaterialAsset } from "./private-materials.js";
 
@@ -15,6 +17,24 @@ const start = 1_000_000;
 const options = { masterKey: key, now: () => start, publicBaseUrl: "" };
 
 describe("private material references", () => {
+  it("only forwards owned Agent images and renews private references", async () => {
+    const configured = { ...options, publicBaseUrl: "https://agent.example/app" };
+    const output = "/static/assets/cover.png";
+    const db = {
+      getUploadByStorageKey: vi.fn(async () => ({ ...asset, mime: "image/png" })),
+      getGeneratedByStorageKey: vi.fn(async () => ({ user_id: "owner", mime: "image/png", is_private: true })),
+    };
+    const signed = await resolveImageReferenceUrl(db, "owner", `https://agent.example/app${output}?material_token=old`, configured);
+    expect(signed).toMatch(/^https:\/\/agent\.example\/app\/static\/assets\/cover\.png\?material_token=/);
+    expect(signed).not.toContain("material_token=old");
+    await expect(resolveImageReferenceUrl(db, "owner", asset.url, configured)).resolves.toContain("/static/uploads/portrait.png?material_token=");
+    await expect(resolveImageReferenceUrl(db, "other", output, configured)).rejects.toThrow("素材不存在");
+    await expect(resolveImageReferenceUrl(db, "other", asset.url, configured)).rejects.toThrow("素材不存在");
+    await expect(resolveImageReferenceUrl(db, "owner", output, options)).rejects.toThrow("PUBLIC_BASE_URL");
+    for (const url of ["data:image/png;base64,YQ==", "https://other.example/static/assets/cover.png", "/static/assets/%2e%2e"]) {
+      await expect(resolveImageReferenceUrl(db, "owner", url, configured)).rejects.toThrow();
+    }
+  });
   it("keeps canonical URLs unchanged and signs private uploads for ten minutes", () => {
     const signed = signPrivateMaterial(asset, options);
     expect(signed).toMatch(/^\/static\/uploads\/portrait\.png\?material_token=/);

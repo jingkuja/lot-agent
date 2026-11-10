@@ -41,6 +41,8 @@ export interface RunJobDeps {
   provider: JobGenerationProvider;
   /** Authorize stable local material URLs, then mint an expiring vendor URL. */
   resolveReferenceUrl?: (url: string) => Promise<string>;
+  /** Authorize an Agent-hosted image and return its externally accessible URL. */
+  resolveImageReferenceUrl?: (url: string) => Promise<string>;
   prepareKlingVoices?: (input: PrepareKlingVoicesInput) => Promise<ReferenceInput>;
   /** Voice checkpoint owner when it is not this job: a marketing parent shares one voice per sample across its clips. */
   voiceScopeTaskId?: string;
@@ -119,17 +121,24 @@ async function publicReference(deps: RunJobDeps, value: ReferenceInput | undefin
   return value ? Promise.all(value.map(resolve)) : undefined;
 }
 
-/**
- * Tokenhub's `/images/edits` accepts only `data:image/...;base64,...` inputs.
- * Reference uploads are stored as static URLs, so resolve them through the
- * worker's already guarded/bounded byte loader, then encode the exact bytes for
- * the edit request. Data URLs are deliberately normalized the same way.
- */
-async function imageReferencesAsDataUrls(
+function usesImageReferenceUrls(model: string): boolean {
+  return /^(linqu|lingqu)-image$/i.test(model);
+}
+
+function agentImageReferenceUrl(deps: RunJobDeps, url: string): Promise<string> {
+  if (!deps.resolveImageReferenceUrl) throw new GenerationError("CONFIG_MISSING", "图片参考图链接服务未配置。");
+  return deps.resolveImageReferenceUrl(url);
+}
+
+/** Most image models need Base64 data URLs. URL-only models fetch Agent-hosted references. */
+async function prepareImageReferences(
   deps: RunJobDeps,
   media: ReferenceMedia[] | undefined
 ): Promise<ReferenceMedia[] | undefined> {
   if (!media?.length) return undefined;
+  if (usesImageReferenceUrls(deps.vendorModel)) {
+    return Promise.all(media.map(async (item) => ({ ...item, url: await agentImageReferenceUrl(deps, item.url) })));
+  }
   return Promise.all(media.map(async (item) => {
     const source = await publicReference(deps, item.url) as string;
     const { body, mime } = await deps.urlToBytes(source, { signal: deps.signal });
@@ -215,11 +224,20 @@ function producedUrls(mediaType: MediaType, input: Record<string, unknown>, p: P
   return urls.slice(0, requested);
 }
 
+async function storeGeneratedAsset(deps: RunJobDeps, job: JobLike, type: MediaType, file: { body: Buffer; mime: string }, durationSec?: number) {
+  const { body, mime } = file;
+  const id = randomUUID();
+  const key = `${id}.${deps.extFor(mime)}`;
+  const { url } = await deps.storage.put({ key, body, contentType: mime });
+  await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
+  return { id, asset: durationSec != null ? { url, mime, durationSec } : { url, mime } };
+}
+
 /**
  * Download the vendor's finished media into our own storage, register the
- * assets, meter them, and flip the message to `completed`. Every file is
- * fetched before any is stored, so a multi-image result is kept whole or not
- * at all. If a download (after its retries, or the store) fails once the
+ * assets, meter them, and flip the message to `completed`. A set's first image
+ * may already be stored as a reference for later images. If a download (after
+ * its retries, or the store) fails once the
  * vendor produced the media, classify it as a recoverable `download_failed` —
  * persist the source urls on the message and return a `downloadFailed` output
  * rather than failing the whole generation. A cancellation observed
@@ -231,15 +249,16 @@ async function downloadAndFinalize(
   mediaType: MediaType,
   sourceUrls: string[],
   cacheKey: string | null,
-  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>
+  setMsg: (status: string, extra: Record<string, unknown>) => Promise<void>,
+  firstAsset?: Awaited<ReturnType<typeof storeGeneratedAsset>>,
 ): Promise<GenOut> {
   const sourceUrl = sourceUrls[0];
   try {
     const files = [];
-    for (const source of sourceUrls) files.push(await fetchProduced(deps, job.id, source));
+    for (const source of sourceUrls.slice(firstAsset ? 1 : 0)) files.push(await fetchProduced(deps, job.id, source));
     const durationSec = mediaType === "video" ? billedVideoSeconds(job.input.durationSec) : undefined;
-    const assetIds: string[] = [];
-    const assets: GenAssets = [];
+    const assetIds = firstAsset ? [firstAsset.id] : [];
+    const assets: GenAssets = firstAsset ? [firstAsset.asset] : [];
     const whiteBackground = mediaType === "image" && job.input.scene === "white_background";
     const whiteChecks: WhiteBackgroundCheck[] = [];
     for (const file of files) {
@@ -255,16 +274,11 @@ async function downloadAndFinalize(
           whiteChecks.push({ corrected: false, issues: [] });
         }
       }
-      const assetId = randomUUID();
-      const key = `${assetId}.${deps.extFor(mime)}`;
-      const { url } = await deps.storage.put({ key, body, contentType: mime });
-      await deps.db.createAsset({
-        id: assetId, taskId: job.id, userId: job.userId, type: mediaType, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec,
-      });
-      assetIds.push(assetId);
-      assets.push(durationSec != null ? { url, mime, durationSec } : { url, mime });
+      const { id, asset } = await storeGeneratedAsset(deps, job, mediaType, { body, mime }, durationSec);
+      assetIds.push(id);
+      assets.push(asset);
     }
-    const outputCount = mediaType === "video" ? (durationSec ?? 1) : files.length;
+    const outputCount = mediaType === "video" ? (durationSec ?? 1) : assets.length;
     await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount } });
     const out: GenOut = { assetIds, assets, ...(whiteChecks.length ? { whiteChecks } : {}) };
     if (cacheKey) await deps.cache.set(cacheKey, out);
@@ -363,7 +377,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       return await runImageSet(deps, job, setPrompts, cacheKey, setMsg, assertNotCancelled, {
         size: input.size as string | undefined,
         quality: (input.quality as string | undefined) ?? "auto",
-        media: await imageReferencesAsDataUrls(deps, media),
+        media: await prepareImageReferences(deps, media),
       });
     }
 
@@ -373,10 +387,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     // create a duplicate generation.
     let vendorTaskId = await deps.db.getTaskVendorId(job.id);
     if (!vendorTaskId) {
-      // Tokenhub image edits only accept Base64 data URLs. Video vendors fetch
-      // references themselves, so those keep externally accessible URLs.
       let publicMedia = mediaType === "image"
-        ? await imageReferencesAsDataUrls(deps, media)
+        ? await prepareImageReferences(deps, media)
         : media ? await Promise.all(media.filter(item => !needsKlingVoices || item.type !== "reference_audio").map(async (item) => ({ ...item, url: await publicReference(deps, item.url) as string }))) : undefined;
       let publicInputReference = await publicReference(deps, inputReference);
       let publicVideoReference = await publicReference(deps, referenceVideo);
@@ -522,6 +534,7 @@ async function submitEach(
         if (index > 0 && nextReference && !media?.length && !referenced) {
           referenced = true;
           media = await nextReference(sourceUrls[0]);
+          await assertNotCancelled();
         }
         if (referenced && media?.length) prompt = SET_REFERENCE_NOTE + prompt;
         console.log("[image.generate] set request", JSON.stringify({ taskId: job.id, model: deps.vendorModel, index, reference: !!media?.length }));
@@ -545,10 +558,9 @@ async function submitEach(
 }
 
 /** An image as a reference for the rest of its set. Best effort: without it the set is still made, only less alike. */
-async function setReference(taskId: string, read: () => Promise<{ body: Buffer }>): Promise<ReferenceMedia[] | undefined> {
+async function setReference(taskId: string, resolve: () => Promise<string>): Promise<ReferenceMedia[] | undefined> {
   try {
-    const { body } = await read();
-    return [{ type: "reference_image", url: await referenceDataUrl(body) }];
+    return [{ type: "reference_image", url: await resolve() }];
   } catch (err) {
     if (err instanceof JobCancelledError) throw err;
     console.warn("[image.generate] set reference unavailable", { taskId, errorType: (err as Error)?.name });
@@ -569,7 +581,14 @@ async function runImageSet(
   assertNotCancelled: () => Promise<void>,
   request: SetRequest
 ): Promise<GenOut> {
-  const firstAsReference = (firstUrl: string) => setReference(job.id, () => fetchProduced(deps, job.id, firstUrl));
+  let firstAsset: Awaited<ReturnType<typeof storeGeneratedAsset>> | undefined;
+  const firstAsReference = (firstUrl: string) => setReference(job.id, async () => {
+    const file = await fetchProduced(deps, job.id, firstUrl);
+    if (!usesImageReferenceUrls(deps.vendorModel)) return referenceDataUrl(file.body);
+    await assertNotCancelled();
+    firstAsset = await storeGeneratedAsset(deps, job, "image", file);
+    return agentImageReferenceUrl(deps, firstAsset.asset.url);
+  });
   const { sourceUrls, failure } = await submitEach(deps, job, prompts, request, assertNotCancelled, firstAsReference);
   if (!sourceUrls.length) throw failure ?? new Error("generation completed without a url");
   const partial = sourceUrls.length < prompts.length;
@@ -577,7 +596,7 @@ async function runImageSet(
     ? (status: string, extra: Record<string, unknown>) => setMsg(status, { ...extra, missing: prompts.length - sourceUrls.length })
     : setMsg;
   // A partial set is not cached: sending the same request again should try for the whole set.
-  const out = await downloadAndFinalize(deps, job, "image", sourceUrls, partial ? null : cacheKey, finalize);
+  const out = await downloadAndFinalize(deps, job, "image", sourceUrls, partial ? null : cacheKey, finalize, firstAsset);
   return partial && !out.downloadFailed ? { ...out, missing: prompts.length - sourceUrls.length } : out;
 }
 
@@ -668,11 +687,16 @@ export async function runImageSetRedo(deps: RunJobDeps, job: JobLike): Promise<G
   };
   try {
     await assertNotCancelled();
-    let media = await imageReferencesAsDataUrls(deps, input.media as ReferenceMedia[] | undefined);
+    let media = await prepareImageReferences(deps, input.media as ReferenceMedia[] | undefined);
     let prompts = redo.prompts;
-    if (!media?.length && redo.setReference && deps.readOwnOutput) {
+    const storedReference = redo.setReference;
+    if (!media?.length && storedReference) {
       const read = deps.readOwnOutput;
-      media = await setReference(job.id, () => read(redo.setReference as string));
+      if (usesImageReferenceUrls(deps.vendorModel)) {
+        media = await setReference(job.id, () => agentImageReferenceUrl(deps, storedReference));
+      } else if (read) {
+        media = await setReference(job.id, async () => referenceDataUrl((await read(storedReference)).body));
+      }
       if (media?.length) prompts = prompts.map((prompt) => SET_REFERENCE_NOTE + prompt);
     }
     const request = { size: input.size as string | undefined, quality: (input.quality as string | undefined) ?? "auto", media };

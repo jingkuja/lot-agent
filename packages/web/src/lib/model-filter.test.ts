@@ -83,7 +83,20 @@ describe("visibleImageModels", () => {
     ]);
   });
 
-  it("returns empty when none of the three allowed models exist", () => {
+  it.each(["linqu-image", "lingqu-image"])("adds %s without hiding the standard default or the gpt-image-2 fallback", (id) => {
+    const available = [img(id), img("gpt-image-2.5-sunburst"), img("gpt-image-2.5-flare")];
+    expect(visibleImageModels(available).map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: "gpt-image-2.5-flare", label: "默认" },
+      { id: "gpt-image-2.5-sunburst", label: "旗舰" },
+      { id, label: "电商爆款" },
+    ]);
+    expect(visibleImageModels([img(id), img("gpt-image-2")]).map(({ id }) => id)).toEqual([
+      "gpt-image-2", id,
+    ]);
+    expect(visibleImageModels([img(id)])[0]).toMatchObject({ id, label: "电商爆款" });
+  });
+
+  it("returns empty when none of the allowed models exist", () => {
     expect(visibleImageModels([img("wanx-standard"), img("qwen-image-2.0")])).toEqual([]);
   });
 });

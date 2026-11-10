@@ -51,7 +51,7 @@ export function normalizeImageSize(size?: string): string {
   return `${width}x${height}`;
 }
 
-/** Tokenhub `/images/edits` accepts up to five Base64 data URLs in `image`. */
+/** Tokenhub `/images/edits` accepts up to five references in `image`. */
 export const MAX_IMAGE_EDIT_REFERENCES = 5;
 
 /**
@@ -75,7 +75,7 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     const body: Record<string, unknown> = hasReferences
       ? {
           model,
-          // Tokenhub's edit endpoint takes Base64 data URLs in `image` as
+          // Reference format depends on the model. Send the prepared URLs as
           // an array, including the single-reference case.
           image: referenceUrls,
           prompt: req.prompt,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { HttpKlingVoiceProvider, HttpVideoGenerationProvider, OpenaiVideoAdapter } from "@lot-agent/core";
+import { HttpKlingVoiceProvider, HttpVideoGenerationProvider, OpenAIImagesImageProvider, OpenaiVideoAdapter } from "@lot-agent/core";
 import { KlingVoicePreparation } from "./kling-voices.js";
 import sharp from "sharp";
 import {
@@ -313,6 +313,29 @@ describe("runGenerationJob", () => {
       media: [{ type: "reference_image", url: "data:image/png;base64,cmVmZXJlbmNl" }],
     }));
     expect(deps.urlToBytes).toHaveBeenCalledWith("/static/uploads/reference.png", { signal: undefined });
+  });
+
+  it.each(["linqu-image", "lingqu-image"])("sends %s Agent URLs in the gateway's image array", async (model) => {
+    const output = "data:image/png;base64,YQ==";
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ data: [{ b64_json: "YQ==" }] }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const provider = new OpenAIImagesImageProvider({ baseUrl: "https://gateway.example/v1", apiKey: "fixture", model });
+      const reference = "/static/assets/reference.png";
+      const resolved = "https://agent.example/static/assets/reference.png";
+      const resolveImageReferenceUrl = vi.fn(async () => resolved);
+      const { deps } = fakeDeps(provider, { vendorModel: model, resolveImageReferenceUrl });
+      const media = [{ type: "reference_image", url: reference }];
+      await runGenerationJob(deps, { ...job, input: { ...job.input, media } }, "image");
+
+      expect(resolveImageReferenceUrl).toHaveBeenCalledWith(reference);
+      const [endpoint, request] = fetcher.mock.calls[0];
+      expect(endpoint).toBe("https://gateway.example/v1/images/edits");
+      expect(JSON.parse(String(request.body))).toMatchObject({ model, image: [resolved] });
+      expect(vi.mocked(deps.urlToBytes).mock.calls.map(([url]) => url)).toEqual([output]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("encodes two image-edit references as Base64 data URLs before calling the provider", async () => {
@@ -832,6 +855,22 @@ function setProvider() {
 describe("image set consistency", () => {
   const setInput = { ...job.input, prompt: "cover", prompts: ["cover", "detail", "scene"], n: 3, scene: "product_set" };
 
+  it("stores the first linqu-image result once and uses its Agent URL for later images", async () => {
+    const provider = setProvider();
+    const resolveImageReferenceUrl = vi.fn(async (url: string) => `https://agent.example${url}`);
+    const { deps } = fakeDeps(provider, { vendorModel: "linqu-image", resolveImageReferenceUrl });
+    const out = await runGenerationJob(deps, { ...job, input: setInput }, "image");
+
+    expect(resolveImageReferenceUrl).toHaveBeenCalledOnce();
+    expect(resolveImageReferenceUrl).toHaveBeenCalledWith(out.assets[0].url);
+    for (const [request] of provider.create.mock.calls.slice(1)) {
+      expect(request.media).toEqual([{ type: "reference_image", url: `https://agent.example${out.assets[0].url}` }]);
+    }
+    expect(deps.urlToBytes).toHaveBeenCalledTimes(3);
+    expect(deps.storage.put).toHaveBeenCalledTimes(3);
+    expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 0, outputCount: 3 } }));
+  });
+
   it("without a user reference, sends the first image as the reference for the rest of the set", async () => {
     const provider = setProvider();
     const first = await png(2400, 1600);
@@ -911,6 +950,19 @@ describe("image set redo", () => {
   const redoJob = (input: Record<string, unknown>) => ({
     id: "r1", userId: "u1",
     input: { redoMessageId: "m1", conversationId: "c1", size: "1024x1024", quality: "auto", ...input },
+  });
+
+  it("uses the stored reference URL for a linqu-image redo", async () => {
+    const provider = setProvider();
+    const readOwnOutput = vi.fn();
+    const resolved = `https://agent.example${a.url}`;
+    const resolveImageReferenceUrl = vi.fn(async () => resolved);
+    const metadata = { assets: [a, b], redo: { status: "running", indexes: [1], taskId: "r1" } };
+    const { deps } = redoDeps(provider, metadata, { vendorModel: "linqu-image", resolveImageReferenceUrl, readOwnOutput });
+    await runImageSetRedo(deps, redoJob({ indexes: [1], prompts: ["other angle"], setReference: a.url }));
+    expect(resolveImageReferenceUrl).toHaveBeenCalledWith(a.url);
+    expect(readOwnOutput).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ media: [{ type: "reference_image", url: resolved }] }));
   });
 
   it("makes the image again with its original prompt and puts it back in place, using another image of the set", async () => {

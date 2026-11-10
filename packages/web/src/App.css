@@ -1053,6 +1053,11 @@ html, body, #root {
   gap: 8px;
 }
 .image-model-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   min-height: 52px;
   padding: 10px 12px;
   border: 1.5px solid transparent;
@@ -1064,6 +1069,8 @@ html, body, #root {
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
+.image-model-card--featured { grid-column: 1 / -1; }
+.image-model-card small { color: var(--text-secondary); font-size: 11px; font-weight: 400; line-height: 1.5; }
 .image-model-card:hover {
   color: var(--text);
 }
@@ -1348,119 +1355,144 @@ html, body, #root {
   color: var(--error);
 }
 
-/* Image composer: the image-type console dock seated on the composer's top edge
-   (自由创作 / 产品套图 / 主副图 / 白底图). Same pairing as the points card and its 充值 button:
-   a pale accent-tinted panel with a deep accent pill. Everything derives from theme variables. */
-.scene-dock {
-  --scene-glow: color-mix(in srgb, var(--accent) 34%, transparent);
-  position: relative;
-  z-index: 1;
-  width: fit-content;
-  max-width: calc(100% - 32px);
-  margin: 0 auto -1px;
-  padding: 9px 12px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-bottom: 0;
-  border-radius: 26px 26px 0 0;
-  background:
-    radial-gradient(90% 120% at 50% 130%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
-    color-mix(in srgb, var(--accent) 9%, var(--bg-card));
-  box-shadow: 0 -8px 26px -16px var(--scene-glow);
-  overflow: hidden;
-}
-/* Console texture: a faint accent grid with a few twinkling points. */
-.scene-dock-stars {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    radial-gradient(1.5px 1.5px at 14% 72%, color-mix(in srgb, var(--accent) 70%, transparent) 50%, transparent 51%),
-    radial-gradient(1.5px 1.5px at 38% 20%, color-mix(in srgb, var(--accent) 60%, transparent) 50%, transparent 51%),
-    radial-gradient(1.5px 1.5px at 66% 80%, color-mix(in srgb, var(--accent) 70%, transparent) 50%, transparent 51%),
-    radial-gradient(1.5px 1.5px at 90% 26%, color-mix(in srgb, var(--accent) 60%, transparent) 50%, transparent 51%),
-    linear-gradient(color-mix(in srgb, var(--accent) 7%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent) 1px, transparent 1px);
-  background-size: auto, auto, auto, auto, 14px 14px, 14px 14px;
-  mask-image: linear-gradient(180deg, transparent, black 45%);
-  animation: scene-dock-twinkle 4.5s ease-in-out infinite alternate;
-}
-.scene-dock-track {
-  position: relative;
-  display: flex;
-  gap: 4px;
-  /* Room for the active tab's glow: the scroll container would clip it to a box. */
-  padding: 10px 14px;
-  margin: -10px -14px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.scene-dock-track::-webkit-scrollbar { display: none; }
-.scene-dock-tab {
-  position: relative;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-  transition: color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.14s;
-}
-.scene-dock-tab:hover:not(:disabled):not(.active) {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-/* The 充值 button's recipe, with a stronger glow. */
-.scene-dock-tab.active {
-  color: var(--text-on-accent);
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 76%, var(--text)));
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  box-shadow: 0 4px 14px var(--scene-glow), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 28%, transparent);
-}
-.scene-dock-tab:active:not(:disabled) { transform: translateY(1px); }
-.scene-dock-tab:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
-.scene-dock-tab:disabled { cursor: default; }
-.scene-dock-tab:disabled:not(.active) { opacity: 0.55; }
-.scene-dock-spark {
-  font-size: 12px;
-  animation: scene-dock-pulse 1.8s ease-in-out infinite;
-}
-/* The composer below gets an accent horizon where the dock meets it. */
+/* Image studio: one framed workspace, with a visual mode selector and a clear output action. */
 .input-box--scene {
   position: relative;
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-input));
-  box-shadow: 0 16px 40px -30px color-mix(in srgb, var(--accent) 60%, transparent);
+  padding: 0 22px 16px;
+  gap: 14px;
+  border-radius: 24px;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  box-shadow: var(--shadow-md), 0 24px 60px -36px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .input-box--scene::before {
   content: "";
   position: absolute;
   top: -1px;
-  left: 8%;
-  right: 8%;
+  left: 24px;
+  right: 24px;
   height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent) 35%, color-mix(in srgb, var(--accent) 45%, var(--bg-card)) 50%,
-    var(--accent) 65%, transparent);
-  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), color-mix(in srgb, var(--gold) 65%, transparent));
   pointer-events: none;
 }
-@keyframes scene-dock-twinkle { from { opacity: 0.55; } to { opacity: 1; } }
-@keyframes scene-dock-pulse { 0%, 100% { opacity: 0.65; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.12); } }
+.image-studio-header {
+  margin: 0 -22px;
+  padding: 22px 22px 16px;
+  border-radius: 23px 23px 0 0;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(ellipse at 90% 0%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 55%),
+    linear-gradient(120deg, color-mix(in srgb, var(--accent) 8%, var(--bg-card)), var(--bg-card));
+}
+.image-studio-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.image-studio-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 10px; font-weight: 750; letter-spacing: 2px; color: var(--accent); }
+.image-studio-eyebrow > span { font-size: 16px; }
+.image-studio-intro h2 { margin: 7px 0; font-size: clamp(20px, 2.4vw, 27px); letter-spacing: -.04em; line-height: 1.3; color: var(--text); }
+.image-studio-intro p { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.image-studio-art { position: relative; flex: 0 0 122px; height: 100px; margin-right: 12px; }
+.image-studio-art > * { position: absolute; width: 70px; height: 88px; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-sm); }
+.image-studio-art > span:first-child {
+  top: 4px; left: 0; transform: rotate(-16deg);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 30%, var(--bg-card)), var(--bg-card));
+}
+.image-studio-art > span:nth-child(2) {
+  top: 7px; right: 0; transform: rotate(16deg);
+  background: linear-gradient(30deg, color-mix(in srgb, var(--gold) 30%, var(--bg-card)), var(--bg-card));
+}
+.image-studio-art > svg { left: 28px; top: 0; transform: rotate(-2deg); background: var(--bg-card); }
+.image-studio-art circle { fill: var(--gold); }
+.image-studio-art path:first-of-type { fill: color-mix(in srgb, var(--accent) 22%, var(--bg-card)); stroke: var(--accent); }
+.image-studio-art path:last-of-type { stroke: var(--text-muted); stroke-width: 2px; }
+.scene-dock { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.scene-dock-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-card) 65%, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s, background .18s, transform .18s, box-shadow .18s;
+}
+.scene-dock-tab > svg { width: 22px; height: 22px; margin-bottom: 3px; color: var(--accent); }
+.scene-dock-tab strong { font-size: 13px; line-height: 1.3; }
+.scene-dock-tab small { font-size: 10px; line-height: 1.4; }
+.scene-dock-tab:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-sm); }
+.scene-dock-tab.active {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.scene-dock-tab.active svg { color: inherit; }
+.scene-dock-tab.active small { opacity: .8; }
+.scene-dock-tab.active::after { content: ""; position: absolute; top: 12px; right: 10px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.scene-dock-tab:disabled { cursor: default; opacity: .65; }
+.image-prompt-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.image-prompt-heading strong { color: var(--text); font-size: 12px; }
+.image-prompt-heading > span { color: var(--text-muted); font-size: 11px; }
+.input-box--scene textarea {
+  min-height: 86px;
+  padding: 4px 0;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.input-area--centered .input-box--scene textarea { min-height: 90px; }
+.image-prompt-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -4px; }
+.image-prompt-ideas > span { margin-right: 3px; color: var(--text-muted); font-size: 11px; }
+.image-prompt-ideas button {
+  display: inline-flex; align-items: center; gap: 10px; padding: 6px 9px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--bg-tool);
+  font: inherit; font-size: 11px; color: var(--text-secondary); cursor: pointer;
+}
+.image-prompt-ideas button > span { color: var(--accent); }
+.image-prompt-ideas button:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-active); }
+.input-box--scene .input-toolbar { flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--border); }
+.input-box--scene .input-toolbar-left { flex-wrap: wrap; }
+.input-box--scene .input-toolbar-right { margin-left: auto; flex-wrap: wrap; max-width: 100%; }
+.input-box--scene :is(.btn-reference, .media-trigger) { border-radius: 9px; box-shadow: none; font-size: 12px; }
+.input-box--scene .btn-reference { padding: 0 10px; }
+.input-box--scene .media-trigger { height: auto; min-height: 38px; padding: 6px 10px; flex-wrap: wrap; }
+.input-box--scene .media-trigger-label { display: none; }
+.image-settings-summary { color: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.input-box--scene :is(.btn-send, .btn-stop) {
+  width: auto; min-width: 112px; height: 40px; padding: 0 16px; gap: 7px;
+  border-radius: 10px; font: inherit; font-size: 13px; font-weight: 650;
+}
+.input-box--scene .btn-send:not(:disabled) { box-shadow: 0 5px 14px -5px color-mix(in srgb, var(--accent) 50%, transparent); }
+.input-box--scene .btn-send:disabled { background: var(--bg-active); color: var(--text-muted); }
+.input-box--scene :is(.btn-send, .btn-stop) svg { width: 17px; height: 17px; }
+.input-box--scene :is(button:focus-visible, textarea:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* Keep the ongoing conversation's composer compact; the intro is for an empty canvas. */
+.input-area:not(.input-area--centered) .image-studio-intro { display: none; }
+.input-area:not(.input-area--centered) .scene-dock-tab { padding: 8px; gap: 4px; }
+.input-area:not(.input-area--centered) .scene-dock-tab small { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .scene-dock-stars, .scene-dock-spark { animation: none; }
+  .scene-dock-tab { transition: none; }
 }
 @media (max-width: 620px) {
-  .scene-dock { max-width: 100%; padding: 7px 6px 6px; border-radius: 22px 22px 0 0; }
-  .scene-dock-track { gap: 2px; padding: 8px 6px; margin: -8px -6px; }
-  .scene-dock-tab { padding: 7px 10px; gap: 4px; font-size: 13px; letter-spacing: 0; }
-  .scene-dock-spark { font-size: 11px; }
+  .input-box--scene { padding: 0 14px 14px; gap: 12px; }
+  .image-studio-header { margin: 0 -14px; padding: 18px 14px 12px; }
+  .image-studio-intro { margin-bottom: 14px; }
+  .image-studio-art { flex-basis: 86px; transform: scale(.8); transform-origin: right center; margin-right: 0; }
+  .image-studio-art > svg { left: 10px; }
+  .scene-dock { display: flex; overflow-x: auto; padding: 3px 2px 7px; scrollbar-width: thin; }
+  .scene-dock-tab { flex: 0 0 108px; }
+  .image-prompt-heading { flex-wrap: wrap; gap: 4px; }
+  .input-box--scene .input-toolbar { gap: 10px; }
+  .input-box--scene .input-toolbar-right { width: 100%; justify-content: space-between; }
+  .input-box--scene :is(.btn-send, .btn-stop) { min-width: 96px; padding: 0 10px; }
+  .image-settings-summary { font-size: 10px; }
+}
+@media (max-width: 380px) {
+  .image-studio-art { display: none; }
+  .input-box--scene .media-trigger { padding: 6px; }
 }
 .image-scene-hint { padding: 0 2px; }
 /* 套图的计费说明：紧跟用途说明，字号相同 */

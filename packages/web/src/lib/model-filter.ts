@@ -31,10 +31,23 @@ export function isGptImage2(id: string | null | undefined): boolean {
 const IMAGE_DEFAULT_LABEL = "默认";
 const IMAGE_FLAGSHIP_LABEL = "旗舰";
 
+export function isLingquImage(id: string | null | undefined): boolean {
+  // The live gateway publishes `linqu-image`; also accept the original product spelling.
+  return ["linqu-image", "lingqu-image"].includes((id ?? "").trim().toLowerCase());
+}
+
+export function imageModelDescription(id: string): string | undefined {
+  if (isLingquImage(id)) return "复刻爆款，模特出镜无限制。";
+  if (isGptImage25Sunburst(id)) return "追求更高品质的细节。";
+  if (isGptImage25Flare(id) || isGptImage2(id)) return "快速高质量出图";
+  return undefined;
+}
+
 /**
  * Image-generation picker: never show vendor ids.
  * Prefer flare (默认) + sunburst (旗舰); if both are absent, gpt-image-2 as 默认;
- * if none of the three exist, return empty (UI shows 暂无模型).
+ * Also expose linqu-image / lingqu-image as 电商爆款, after standard models so the initial selection stays 默认.
+ * The settings panel places 电商爆款 visually above the standard pair.
  */
 export function visibleImageModels<T extends { id: string }>(models: T[]): Array<T & { label: string }> {
   const labeled = (model: T, label: string): T & { label: string } => ({ ...model, label });
@@ -43,9 +56,13 @@ export function visibleImageModels<T extends { id: string }>(models: T[]): Array
   const out: Array<T & { label: string }> = [];
   if (flare) out.push(labeled(flare, IMAGE_DEFAULT_LABEL));
   if (sunburst) out.push(labeled(sunburst, IMAGE_FLAGSHIP_LABEL));
-  if (out.length > 0) return out;
-  const gpt2 = models.find((model) => isGptImage2(model.id));
-  return gpt2 ? [labeled(gpt2, IMAGE_DEFAULT_LABEL)] : [];
+  if (out.length === 0) {
+    const gpt2 = models.find((model) => isGptImage2(model.id));
+    if (gpt2) out.push(labeled(gpt2, IMAGE_DEFAULT_LABEL));
+  }
+  const lingqu = models.find((model) => isLingquImage(model.id));
+  if (lingqu) out.push(labeled(lingqu, "电商爆款"));
+  return out;
 }
 
 /** Seedance (and only Seedance) auto-adapts duration/ratio from a reference video. */

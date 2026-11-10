@@ -14,7 +14,7 @@ export function groupForKind(kind: string | undefined): ModelGroup {
 }
 
 /** 只填补还未选择(null)的槽位:取各组接口返回的第一个模型;已有选择保持不变。
- * 图像组只认输入框展示的 flare / sunburst（或 gpt-image-2 兜底），避免选中被隐藏的目录项。 */
+ * 图像组只认输入框展示的 flare / sunburst（或 gpt-image-2 兜底）和 linqu-image / lingqu-image，优先选「默认」。 */
 export function fillModelDefaults(
   prev: SelectedModels,
   catalog: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }

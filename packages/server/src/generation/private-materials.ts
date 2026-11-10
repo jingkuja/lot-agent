@@ -25,6 +25,11 @@ interface GeneratedLookup {
   getGeneratedByStorageKey(key: string): Promise<Pick<PrivateMaterialAsset, "user_id" | "storage_key" | "is_private"> | null | undefined>;
 }
 
+interface ImageReferenceLookup {
+  getUploadByStorageKey(key: string): Promise<(PrivateMaterialAsset & { mime: string }) | null | undefined>;
+  getGeneratedByStorageKey(key: string): Promise<{ user_id: string; mime: string; is_private?: boolean } | null | undefined>;
+}
+
 const TOKEN_PARAMETER = "material_token";
 const TOKEN_TTL_MS = 10 * 60_000;
 const UPLOAD_PATH = "/static/uploads/";
@@ -252,4 +257,35 @@ export async function resolveMaterialReference(
   // Preserve the worker's externally reachable form even when legacy rows
   // were stored with a host-relative URL before PUBLIC_BASE_URL was configured.
   return resolved.startsWith("/static/") ? `${publicBase(options)}${resolved}` : resolved;
+}
+
+/** URL-only image models fetch references themselves. Forward only owned files on the configured Agent origin. */
+export async function resolveImageReferenceUrl(
+  db: ImageReferenceLookup,
+  userId: string,
+  url: string,
+  options: PrivateMaterialOptions = {},
+): Promise<string> {
+  const base = publicBase(options);
+  if (!base) throw new GenerationError("CONFIG_MISSING", "图片参考图需要配置模型可访问的 PUBLIC_BASE_URL。");
+  const local = url.startsWith(`${base}/`) ? url.slice(base.length) : url;
+  const match = /^(\/static\/(?:uploads|assets)\/)([^/?#]+)(?:\?[^#]*)?$/.exec(local);
+  if (!match) throw new Error("参考图必须使用 Agent 生成的图片链接。");
+  let key: string;
+  try { key = decodeURIComponent(match[2]); } catch { throw new Error("素材地址无效。"); }
+  if (!safeKey(key)) throw new Error("素材地址无效。");
+  const canonical = `${base}${match[1]}${encodeURIComponent(key)}`;
+  if (match[1] === UPLOAD_PATH) {
+    const asset = await db.getUploadByStorageKey(key);
+    if (asset?.type !== "upload" || asset.storage_key !== key || asset.user_id !== userId || !asset.mime.startsWith("image/")) {
+      throw new Error("素材不存在。");
+    }
+    return signPrivateMaterial({ ...asset, url: canonical }, options);
+  }
+  const asset = await db.getGeneratedByStorageKey(key);
+  if (!asset || asset.user_id !== userId || !asset.mime.startsWith("image/")) throw new Error("素材不存在。");
+  if (!asset.is_private) return canonical;
+  const signed = signPrivateOutput(userId, canonical, options);
+  if (signed === canonical) throw new Error("私有素材访问服务未配置。");
+  return signed;
 }
