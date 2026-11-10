@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useI18n } from "../i18n/index.js";
 import { IMAGE_SCENES, type ImageScene } from "../lib/image-settings.js";
 
@@ -33,29 +34,35 @@ const SCENE_DETAILS: Record<ImageScene, { caption: string; icon: string; ideas: 
   },
 };
 
-export function ImageComposerHeader({ scene, onChange, disabled }: {
+function SceneIcon({ scene }: { scene: ImageScene }) {
+  return <span className="scene-dock-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+      <path d={SCENE_DETAILS[scene].icon} />
+    </svg>
+  </span>;
+}
+
+function FoldChevron({ up }: { up: boolean }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={up ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
+  </svg>;
+}
+
+/** Mode rail of the image workbench. `onFold` adds the fold button, shown where the workbench sits under results. */
+export function ImageComposerHeader({ scene, onChange, disabled, onFold }: {
   scene: ImageScene;
   onChange: (scene: ImageScene) => void;
   disabled: boolean;
+  onFold?: () => void;
 }) {
   const { t } = useI18n();
+  const dock = useRef<HTMLDivElement>(null);
+  // On narrow screens the rail scrolls sideways; keep the chosen type in view.
+  useEffect(() => {
+    dock.current?.querySelector(".scene-dock-tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [scene]);
   return <div className="image-studio-header">
-    <div className="image-studio-intro">
-      <div>
-        <span className="image-studio-eyebrow"><span aria-hidden>✦</span> IMAGE STUDIO</span>
-        <h2>{t("好创意，值得好画面")}</h2>
-        <p>{t("从一句灵感，到一整套产品视觉")}</p>
-      </div>
-      <div className="image-studio-art" aria-hidden="true">
-        <span /><span />
-        <svg viewBox="0 0 100 120" fill="none">
-          <circle cx="70" cy="32" r="12" />
-          <path d="m8 92 28-38 23 27 13-17 20 28Z" />
-          <path d="M12 106h45M12 111h25" />
-        </svg>
-      </div>
-    </div>
-    <div className="scene-dock" role="group" aria-label={t("创作类型")}>
+    <div className="scene-dock" role="group" aria-label={t("创作类型")} ref={dock}>
       {IMAGE_SCENES.map((item) => <button
         key={item.value}
         type="button"
@@ -65,14 +72,27 @@ export function ImageComposerHeader({ scene, onChange, disabled }: {
         onClick={() => onChange(item.value)}
         disabled={disabled}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-          <path d={SCENE_DETAILS[item.value].icon} />
-        </svg>
+        <SceneIcon scene={item.value} />
         <strong>{t(item.label)}</strong>
         <small>{t(SCENE_DETAILS[item.value].caption)}</small>
       </button>)}
     </div>
+    {onFold && <button type="button" className="image-studio-fold" onClick={onFold} aria-expanded="true" aria-label={t("收起工作台")} title={t("收起工作台")}>
+      <FoldChevron up={false} />
+    </button>}
   </div>;
+}
+
+/** The folded workbench's handle: shows the current image type and opens the workbench. */
+export function ImageComposerSlate({ scene, onUnfold }: { scene: ImageScene; onUnfold: () => void }) {
+  const { t } = useI18n();
+  const label = IMAGE_SCENES.find((item) => item.value === scene)?.label;
+  return <button type="button" className="image-studio-slate" onClick={onUnfold} aria-expanded="false" title={t("展开工作台")}
+    aria-label={`${t(label)} · ${t("展开工作台")}`}>
+    <SceneIcon scene={scene} />
+    <strong>{t(label)}</strong>
+    <FoldChevron up />
+  </button>;
 }
 
 export function ImagePromptIdeas({ scene, onPick }: { scene: ImageScene; onPick: (prompt: string) => void }) {
@@ -80,7 +100,7 @@ export function ImagePromptIdeas({ scene, onPick }: { scene: ImageScene; onPick:
   return <div className="image-prompt-ideas">
     <span>{t("试试灵感")}</span>
     {SCENE_DETAILS[scene].ideas.map((idea) => <button type="button" key={idea.label} onClick={() => onPick(t(idea.prompt))}>
-      {t(idea.label)}<span aria-hidden="true">↗</span>
+      {t(idea.label)}
     </button>)}
   </div>;
 }

@@ -38,7 +38,7 @@ import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
 import { ProductPickerDialog } from "./ProductPickerDialog.js";
 import { productPromptText, withProductText } from "../lib/product-reference.js";
-import { ImageComposerHeader, ImagePromptIdeas } from "./ImageComposer.js";
+import { ImageComposerHeader, ImageComposerSlate, ImagePromptIdeas } from "./ImageComposer.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -89,6 +89,8 @@ interface InputBoxProps {
   imageCount?: boolean;
   /** 图片模式顶部的电商场景标签（自由创作 / 产品套图 / 主副图 / 白底图）；只在图片 Agent 会话中打开。 */
   imageScenes?: boolean;
+  /** 图片工作台位于生成结果下方时打开：初始收成一行，发送和生成结束后自动收起，点击提示词或左侧类型展开。 */
+  imageCollapsible?: boolean;
 }
 
 /** The composer remounts when a new chat gets its first message (and on conversation switches);
@@ -133,6 +135,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   videoDurations,
   imageCount = true,
   imageScenes = false,
+  imageCollapsible = false,
 }: InputBoxProps, ref) {
   const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
@@ -140,6 +143,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const setImageScene = (scene: ImageScene) => { lastImageScene = scene; setImageSceneState(scene); };
   const sceneTabs = mode === "image" && imageScenes;
   const activeScene = sceneTabs ? IMAGE_SCENES.find((scene) => scene.value === imageScene) : undefined;
+  const [folded, setFolded] = useState(true);
+  const collapsed = sceneTabs && imageCollapsible && folded;
   const promptValue = value !== undefined ? value : internalValue;
   const setPromptValue = onChange ?? setInternalValue;
   const pickerModels = useMemo(
@@ -196,6 +201,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const hasDraft = !!(promptValue.trim() || files.length || referenceVideoFiles.length || referenceAudioFiles.length || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length || oldContractFile || newContractFile);
   const updateDraftRef = useRef(!embedded && hasDraft);
   updateDraftRef.current = !embedded && hasDraft;
+  // A generation starting or ending hands the space back to the results, unless a draft is being written.
+  const hasDraftRef = useRef(hasDraft);
+  hasDraftRef.current = hasDraft;
+  useEffect(() => { if (!hasDraftRef.current) setFolded(true); }, [disabled]);
   useEffect(() => {
     const beforeUpdate = (event: Event) => { if (updateDraftRef.current) event.preventDefault(); };
     window.addEventListener("lot:before-update", beforeUpdate);
@@ -285,6 +294,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [productNotice, setProductNotice] = useState("");
   const [checkingMedia, setCheckingMedia] = useState(false);
   const checkingMediaRef = useRef(false);
+  // A problem with the request is explained inside the workbench, so open it.
+  useEffect(() => { if (attachmentError || noModelNotice) setFolded(false); }, [attachmentError, noModelNotice]);
   const addReferenceMedia = useCallback(async (picked: File[], kind: "video" | "audio") => {
     if (!picked.length) return;
     if (checkingMediaRef.current) {
@@ -383,6 +394,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (!attachment || attachment.id === consumedAttachment.current) return;
     consumedAttachment.current = attachment.id;
     const file = attachment.file; setAttachmentError("");
+    setFolded(false);
     if (mediaMode && !/^(image|audio|video)\//.test(file.type) || mode === "image" && !file.type.startsWith("image/")) setAttachmentError("当前助手不支持此附件类型，请切换到通用助手后选择。");
     else if (videoMode && file.type.startsWith("audio/")) {
       void addReferenceMedia([file], "audio");
@@ -541,12 +553,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     setNewContractFile(null);
     revokeAll();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+    setFolded(true);
+    if (sceneTabs && imageCollapsible) textareaRef.current?.blur();
   }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, currentImageSettings, setPromptValue,
-    activeScene, files.length]);
+    activeScene, files.length, sceneTabs, imageCollapsible]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (embedded) return;
+      if (e.key === "Escape" && sceneTabs && imageCollapsible && !e.nativeEvent.isComposing && !compositionActiveRef.current) {
+        setFolded(true);
+        textareaRef.current?.blur();
+        return;
+      }
       if (shouldSubmitComposer({
         key: e.key,
         shiftKey: e.shiftKey,
@@ -557,7 +576,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         handleSend();
       }
     },
-    [handleSend, embedded]
+    [handleSend, embedded, sceneTabs, imageCollapsible]
   );
 
   const handleInput = useCallback(() => {
@@ -568,13 +587,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     }
   }, []);
 
-  useEffect(() => { if (sceneTabs) handleInput(); }, [sceneTabs, promptValue, handleInput]);
+  useEffect(() => { if (sceneTabs) handleInput(); }, [sceneTabs, promptValue, handleInput, collapsed]);
 
   return (
     <>
-    <div className={`input-box${embedded ? " input-box--embedded" : ""}${sceneTabs ? " input-box--scene" : ""}`}>
-      {sceneTabs && <>
-        <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={disabled} />
+    <div className={[
+      "input-box", embedded && "input-box--embedded", sceneTabs && "input-box--scene", sceneTabs && disabled && "input-box--busy",
+      collapsed && "input-box--collapsed", sceneTabs && imageCollapsible && !collapsed && "input-box--unfolded",
+    ].filter(Boolean).join(" ")}>
+      {collapsed && <ImageComposerSlate scene={imageScene} onUnfold={() => { setFolded(false); if (!disabled) textareaRef.current?.focus(); }} />}
+      {sceneTabs && !collapsed && <>
+        <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={disabled}
+          onFold={imageCollapsible ? () => setFolded(true) : undefined} />
         <div className="image-prompt-heading">
           <strong>{t("描述你的画面")}</strong>
           <span>{t("主体、场景、风格，越具体越出彩")}</span>
@@ -694,10 +718,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             </div>
           )}
           {files.map((f, i) => (
-            <div className="attachment-chip" key={i}>
+            <div className={`attachment-chip${sceneTabs && urlsRef.current.get(f) ? " attachment-chip--tile" : ""}`} key={i} title={sceneTabs ? f.name : undefined}>
               {mediaMode && (
-                <span className="attachment-slot-badge badge-image-reference">
-                  {seedance25Video ? t("参考图 {0}", [seedanceAssetMention("Image", i)]) : mode === "image" && files.length > 1 ? t("参考图{0}", [i + 1]) : t("参考图")}
+                <span className="attachment-slot-badge badge-image-reference" aria-label={sceneTabs ? t("参考图{0}", [i + 1]) : undefined}>
+                  {seedance25Video ? t("参考图 {0}", [seedanceAssetMention("Image", i)])
+                    : sceneTabs ? i + 1 : mode === "image" && files.length > 1 ? t("参考图{0}", [i + 1]) : t("参考图")}
                 </span>
               )}
               {pptMode && <span className="attachment-slot-badge badge-content">{t("内容")}</span>}
@@ -727,8 +752,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         onCompositionStart={() => { compositionActiveRef.current = true; }}
         onCompositionEnd={() => { compositionActiveRef.current = false; }}
         onInput={handleInput}
+        onFocus={() => { if (collapsed) setFolded(false); }}
         placeholder={
           disabled && !embedded ? t(sceneTabs ? "正在生成画面…" : "Agent 正在思考…")
+            : collapsed ? t("描述下一张画面…")
             : t(activeScene?.placeholder ?? (sceneTabs ? "想创作什么？描述画面，或从下方选一个灵感开始…" : placeholder))
               ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
@@ -737,6 +764,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         rows={1}
         autoFocus={autoFocus}
       />
+      {collapsed && files.length > 0 && <span className="image-studio-slate-refs">{t("参考图 {0}", [files.length])}</span>}
       {sceneTabs && !promptValue.trim() && !disabled && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
         setPromptValue(prompt);
         textareaRef.current?.focus();

@@ -212,7 +212,7 @@ try {
   await page.getByTitle('新建对话', { exact: true }).click();
   await input.fill('测试图片任务');
   const submitted = page.waitForResponse((response) => response.url().endsWith('/new-chat/generations'));
-  await page.getByTitle('发送', { exact: true }).click();
+  await page.getByTitle('生成图片', { exact: true }).click();
   await submitted;
   assert.equal(writes.find((request) => request.path === '/api/conversations').body.agentId, 'image');
   assert.equal(writes.find((request) => request.path.endsWith('/generations')).body.mediaType, 'image');
