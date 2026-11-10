@@ -6,11 +6,10 @@
 .deployment-pending { background: var(--overlay-raise); color: var(--text-muted); }
 .deployment-deployed { background: color-mix(in srgb, var(--success) 12%, var(--bg-card)); color: var(--success); }
 
-:root,
-.workspace-sidebar :is(.account-dialog-overlay, .agent-center-overlay, .de-modal-backdrop, dialog) {
+:root {
   /* Light theme: 青绿山水. Mist-white ground, 石绿 jade accent, 石青 azurite as its
-     partner in gradients, 泥金 gold for points and value. The sidebar is always the
-     ink zone (see the dark block below). */
+     partner in gradients, 泥金 gold for points and value. The sidebar shares the
+     chat area's ground and theme palette. */
   --bg: #eef3f1;
   --bg-sidebar: #f4f7f6;
   --bg-card: #ffffff;
@@ -82,7 +81,7 @@
   --logo-grad: linear-gradient(180deg, var(--brand-grad-from), var(--brand-grad-to));
   --logo-glow: 0 0 40px color-mix(in srgb, var(--accent) 18%, transparent);
 
-  /* Ink zone: the sidebar and the login showcase, the same in both themes. */
+  /* Ink zone: the dark sidebar and the login showcase. */
   --ink: #0a2229;
   --ink-deep: #06161b;
 
@@ -125,18 +124,13 @@
   --neu-raise-sm: 0 1px 1px rgba(12,38,43,0.04);
   --neu-sink: none;
   --neu-pop: 0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent);
-  --zone-sidebar-bg:
-    radial-gradient(120% 46% at 0% 0%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
-    linear-gradient(180deg, var(--ink) 0%, var(--ink-deep) 100%);
+  --zone-sidebar-bg: var(--zone-chat-bg);
   --zone-chat-bg: #f7faf9;
 }
 
 [data-theme="dark"],
-.workspace-sidebar,
-.login-showcase,
-[data-theme="dark"] .workspace-sidebar :is(.account-dialog-overlay, .agent-center-overlay, .de-modal-backdrop, dialog) {
-  /* Dark theme: the same landscape at night. The sidebar uses these values in the
-     light theme too, so the ink zone looks the same everywhere. */
+.login-showcase {
+  /* Dark theme: the same landscape at night. The login showcase always uses this palette. */
   --bg: #071317;
   --bg-sidebar: #06161b;
   --bg-card: #10262c;
@@ -223,6 +217,9 @@
   --neu-raise-sm: 0 1px 1px rgba(0,0,0,0.22);
   --neu-sink: none;
   --neu-pop: 0 1px 2px color-mix(in srgb, var(--accent) 28%, transparent);
+  --zone-sidebar-bg:
+    radial-gradient(120% 46% at 0% 0%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--ink) 0%, var(--ink-deep) 100%);
   --zone-chat-bg: #0b1c21;
 }
 
