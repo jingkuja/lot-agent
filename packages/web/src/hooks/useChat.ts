@@ -1,3 +1,4 @@
+import { storedPosters, type PosterFields, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
@@ -17,6 +18,10 @@ import {
 // The message/generation view models live with the reducer; components keep
 // importing them from here.
 export type { DisplayMessage, GenerationView } from "./chat-reducer.js";
+
+function realTextOf(settings: unknown): boolean {
+  return !!settings && typeof settings === "object" && (settings as { realText?: unknown }).realText === true;
+}
 
 function sceneOf(settings: unknown): string | undefined {
   const scene = settings && typeof settings === "object" ? (settings as { scene?: unknown }).scene : undefined;
@@ -111,6 +116,7 @@ export function useChat(
                 error: downloadFailed ? (out?.error as string | undefined) : t.error,
                 ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing), missing: out.missing } : {}),
                 whiteChecks: whiteBackgroundChecks(out?.whiteChecks),
+                posters: storedPosters(out?.posters),
                 taskId,
               },
             });
@@ -187,6 +193,7 @@ export function useChat(
               composites: generationComposites(parsedMeta.composites),
               redo: generationRedo(parsedMeta.redo),
               whiteChecks: whiteBackgroundChecks(parsedMeta.whiteChecks),
+              posters: storedPosters(parsedMeta.posters),
             }
           : undefined;
       return {
@@ -564,6 +571,7 @@ export function useChat(
             model: modelId,
             // Settings stay whitelisted on the server; the scene travels on its own.
             scene: mediaType === "image" ? sceneOf(settings) : undefined,
+            ...(mediaType === "image" && realTextOf(settings) ? { realText: true } : {}),
           });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
@@ -708,6 +716,21 @@ export function useChat(
     }
   }, []);
 
+  // 真实字体: new wording for one typeset image. Rendered again on the server, free; resolves to an error text to show.
+  const editPoster = useCallback(async (
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate,
+  ): Promise<string | undefined> => {
+    const cid = cidRef.current;
+    if (!cid) return "改字失败，请稍后重试";
+    try {
+      const result = await api.editPoster(cid, messageId, { index, fields, template });
+      if (cidRef.current === cid) dispatch({ type: "generation_poster_edited", messageId, index, asset: result.asset, poster: result.poster });
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "改字失败，请稍后重试";
+    }
+  }, []);
+
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
   const composeGeneration = useCallback(async (messageId: string, layout: ComposeLayout, gap: boolean): Promise<string | undefined> => {
     const cid = cidRef.current;
@@ -759,6 +782,7 @@ export function useChat(
     generateMedia,
     redownloadGeneration,
     composeGeneration,
+    editPoster,
     redoGenerationImages,
     exportGeneration,
   };

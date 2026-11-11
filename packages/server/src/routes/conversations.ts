@@ -16,6 +16,10 @@ import {
   composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
 } from "../generation/compose.js";
 import { IMAGE_REDO_TASK } from "../generation/run-job.js";
+import { posterRenderKey, renderPoster } from "../generation/poster-render.js";
+import {
+  editPosterLayout, parsePosterLayout, planPoster, posterBackgroundPrompt, PosterPlanError, posterTemplateFor, type PosterLayout,
+} from "@lot-agent/core/poster";
 import { buildExportZip, parseExportPreset, safeExportName, type ExportSource } from "../generation/image-export.js";
 import {
   DEFAULT_MINIPROGRAM_CONFIG,
@@ -600,6 +604,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       model?: string;
       /** Image scene: 自由创作 by default; the e-commerce scenes are checked and rewritten first. */
       scene?: unknown;
+      /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 only. */
+      realText?: unknown;
     };
     try {
       body = await c.req.json();
@@ -613,6 +619,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     }
     const scene = mediaType === "image" ? parseImageScene(body.scene) : "free";
     if (!scene) return c.json({ error: "unknown image scene" }, 400);
+    const realText = mediaType === "image" && scene === "free" && body.realText === true;
     // The mini program and marketing studio create one conversation per paid video attempt. Use a
     // database lease (shared across server processes) plus its durable message
     // to replay retries, including a retry after enqueue returned no response.
@@ -726,6 +733,28 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         // Set scenes make one image per prompt; the white-background scene keeps the requested count.
         if (imageSceneUsesSet(scene)) settings = { ...settings, n: modelPrompts.length };
       }
+      // 真实字体: a text model extracts the wording and describes the picture; prices, rates and dates it did not copy
+      // from the request are emptied in code. Like a scene check, a failed plan sends no image request.
+      let poster: PosterLayout | undefined;
+      if (realText) {
+        try {
+          const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
+          const plan = await planPoster(
+            { prompt, referenceImages: media?.length ?? 0 },
+            (system, user) => service.imageSceneText(system, user, userId, conv.agent_id, signal)
+          );
+          const [width, height] = String(settings.size ?? "").split("x").map(Number);
+          // The picture leaves room for the template that will really be used on this canvas shape.
+          const template = width > 0 && height > 0 ? posterTemplateFor(plan.layout.template, width, height) : plan.layout.template;
+          poster = { ...plan.layout, template };
+          modelPrompts = [posterBackgroundPrompt(plan.background, template)];
+        } catch (error) {
+          console.warn("[image.poster] plan failed", error instanceof PosterPlanError
+            ? { errorType: "invalid_plan", reason: error.reason, replyLength: error.replyLength }
+            : { errorType: (error as Error)?.name });
+          return c.json({ error: "创作助手暂时无法整理这次的文字，未提交出图，请稍后重试或关闭「真实字体」", code: "IMAGE_SCENE_UNAVAILABLE" }, 503);
+        }
+      }
 
       // Persist user message.
       const userMessageId = randomUUID();
@@ -737,7 +766,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       // message before a follow-up status write could land.
       const assistantMessageId = randomUUID();
       const supportsProgress = service.generationSupportsProgress[mediaType];
-      const baseMeta = { kind: "generation", mediaType, prompt, settings, supportsProgress, ...(scene !== "free" ? { scene } : {}) };
+      const baseMeta = {
+        kind: "generation", mediaType, prompt, settings, supportsProgress, ...(scene !== "free" ? { scene } : {}), ...(poster ? { poster } : {}),
+      };
       await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
         metadata: { ...baseMeta, status: "generating" },
         model: resolvedModel ?? modelId,
@@ -759,6 +790,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           // Set scenes: one image per prompt, each its own model request. The card keeps showing the user's text.
           ...(modelPrompts.length > 1 ? { prompts: modelPrompts } : {}),
           ...(scene !== "free" ? { scene, displayPrompt: prompt } : {}),
+          ...(poster ? { poster, displayPrompt: prompt } : {}),
           conversationId,
           assistantMessageId,
           requireUserModelKey: agentExtension(conv.agent_id)?.ownerKeyOnly === true,
@@ -835,7 +867,11 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (!reopened) return c.json({ error: "Retry already in progress" }, 409);
 
     // The scene decides the role labels on the card, so it survives the retry.
-    const scene = typeof meta.scene === "string" && meta.scene ? { scene: meta.scene } : {};
+    const scene = {
+      ...(typeof meta.scene === "string" && meta.scene ? { scene: meta.scene } : {}),
+      // 真实字体: the planned wording goes with the retry, so the downloaded picture is still typeset.
+      ...(parsePosterLayout(meta.poster) ? { poster: meta.poster } : {}),
+    };
     // Identity fields spread LAST so nothing stored in settings can override them.
     const taskId = await service.jobQueue.enqueue(
       "generation.redownload",
@@ -906,6 +942,74 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "只有已完成的图片可以合成" }, 409);
     }
     return c.json({ composite });
+  });
+
+  // POST /:id/generations/:messageId/poster — 真实字体: change the wording (or template) of one typeset image and render
+  // it again on its stored text-free background. Local work only: no model request, nothing metered. The picture is
+  // stored under a key made from the background and the layout, so the same edit is rendered once.
+  app.post("/:id/generations/:messageId/poster", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as { index?: unknown; fields?: unknown; template?: unknown } | null;
+    const index = body?.index;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !body?.fields || typeof body.fields !== "object") {
+      return c.json({ error: "index and fields are required" }, 400);
+    }
+    if (!deps.assets) return c.json({ error: "改字暂不可用" }, 503);
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const stored = parsePosterLayout(Array.isArray(meta.posters) ? meta.posters[index] : undefined);
+    const backgroundUrl = stored?.background?.url;
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || !stored || !backgroundUrl) {
+      return c.json({ error: "这张图不能改字" }, 409);
+    }
+    // The background must be this user's own stored output; the URL in the message is never fetched.
+    const backgroundKey = outputStorageKey(backgroundUrl);
+    const owned = backgroundKey ? await service.db.getGeneratedByStorageKey(backgroundKey) : null;
+    if (!backgroundKey || !owned || owned.user_id !== userId || !await deps.assets.exists(backgroundKey)) {
+      return c.json({ error: "背景图已不存在，无法改字" }, 409);
+    }
+    const layout = editPosterLayout(stored, { fields: body.fields, template: body.template });
+    const key = `poster-${posterRenderKey(backgroundKey, layout)}.png`;
+    const existing = await service.db.getGeneratedByStorageKey(key);
+    if (existing && existing.user_id !== userId) return c.json({ error: "改字失败，请稍后重试" }, 500);
+    let asset: { url: string; mime: string };
+    let overflow = false;
+    try {
+      const rendered = await renderPoster(await deps.assets.get(backgroundKey), layout);
+      overflow = rendered.overflow;
+      if (existing && await deps.assets.exists(key)) {
+        asset = { url: existing.url, mime: rendered.mime };
+      } else {
+        const { url } = await deps.assets.put({ key, body: rendered.body, contentType: rendered.mime });
+        if (!existing) {
+          await service.db.createAsset({
+            id: randomUUID(), taskId: typeof meta.taskId === "string" ? meta.taskId : null, userId, type: "image", storageKey: key, url,
+            mime: rendered.mime, sizeBytes: rendered.body.byteLength, width: rendered.width, height: rendered.height,
+          });
+        }
+        asset = { url, mime: rendered.mime };
+      }
+    } catch (error) {
+      console.warn("[image.poster] render failed", { messageId, errorType: (error as Error)?.name });
+      return c.json({ error: "改字失败，请稍后重试" }, 500);
+    }
+    const poster: PosterLayout = overflow ? { ...layout, overflow: true } : layout;
+    // Row lock: the edit depends on what is on the message now. Composites were joined from the old picture.
+    const saved = await service.db.updateGenerationMetadata(messageId, { conversationId, userId }, (current) => {
+      const assets = Array.isArray(current.assets) ? [...current.assets] : [];
+      const posters = Array.isArray(current.posters) ? [...current.posters] : [];
+      const same = (posters[index] as { background?: { url?: unknown } } | undefined)?.background?.url === backgroundUrl;
+      if (current.status !== "completed" || index >= assets.length || !same) return null;
+      assets[index] = asset;
+      posters[index] = poster;
+      const { composites: _composites, ...rest } = current;
+      return { ...rest, assets, posters };
+    });
+    if (!saved) return c.json({ error: "这张图已变化，请刷新后再改字" }, 409);
+    return c.json({ index, asset, poster });
   });
 
   // POST /:id/generations/:messageId/export — 打包下载: this generation's images and composites in one zip, as stored

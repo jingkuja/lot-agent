@@ -32,6 +32,10 @@
     "./digital-presenter": {
       "types": "./dist/digital-presenter/index.d.ts",
       "import": "./dist/digital-presenter/index.js"
+    },
+    "./poster": {
+      "types": "./dist/poster/index.d.ts",
+      "import": "./dist/poster/index.js"
     }
   },
   "scripts": {

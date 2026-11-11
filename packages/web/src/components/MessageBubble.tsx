@@ -1,3 +1,4 @@
+import type { PosterFields, PosterTemplate } from "@lot-agent/core/poster";
 import { RunRecoveryCard } from "./RunRecoveryCard.js";
 import { runStatusLabels } from "../lib/run-status.js";
 import { useI18n } from "../i18n/index.js";
@@ -47,6 +48,7 @@ interface MessageBubbleProps {
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
+  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
 }
 
 export function MessageBubble({
@@ -62,6 +64,7 @@ export function MessageBubble({
   onComposeGeneration,
   onRedoGeneration,
   onExportGeneration,
+  onEditPoster,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -76,6 +79,7 @@ export function MessageBubble({
             onCompose={onComposeGeneration}
             onRedo={onRedoGeneration}
             onExport={onExportGeneration}
+            onEditPoster={onEditPoster}
           />
         </div>
       </div>

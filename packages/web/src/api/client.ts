@@ -1,4 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
+import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
 import type { ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, RedoRequest } from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
@@ -571,6 +572,8 @@ export const api = {
       model?: string;
       /** Image scene; omitted for 自由创作. */
       scene?: string;
+      /** 真实字体: typeset the wording on a text-free picture. */
+      realText?: boolean;
     }
   ) =>
     request<{
@@ -626,6 +629,13 @@ export const api = {
   redoGeneration: (conversationId: string, messageId: string, body: RedoRequest) =>
     request<{ taskId: string; redo: GenerationRedo }>(
       `/conversations/${conversationId}/generations/${messageId}/redo`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+
+  /** 真实字体: change one typeset image's wording or template; rendered again on the server, free. */
+  editPoster: (conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate }) =>
+    request<{ index: number; asset: { url: string; mime: string }; poster: PosterLayout }>(
+      `/conversations/${conversationId}/generations/${messageId}/poster`,
       { method: "POST", body: JSON.stringify(body) }
     ),
 

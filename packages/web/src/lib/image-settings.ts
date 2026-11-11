@@ -155,6 +155,8 @@ export function generationComposites(raw: unknown): GenerationComposite[] | unde
 export interface ImageSettings {
   /** Only on a composer send; generated-image edits never carry a scene. */
   scene?: ImageScene;
+  /** 真实字体: the picture is made without text and the wording is typeset on it. Only on a 自由创作 composer send. */
+  realText?: boolean;
   /** 1K / 2K / 4K; sent with `ratio` instead of a pixel size. */
   resolution?: string;
   ratio?: string;

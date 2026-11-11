@@ -1,3 +1,4 @@
+import type { PosterLayout } from "@lot-agent/core/poster";
 import type { GenerationComposite, GenerationRedo, WhiteBackgroundCheck } from "../lib/image-settings.js";
 
 export interface GenerationView {
@@ -27,6 +28,8 @@ export interface GenerationView {
   redo?: GenerationRedo;
   /** 白底图: per image, whether the background was corrected and what may still fail a listing check. */
   whiteChecks?: WhiteBackgroundCheck[];
+  /** 真实字体: per image, the wording typeset on it (null where an image has none); 改字 edits it for free. */
+  posters?: (PosterLayout | null)[];
 }
 
 /** Later updates of a generation (ids, progress, final state) carry only what changed; what the card already knew stays. */
@@ -147,6 +150,8 @@ export type ChatAction =
   | { type: "generation_finished"; messageId: string; generation: GenerationView }
   /** A picture joined from a finished generation's images was stored. */
   | { type: "generation_composited"; messageId: string; composite: GenerationComposite }
+  /** One typeset image was rendered again with new wording; pictures joined from the old one are gone. */
+  | { type: "generation_poster_edited"; messageId: string; index: number; asset: { url: string; mime: string }; poster: PosterLayout }
   /** A redo was started on a finished set (the server reload brings its result). */
   | { type: "generation_redo_changed"; messageId: string; redo?: GenerationRedo };
 
@@ -289,6 +294,18 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: state.messages.map((m) =>
           m.id === action.messageId && m.generation ? { ...m, generation: { ...m.generation, redo: action.redo } } : m
         ),
+      };
+
+    case "generation_poster_edited":
+      return {
+        ...state,
+        messages: state.messages.map((m) => {
+          const generation = m.generation;
+          if (m.id !== action.messageId || !generation?.assets || action.index >= generation.assets.length) return m;
+          const assets = generation.assets.map((asset, index) => (index === action.index ? action.asset : asset));
+          const posters = assets.map((_, index) => (index === action.index ? action.poster : generation.posters?.[index] ?? null));
+          return { ...m, generation: { ...generation, assets, posters, composites: undefined } };
+        }),
       };
 
     case "generation_composited":

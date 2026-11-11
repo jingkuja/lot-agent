@@ -6,6 +6,8 @@ import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import { referenceDataUrl } from "./compose.js";
 import { whitenBackground, type WhiteBackgroundCheck } from "./white-background.js";
+import { renderPoster } from "./poster-render.js";
+import { parsePosterLayout, type PosterLayout } from "@lot-agent/core/poster";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -111,6 +113,8 @@ type GenOut = {
   missing?: number;
   /** 白底图: per image, whether the background was made pure white and what may still fail a listing check. */
   whiteChecks?: WhiteBackgroundCheck[];
+  /** 真实字体: per image, the layout typeset on it and the stored text-free background it can be rendered on again. */
+  posters?: PosterLayout[];
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -166,6 +170,8 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
     // Scene images send rewritten prompts to the model; the card keeps the user's own text.
     prompt: typeof input.displayPrompt === "string" ? input.displayPrompt : prompt,
     ...(typeof input.scene === "string" ? { scene: input.scene } : {}),
+    // 真实字体: the planned wording stays on the message through every status, so a download retry can still typeset it.
+    ...(parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
     taskId: job.id,
     settings: {
       size: input.size,
@@ -261,8 +267,27 @@ async function downloadAndFinalize(
     const assets: GenAssets = firstAsset ? [firstAsset.asset] : [];
     const whiteBackground = mediaType === "image" && job.input.scene === "white_background";
     const whiteChecks: WhiteBackgroundCheck[] = [];
+    const poster = mediaType === "image" ? parsePosterLayout(job.input.poster) : null;
+    const posters: PosterLayout[] = [];
     for (const file of files) {
       let { body, mime } = file;
+      if (poster) {
+        // The model's picture has no text. Keep it as its own asset (a text edit renders on it again), then typeset.
+        const background = await storeGeneratedAsset(deps, job, mediaType, { body, mime });
+        const layout: PosterLayout = { ...poster, background: { url: background.asset.url } };
+        try {
+          const rendered = await renderPoster(body, layout);
+          ({ body, mime } = rendered);
+          posters.push(rendered.overflow ? { ...layout, overflow: true } : layout);
+        } catch (err) {
+          // Best effort: the picture is kept without text and the card can typeset it again.
+          console.warn("[image.poster] render failed", { taskId: job.id, errorType: (err as Error)?.name });
+          posters.push(layout);
+          assetIds.push(background.id);
+          assets.push(background.asset);
+          continue;
+        }
+      }
       if (whiteBackground) {
         // Best effort: an image that cannot be checked is stored as the model made it.
         try {
@@ -280,9 +305,10 @@ async function downloadAndFinalize(
     }
     const outputCount = mediaType === "video" ? (durationSec ?? 1) : assets.length;
     await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount } });
-    const out: GenOut = { assetIds, assets, ...(whiteChecks.length ? { whiteChecks } : {}) };
+    const checks = { ...(whiteChecks.length ? { whiteChecks } : {}), ...(posters.length ? { posters } : {}) };
+    const out: GenOut = { assetIds, assets, ...checks };
     if (cacheKey) await deps.cache.set(cacheKey, out);
-    await setMsg("completed", { assets, ...(whiteChecks.length ? { whiteChecks } : {}) });
+    await setMsg("completed", { assets, ...checks });
     await deps.updateProgress(job.id, 100);
     return out;
   } catch (err) {
@@ -354,6 +380,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     const cacheKey = genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
       prompt, ...(setPrompts ? { prompts: setPrompts } : {}),
+      // The same picture prompt with other wording is another poster.
+      ...(mediaType === "image" && parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
       size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
       input_reference: inputReference,
@@ -368,7 +396,9 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     const cached = await deps.cache.get(cacheKey) as GenOut | null;
     const cachedAssets = cached ? await Promise.all(cached.assetIds.map((id) => deps.db.getAsset(id))) : [];
     if (cached && cachedAssets.length > 0 && cachedAssets.every((asset) => asset?.user_id === job.userId)) {
-      await setMsg("completed", { assets: cached.assets, ...(cached.whiteChecks ? { whiteChecks: cached.whiteChecks } : {}) });
+      await setMsg("completed", {
+        assets: cached.assets, ...(cached.whiteChecks ? { whiteChecks: cached.whiteChecks } : {}), ...(cached.posters ? { posters: cached.posters } : {}),
+      });
       await deps.updateProgress(job.id, 100);
       return cached;
     }

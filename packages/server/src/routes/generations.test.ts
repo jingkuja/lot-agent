@@ -989,3 +989,117 @@ describe("POST /conversations/:id/generations/:messageId/export", () => {
     expect((await (await setup({ status: "generating" })).exportZip({ preset: "original" })).status).toBe(409);
   });
 });
+
+describe("真实字体 posters", () => {
+  const send = (service: any, body: Record<string, unknown>) => app(service).request("/conversations/c1/generations", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mediaType: "image", ...body }),
+  });
+  const plan = JSON.stringify({
+    background: "A steaming hot pot on a wooden table", template: "side_panel", title: "火锅店盛大开业", subtitle: "", points: [],
+    price: "¥199", originalPrice: "¥299", discount: "8 折", date: "", address: "",
+  });
+
+  it("plans the wording, sends a text-free picture prompt and keeps the user's text on the card", async () => {
+    const service = fakeService();
+    service.imageSceneText = vi.fn(async () => plan);
+    const res = await send(service, { prompt: "火锅店开业海报，全场 8 折，套餐 199 元", realText: true, settings: { size: "1024x1536", n: 1 } });
+    expect(res.status).toBe(202);
+    const [, input] = service.jobQueue.enqueue.mock.calls[0];
+    expect(input.prompt).toContain("A steaming hot pot");
+    expect(input.prompt).toContain("no text");
+    expect(input.displayPrompt).toBe("火锅店开业海报，全场 8 折，套餐 199 元");
+    // A side panel does not fit a portrait canvas, and the invented original price is emptied.
+    expect(input.poster).toMatchObject({
+      template: "bottom_panel", cleared: ["originalPrice"], fields: { title: "火锅店盛大开业", price: "¥199", originalPrice: "", discount: "8 折" },
+    });
+    expect(service.messages.at(-1).metadata).toMatchObject({ poster: input.poster, prompt: "火锅店开业海报，全场 8 折，套餐 199 元" });
+  });
+
+  it("sends nothing when the wording cannot be planned, and plans nothing with the switch off", async () => {
+    const broken = fakeService();
+    broken.imageSceneText = vi.fn(async () => "not json");
+    const res = await send(broken, { prompt: "火锅店开业海报", realText: true });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ code: "IMAGE_SCENE_UNAVAILABLE" });
+    expect(broken.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(broken.messages).toHaveLength(0);
+
+    const off = fakeService();
+    off.imageSceneText = vi.fn();
+    expect((await send(off, { prompt: "火锅店开业海报" })).status).toBe(202);
+    expect(off.imageSceneText).not.toHaveBeenCalled();
+    expect(off.jobQueue.enqueue.mock.calls[0][1].poster).toBeUndefined();
+  });
+
+  async function setup(metadata: Record<string, unknown> = {}) {
+    const { default: sharp } = await import("sharp");
+    const service = fakeService();
+    const files = new Map<string, Buffer>([
+      ["bg.png", await sharp({ create: { width: 256, height: 384, channels: 3, background: "#e9dcc3" } }).png().toBuffer()],
+    ]);
+    const fields = { title: "火锅店盛大开业", subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" };
+    const meta: Record<string, unknown> = {
+      kind: "generation", mediaType: "image", status: "completed", taskId: "task-1",
+      assets: [{ url: "/static/assets/old.png", mime: "image/png" }],
+      posters: [{ version: 1, template: "bottom_panel", fields, cleared: ["price"], background: { url: "/static/assets/bg.png" } }],
+      composites: [{ url: "/static/assets/joined.jpg", mime: "image/jpeg", layout: "vertical", gap: false }],
+      ...metadata,
+    };
+    let saved: Record<string, unknown> | null = null;
+    service.db.getGenerationMessage = vi.fn(async () => ({ status: "completed", metadata: meta }));
+    service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => (
+      key.startsWith("poster-") ? null : { user_id: key === "other.png" ? "u2" : "u1", storage_key: key, url: `/static/assets/${key}` }
+    ));
+    service.db.createAsset = vi.fn(async () => {});
+    service.db.updateGenerationMetadata = vi.fn(async (_id: string, _owner: unknown, update: (current: any) => any) => {
+      saved = update(meta);
+      return !!saved;
+    });
+    const assets = {
+      exists: vi.fn(async (key: string) => files.has(key)),
+      get: vi.fn(async (key: string) => files.get(key)!),
+      put: vi.fn(async ({ key, body }: { key: string; body: Buffer }) => { files.set(key, body); return { url: `/static/assets/${key}` }; }),
+    };
+    const a = new Hono<{ Variables: { userId: string } }>();
+    a.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    a.route("/conversations", createGenerationRoutes(service, { assets: assets as any }));
+    const edit = (body: unknown) => a.request("/conversations/c1/generations/m1/poster", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, assets, edit, fields, saved: () => saved };
+  }
+
+  it("renders new wording on the stored picture without a model request", async () => {
+    const { service, assets, edit, fields, saved } = await setup();
+    const res = await edit({ index: 0, fields: { ...fields, price: "¥188" }, template: "overlay" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { asset: { url: string }; poster: { cleared?: string[] } };
+    expect(body.asset.url).toMatch(/^\/static\/assets\/poster-[0-9a-f]{32}\.png$/);
+    expect(body.poster).toMatchObject({ template: "overlay", fields: { price: "¥188" }, background: { url: "/static/assets/bg.png" } });
+    expect(body.poster.cleared).toBeUndefined();
+    expect(assets.put).toHaveBeenCalledTimes(1);
+    expect(service.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", type: "image" }));
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+    // The picture joined from the old image is dropped with it.
+    expect(saved()).toMatchObject({ assets: [body.asset], posters: [body.poster] });
+    expect(saved()).not.toHaveProperty("composites");
+  });
+
+  it("refuses images without a poster, other users' pictures and unfinished messages", async () => {
+    const fields = { title: "开业" };
+    expect((await (await setup()).edit({ index: 1, fields })).status).toBe(409);
+    expect((await (await setup({ posters: undefined })).edit({ index: 0, fields })).status).toBe(409);
+    expect((await (await setup({ status: "generating" })).edit({ index: 0, fields })).status).toBe(409);
+    const foreign = await setup({ posters: [{ template: "overlay", fields, background: { url: "/static/assets/other.png" } }] });
+    expect((await foreign.edit({ index: 0, fields })).status).toBe(409);
+    const external = await setup({ posters: [{ template: "overlay", fields, background: { url: "https://example.com/bg.png" } }] });
+    expect((await external.edit({ index: 0, fields })).status).toBe(409);
+    expect(foreign.assets.put).not.toHaveBeenCalled();
+    expect((await (await setup()).edit({ index: 0 })).status).toBe(400);
+    const gone = await setup();
+    gone.service.db.getGenerationMessage = vi.fn(async () => null);
+    expect((await gone.edit({ index: 0, fields })).status).toBe(404);
+  });
+});
+

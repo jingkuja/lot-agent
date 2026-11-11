@@ -195,7 +195,7 @@ export function Workspace({
 
   const {
     channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear,
-    regenerate, generateMedia, redownloadGeneration, composeGeneration, redoGenerationImages, exportGeneration,
+    regenerate, generateMedia, redownloadGeneration, composeGeneration, redoGenerationImages, exportGeneration, editPoster,
   } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
@@ -550,6 +550,7 @@ export function Workspace({
             onComposeGeneration={composeGeneration}
             onRedoGeneration={redoGenerationImages}
             onExportGeneration={exportGeneration}
+            onEditPoster={editPoster}
             onEditImage={handleEditImage}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。
             onSelectForPreview={

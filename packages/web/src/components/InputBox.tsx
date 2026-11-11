@@ -96,6 +96,8 @@ interface InputBoxProps {
 /** The composer remounts when a new chat gets its first message (and on conversation switches);
  * keep the chosen image type the way the image settings picker keeps its own choices. */
 let lastImageScene: ImageScene = DEFAULT_IMAGE_SCENE;
+/** 真实字体 is remembered the same way. */
+let lastRealText = false;
 
 const MAX_FILES = 5;
 const MAX_IMAGE_REFERENCE_IMAGES = 5;
@@ -142,6 +144,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [imageScene, setImageSceneState] = useState<ImageScene>(() => lastImageScene);
   const setImageScene = (scene: ImageScene) => { lastImageScene = scene; setImageSceneState(scene); };
   const sceneTabs = mode === "image" && imageScenes;
+  const [realText, setRealTextState] = useState(() => lastRealText);
+  const setRealText = (on: boolean) => { lastRealText = on; setRealTextState(on); };
+  // 真实字体 typesets a poster's wording; the e-commerce types have their own image roles and stay as they are.
+  const realTextAvailable = sceneTabs && imageScene === DEFAULT_IMAGE_SCENE;
   const activeScene = sceneTabs ? IMAGE_SCENES.find((scene) => scene.value === imageScene) : undefined;
   const [folded, setFolded] = useState(true);
   const collapsed = sceneTabs && imageCollapsible && folded;
@@ -252,11 +258,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const currentImageSettings = useCallback((): ImageSettings | undefined => {
     const current = settingsRef.current as ImageSettings | undefined;
     if (mode !== "image" || !current) return current;
-    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene } : current;
+    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene }
+      : realTextAvailable && realText ? { ...current, realText: true } : current;
     if (current.ratio !== IMAGE_AUTO_RATIO) return withScene;
     const size = files[0] ? cachedImageSize(files[0]) : undefined;
     return { ...withScene, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO };
-  }, [mode, files, sceneTabs, imageScene]);
+  }, [mode, files, sceneTabs, imageScene, realTextAvailable, realText]);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -606,6 +613,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       </>}
       {activeScene?.hint && <p className="input-modal-hint image-scene-hint">{t(activeScene.hint)}</p>}
       {activeScene?.note && <p className="input-modal-hint image-scene-hint image-scene-note">{t(activeScene.note)}</p>}
+      {realTextAvailable && realText && !collapsed && (
+        <p className="input-modal-hint image-scene-hint">
+          {t("真实字体已开启：写上标题、卖点、价格、时间和地址，这些文字会用真实字体排到图上。价格和日期只用你写的内容，出图后可以免费改字。")}
+        </p>
+      )}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {productNotice && <p className="input-modal-hint" role="status">{t(productNotice)}</p>}
@@ -904,6 +916,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 <circle cx="7.5" cy="7.5" r="1.5" />
               </svg>
               {t("选产品")}</button>
+          )}
+          {realTextAvailable && (
+            <button type="button" className={`btn-reference btn-real-text${realText ? " active" : ""}`} disabled={disabled} aria-pressed={realText}
+              onClick={() => setRealText(!realText)}
+              title={t("开启后，图里的文字用真实字体排版，不会出现错字或模糊；出图后可以免费改字")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 7V5h14v2M12 5v14M9 19h6" />
+              </svg>
+              {t("真实字体")}
+              <span className="btn-real-text-switch" aria-hidden="true" />
+            </button>
           )}
           {productPickerOpen && (
             <ProductPickerDialog

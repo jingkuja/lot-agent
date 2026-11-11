@@ -1045,3 +1045,38 @@ describe("white-background check", () => {
     expect(out.whiteChecks).toBeUndefined();
   });
 });
+
+describe("真实字体 posters", () => {
+  const poster = { version: 1, template: "bottom_panel", fields: { title: "火锅店盛大开业", subtitle: "", points: [], price: "¥199", originalPrice: "",
+    discount: "", date: "", address: "" } };
+
+  it("keeps the text-free picture as its own asset and stores the typeset one as the result", async () => {
+    const picture = await sharp({ create: { width: 256, height: 384, channels: 3, background: "#e9dcc3" } }).png().toBuffer();
+    const { deps, calls } = fakeDeps(setProvider(), { urlToBytes: vi.fn(async () => ({ body: picture, mime: "image/png" })), extFor: () => "png" });
+    const put = vi.mocked(deps.storage.put);
+    const out = await runGenerationJob(deps, { ...job, input: { ...job.input, n: 1, poster, displayPrompt: "火锅店开业海报" } }, "image");
+    expect(put).toHaveBeenCalledTimes(2);
+    expect((put.mock.calls[0][0].body as Buffer).equals(picture)).toBe(true);
+    expect((put.mock.calls[1][0].body as Buffer).equals(picture)).toBe(false);
+    const background = `/static/assets/${put.mock.calls[0][0].key}`;
+    expect(out.assets).toEqual([{ url: `/static/assets/${put.mock.calls[1][0].key}`, mime: "image/png" }]);
+    expect(out.posters).toEqual([{ ...poster, background: { url: background } }]);
+    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", prompt: "火锅店开业海报", poster, posters: out.posters });
+    // One image was made and billed; the stored background is not a second result.
+    expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 0, outputCount: 1 } }));
+  });
+
+  it("does not reuse a cached poster for other wording on the same picture prompt", async () => {
+    const keys: string[] = [];
+    const picture = await png();
+    const run = async (title: string) => {
+      const { deps } = fakeDeps(setProvider(), { urlToBytes: vi.fn(async () => ({ body: picture, mime: "image/png" })), extFor: () => "png" });
+      deps.cache.set = vi.fn(async (key: string) => { keys.push(key); });
+      await runGenerationJob(deps, { ...job, input: { ...job.input, n: 1, poster: { ...poster, fields: { ...poster.fields, title } } } }, "image");
+    };
+    await run("火锅店盛大开业");
+    await run("火锅店周年庆");
+    expect(new Set(keys).size).toBe(2);
+  });
+});
+

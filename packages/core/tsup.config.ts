@@ -1,7 +1,8 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig((options) => ({
-  entry: ["src/index.ts", "src/knowledge/browser.ts", "src/presentation/index.ts", "src/desktop/protocol.ts", "src/marketing-video/index.ts", "src/marketing-analysis/index.ts", "src/digital-presenter/index.ts"],
+  entry: ["src/index.ts", "src/knowledge/browser.ts", "src/presentation/index.ts", "src/desktop/protocol.ts", "src/marketing-video/index.ts", "src/marketing-analysis/index.ts", "src/digital-presenter/index.ts",
+    "src/poster/index.ts"],
   format: ["esm"],
   dts: true,
   // Watch rebuilds must not wipe dist: the running server imports

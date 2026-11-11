@@ -3,7 +3,9 @@ import { useState } from "react";
 import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
+import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
 import { ImageEditDialog } from "./ImageEditDialog.js";
+import { POSTER_FIELD_LABELS, PosterTextDialog } from "./PosterTextDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
 import {
   COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, EXPORT_PRESETS, imageSetRole, WHITE_BACKGROUND_ISSUES,
@@ -33,7 +35,10 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
-function AssetView({ asset, mediaType, index, settings, onEdit }: {
+function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext }: {
+  /** 真实字体: the wording typeset on this image, and how to change it. Both are needed for 改字. */
+  poster?: PosterLayout | null;
+  onRetext?: RetextHandler;
   asset: Asset;
   mediaType: "image" | "video";
   index: number;
@@ -43,6 +48,7 @@ function AssetView({ asset, mediaType, index, settings, onEdit }: {
   const { t } = useI18n();
   const [errored, setErrored] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [retexting, setRetexting] = useState(false);
   const ext = (asset.url.split("?")[0].split(".").pop() || "bin").toLowerCase();
   const name = `生成结果${index + 1}.${ext}`;
   const isVideo = mediaType === "video" && asset.mime.startsWith("video/");
@@ -63,8 +69,11 @@ function AssetView({ asset, mediaType, index, settings, onEdit }: {
       ) : (
         <div className="gen-asset-frame">
           <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
-          {onEdit && (
-            <button type="button" className="gen-asset-edit" onClick={() => setEditing(true)}>{t("编辑")}</button>
+          {(onEdit || (poster && onRetext)) && (
+            <div className="gen-asset-actions">
+              {onEdit && <button type="button" className="gen-asset-edit" onClick={() => setEditing(true)}>{t("编辑")}</button>}
+              {poster && onRetext && <button type="button" className="gen-asset-edit" onClick={() => setRetexting(true)}>{t("改字")}</button>}
+            </div>
           )}
         </div>
       )}
@@ -73,6 +82,30 @@ function AssetView({ asset, mediaType, index, settings, onEdit }: {
         <ImageEditDialog imageUrl={asset.url} size={settings?.size}
           onSubmit={(prompt) => onEdit(asset.url, prompt, settings)} onClose={() => setEditing(false)} />
       )}
+      {retexting && poster && onRetext && (
+        <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
+          onSubmit={(fields, template) => onRetext(index, fields, template)} />
+      )}
+    </div>
+  );
+}
+
+type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+
+/** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
+function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
+  const { t } = useI18n();
+  const cleared = [...new Set((posters ?? []).flatMap((poster) => poster?.cleared ?? []))];
+  const overflow = (posters ?? []).some((poster) => poster?.overflow);
+  if (!cleared.length && !overflow) return null;
+  return (
+    <div className="gen-white-notes" role="status">
+      {cleared.length > 0 && (
+        <p className="gen-white-issue">
+          {t("这些内容没在你的描述里找到，没有写到图上：{0}。点图上的「改字」可以补上，不扣积分。", [cleared.map((name) => t(POSTER_FIELD_LABELS[name])).join(t("、"))])}
+        </p>
+      )}
+      {overflow && <p className="gen-white-issue">{t("文字太多，缩到最小字号仍放不下，建议点「改字」删减。")}</p>}
     </div>
   );
 }
@@ -91,8 +124,8 @@ const DOWNLOAD_ICON = (
 
 /** One image inside a set frame: click to enlarge, its own download, 编辑 and 重做. While it is being redone the
  * old image stays visible under a 重做中 cover. */
-function SetTile({ image, busy, onOpen, onEdit, onRedo }: {
-  image: ViewerImage; busy?: boolean; onOpen: () => void; onEdit?: () => void; onRedo?: () => void;
+function SetTile({ image, busy, onOpen, onEdit, onRedo, onRetext }: {
+  image: ViewerImage; busy?: boolean; onOpen: () => void; onEdit?: () => void; onRedo?: () => void; onRetext?: () => void;
 }) {
   const { t } = useI18n();
   const [errored, setErrored] = useState(false);
@@ -115,6 +148,7 @@ function SetTile({ image, busy, onOpen, onEdit, onRedo }: {
       ) : (
         <div className="gen-set-tile-actions">
           {onEdit && !errored && <button type="button" className="gen-set-action" onClick={onEdit}>{t("编辑")}</button>}
+          {onRetext && !errored && <button type="button" className="gen-set-action" onClick={onRetext}>{t("改字")}</button>}
           {onRedo && <button type="button" className="gen-set-action" onClick={onRedo}>{t("重做")}</button>}
         </div>
       )}
@@ -139,7 +173,8 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: RedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext }: {
+  onRetext?: RetextHandler;
   generation: GenerationView;
   assets: Asset[];
   onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
@@ -151,6 +186,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
   const { t } = useI18n();
   const [viewing, setViewing] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
+  const [retexting, setRetexting] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>();
   const [confirmDialog, confirm] = useConfirm();
@@ -196,7 +232,8 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
         <div className="gen-set-grid">
           {images.map((image, index) => (
             <SetTile key={index} image={image} busy={running && redo.indexes.includes(index)} onOpen={() => setViewing(index)}
-              onEdit={edit && (() => edit(index))} onRedo={canRedo ? () => start({ index }, 1) : undefined} />
+              onEdit={edit && (() => edit(index))} onRedo={canRedo ? () => start({ index }, 1) : undefined}
+              onRetext={onRetext && generation.posters?.[index] ? () => setRetexting(index) : undefined} />
           ))}
           {Array.from({ length: missing }, (_, i) => assets.length + i).map((index) => (
             <MissingTile key={`missing-${index}`} label={labelAt(index)} busy={running && redo.indexes.includes(index)}
@@ -227,6 +264,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
           onComposingChange={setComposing} />
       )}
       <WhiteCheckNotes checks={generation.whiteChecks} />
+      <PosterNotes posters={generation.posters} />
       {exportAll && !running && <ExportMenu onExport={exportAll} />}
       {viewing !== null && (
         <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit} />
@@ -234,6 +272,10 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport }: {
       {editing !== null && onEdit && (
         <ImageEditDialog imageUrl={assets[editing].url} size={generation.settings?.size}
           onSubmit={(prompt) => onEdit(assets[editing].url, prompt, generation.settings)} onClose={() => setEditing(null)} />
+      )}
+      {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
+        <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
+          onSubmit={(fields, template) => onRetext(retexting, fields, template)} />
       )}
       {confirmDialog}
     </div>
@@ -428,9 +470,12 @@ export function GenerationCard({
   onCompose,
   onRedo,
   onExport,
+  onEditPoster,
 }: {
   generation: GenerationView;
   messageId?: string;
+  /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
+  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
   onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
@@ -448,13 +493,15 @@ export function GenerationCard({
   const { mediaType, status, assets, error, taskId } = generation;
   const [cancelRequested, setCancelRequested] = useState(false);
 
+  const retext: RetextHandler | undefined = messageId && onEditPoster
+    ? (index, fields, template) => onEditPoster(messageId, index, fields, template) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
     // keep their own card.
     const imageSet = !!imageSetRole(generation.scene, 0);
     if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
       return (
-        <ImageSet generation={generation} assets={assets} onEdit={onEditImage}
+        <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext}
           onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
           onRedo={messageId && onRedo && imageSet ? (request) => onRedo(messageId, request) : undefined}
           onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
@@ -466,11 +513,13 @@ export function GenerationCard({
         <div className="gen-card-assets">
           {assets.map((a, i) => (
             <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
-              onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined} />
+              onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
+              poster={generation.posters?.[i]} onRetext={retext} />
           ))}
         </div>
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
         {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} />}
+        {singleImage && <PosterNotes posters={generation.posters} />}
         {singleImage && messageId && onExport && (
           <ExportMenu onExport={(preset) => onExport(messageId, preset, [`${SINGLE_EXPORT_NAMES[generation.scene ?? ""] ?? "生成结果"}_01`], [])} />
         )}
