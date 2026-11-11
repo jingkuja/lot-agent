@@ -12,7 +12,7 @@ import { RESPONSE_LANGUAGE_POLICY } from "./response-language-policy.js";
 import { parsePptApproval, PPT_APPROVAL_PREFIX } from "@lot-agent/core/presentation";
 import { exportConfirmedPpt } from "./ppt-confirmation.js";
 import { renderPptPreview } from "../ppt/preview.js";
-import { isAnthropicModel, parseChatSourceTypes } from "@lot-agent/core";
+import { isAnthropicModel, isPortraitVideoModel, parseChatSourceTypes } from "@lot-agent/core";
 import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
@@ -556,9 +556,12 @@ export class AgentService {
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       const catalog = JSON.parse(cached) as ReturnType<typeof enrichCatalog>;
-      // Apply current default ordering to cached catalogs immediately,
-      // without waiting for the cache TTL.
-      return { ...catalog, llm: orderLlmModels(catalog.llm) };
+      // Apply current ordering and visibility rules without waiting for the cache TTL.
+      return {
+        ...catalog,
+        llm: orderLlmModels(catalog.llm),
+        video: catalog.video.filter(({ id }) => !isPortraitVideoModel(id)),
+      };
     }
     if (!apiKey) {
       // Debug mode has no tokenhub key: surface the single env LLM so the model

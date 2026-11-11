@@ -10,7 +10,7 @@ function svc(cacheHit: string | null) {
   return {
     redis: { get: vi.fn().mockResolvedValue(cacheHit), set: vi.fn() },
     db: { getUserApiKey: vi.fn().mockResolvedValue("sk-user") },
-    tokenhub: { listModels: vi.fn().mockResolvedValue({ llm: ["gpt-5.4"], image: [], video: ["veo3.1"] }) },
+    tokenhub: { listModels: vi.fn().mockResolvedValue({ llm: ["gpt-5.4"], image: [], video: ["wan2.2-s2v", "veo3.1", "VideoRetalk"] }) },
     modelCatalog: {
       defaultProvider: { llm: "openai", image: "chat-completions", video: "happyhorse" },
       providerMap: {}, pricing: {},
@@ -52,7 +52,7 @@ describe("GET /api/models", () => {
     expect(res.status).toBe(200);
     const body: any = await res.json();
     expect(body.llm[0]).toMatchObject({ id: "gpt-5.4", provider: "openai" });
-    expect(body.video[0].provider).toBe("happyhorse");
+    expect(body.video).toEqual([expect.objectContaining({ id: "veo3.1", provider: "happyhorse" })]);
     expect(service.redis.set as ReturnType<typeof vi.fn>).toHaveBeenCalled();
   });
 
@@ -64,15 +64,17 @@ describe("GET /api/models", () => {
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 
-  it("normalizes a pre-change cached catalog so server-side defaults are Claude-last", async () => {
+  it("applies current ordering and visibility rules to a pre-change cached catalog", async () => {
     const cached = JSON.stringify({
       llm: [{ id: "claude-sonnet-4", type: "llm", provider: "openai" }, { id: "gpt-5.4", type: "llm", provider: "openai" }],
       image: [],
-      video: [],
+      video: [{ id: "videoretalk" }, { id: "veo3.1" }, { id: "wan2.2-s2v" }],
     });
     const service = svc(cached);
     const res = await mount(service).request("/");
-    expect((await res.json() as any).llm.map((model: { id: string }) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
+    const body = await res.json() as { llm: { id: string }[]; video: { id: string }[] };
+    expect(body.llm.map((model) => model.id)).toEqual(["gpt-5.4", "claude-sonnet-4"]);
+    expect(body.video.map((model) => model.id)).toEqual(["veo3.1"]);
     expect(service.tokenhub.listModels).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,4 @@
-import { isAnthropicModel } from "@lot-agent/core";
+import { isAnthropicModel, isPortraitVideoModel } from "@lot-agent/core";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
 
 export interface Pricing {
@@ -78,6 +78,6 @@ export function enrichCatalog(
   return {
     llm: orderLlmModels(build(models.llm, "llm")),
     image: build(models.image, "image"),
-    video: build(models.video, "video"),
+    video: build(models.video.filter((id) => !isPortraitVideoModel(id)), "video"),
   };
 }
