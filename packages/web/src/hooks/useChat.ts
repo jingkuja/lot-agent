@@ -28,6 +28,16 @@ function sceneOf(settings: unknown): string | undefined {
   return typeof scene === "string" && scene ? scene : undefined;
 }
 
+/** Resolves once the browser has the picture (or gave up on it, or 15 s passed); never rejects. */
+function preloadImage(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    const timer = setTimeout(resolve, 15_000);
+    image.onload = image.onerror = () => { clearTimeout(timer); resolve(); };
+    image.src = url;
+  });
+}
+
 /** Translated by the card, which formats the `{0}` template. */
 function missingNotice(missing: number): string {
   return `套图中有 ${missing} 张未生成成功`;
@@ -744,6 +754,32 @@ export function useChat(
     }
   }, []);
 
+  // 图片合成 from the composer: join picked images (this conversation's or 个人素材's) into one picture. Free; the result
+  // arrives as a finished image message. `cid` is passed because a new chat is created just before. Resolves to an error.
+  const composeImages = useCallback(async (
+    cid: string, urls: string[], layout: ComposeLayout, gap: boolean, prompt: string,
+  ): Promise<string | undefined> => {
+    try {
+      const { userMessage, assistantMessage } = await api.composeImages(cid, { urls, layout, gap, prompt });
+      // The caller keeps its 合成中 cover up until the picture is downloaded, so the card never shows an empty frame.
+      await Promise.all(assistantMessage.metadata.assets.map((asset) => preloadImage(asset.url)));
+      if (cidRef.current === cid) {
+        dispatch({
+          type: "generation_pair_appended",
+          userMessage: { ...userMessage, dbId: userMessage.id },
+          genMessage: {
+            id: assistantMessage.id, dbId: assistantMessage.id, role: "assistant", content: "",
+            generation: { mediaType: "image", status: "completed", assets: assistantMessage.metadata.assets },
+          },
+        });
+      }
+      onStreamEndRef.current?.();
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "合成失败，请稍后重试";
+    }
+  }, []);
+
   const stop = useCallback(() => {
     // Stop only the conversation on screen — a concurrent stream in another
     // conversation keeps running.
@@ -782,6 +818,7 @@ export function useChat(
     generateMedia,
     redownloadGeneration,
     composeGeneration,
+    composeImages,
     editPoster,
     redoGenerationImages,
     exportGeneration,

@@ -645,6 +645,13 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) }
     ),
 
+  /** 图片合成 from the composer: join picked images into one picture, posted to the conversation as a finished image. */
+  composeImages: (conversationId: string, body: { urls: string[]; layout: ComposeLayout; gap: boolean; prompt: string }) =>
+    request<{
+      userMessage: { id: string; role: "user"; content: string };
+      assistantMessage: { id: string; role: "assistant"; status: "completed"; metadata: { assets: { url: string; mime: string }[] } };
+    }>(`/conversations/${conversationId}/compose`, { method: "POST", body: JSON.stringify(body) }),
+
   // ── Tasks ───────────────────────────────────────────────────────────────────
   createTask: (type: "image.generate" | "video.generate", input: unknown) =>
     request<{ jobId: string }>("/tasks", {

@@ -853,6 +853,74 @@ describe("POST /conversations/:id/generations/:messageId/compose", () => {
   });
 });
 
+describe("POST /conversations/:id/compose", () => {
+  async function png(background: string, width = 32): Promise<Buffer> {
+    const { default: sharp } = await import("sharp");
+    return sharp({ create: { width, height: 32, channels: 3, background } }).png().toBuffer();
+  }
+  async function setup() {
+    const service = fakeService();
+    const files = new Map<string, Buffer>([
+      ["a.png", await png("#ff0000")], ["b.png", await png("#00ff00", 64)], ["c.png", await png("#0000ff")], ["other.png", await png("#000000")],
+    ]);
+    service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => ({
+      user_id: key === "other.png" ? "u2" : "u1", storage_key: key, mime: key === "clip.mp4" ? "video/mp4" : "image/png",
+    }));
+    service.db.createAsset = vi.fn(async () => {});
+    const assets = {
+      exists: vi.fn(async (key: string) => files.has(key) || key === "clip.mp4"),
+      get: vi.fn(async (key: string) => files.get(key)!),
+      put: vi.fn(async ({ key }: { key: string }) => ({ url: `/static/assets/${key}` })),
+    };
+    const a = new Hono<{ Variables: { userId: string } }>();
+    a.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
+    a.route("/conversations", createGenerationRoutes(service, { assets: assets as any }));
+    const compose = (body: unknown) => a.request("/conversations/c1/compose", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, assets, compose };
+  }
+  const urls = ["/static/assets/b.png", "/static/assets/a.png", "/static/assets/c.png"];
+
+  it("joins picked images in order and posts the picture as a finished image message, without a model request", async () => {
+    const { service, assets, compose } = await setup();
+    const res = await compose({ urls, layout: "hero", gap: true, prompt: "合成 3 张图片 · 一大多小" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(assets.get.mock.calls.map(([key]) => key)).toEqual(["b.png", "a.png", "c.png"]);
+    const [asset] = body.assistantMessage.metadata.assets;
+    expect(asset).toMatchObject({ mime: "image/jpeg" });
+    expect(asset.url).toMatch(/^\/static\/assets\/[0-9a-f-]+\.jpg$/);
+    expect(service.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", type: "image", taskId: null }));
+    expect(service.db.addMessage).toHaveBeenNthCalledWith(1, body.userMessage.id, "c1", "user", "合成 3 张图片 · 一大多小");
+    expect(service.db.addMessage).toHaveBeenNthCalledWith(2, body.assistantMessage.id, "c1", "assistant", "", {
+      metadata: expect.objectContaining({ kind: "generation", mediaType: "image", status: "completed", composedFrom: { layout: "hero", gap: true, count: 3 } }),
+    });
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+
+  it("refuses images that are not this user's generated pictures", async () => {
+    for (const bad of ["/static/assets/other.png", "https://vendor.example/x.png", "/static/assets/clip.mp4", "/static/assets/gone.png"]) {
+      const { assets, compose } = await setup();
+      expect((await compose({ urls: ["/static/assets/a.png", bad], layout: "vertical" })).status).toBe(409);
+      expect(assets.put).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects bad picks and conversations the user does not own", async () => {
+    const ready = await setup();
+    expect((await ready.compose({ urls: ["/static/assets/a.png"], layout: "vertical" })).status).toBe(400);
+    expect((await ready.compose({ urls: ["/static/assets/a.png", "/static/assets/a.png"], layout: "vertical" })).status).toBe(400);
+    expect((await ready.compose({ urls: urls.slice(0, 2), layout: "hero" })).status).toBe(400);
+    expect((await ready.compose({ urls: Array.from({ length: 10 }, (_, i) => `/static/assets/${i}.png`), layout: "grid" })).status).toBe(400);
+    expect((await ready.compose({ urls, layout: "spiral" })).status).toBe(400);
+    ready.service.db.getConversation = vi.fn(async () => ({ id: "c1", user_id: "u2" }));
+    expect((await ready.compose({ urls, layout: "vertical" })).status).toBe(404);
+    expect(ready.service.db.addMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /conversations/:id/generations/:messageId/redo", () => {
   const a = { url: "/static/assets/a.png", mime: "image/png" };
   const b = { url: "/static/assets/b.png", mime: "image/png" };

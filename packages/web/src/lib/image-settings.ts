@@ -88,6 +88,8 @@ export const COMPOSE_LAYOUTS = [
 ] as const;
 export type ComposeLayout = typeof COMPOSE_LAYOUTS[number]["value"];
 export const COMPOSE_MIN_IMAGES = 2;
+/** Matches the server's limit (`server/generation/compose.ts`). */
+export const COMPOSE_MAX_IMAGES = 9;
 
 /** 打包下载 targets. Sizes and file limits live on the server (`server/generation/image-export.ts`); ids must match. */
 export const EXPORT_PRESETS = [

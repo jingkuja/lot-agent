@@ -123,6 +123,9 @@ function ResBarIcon() {
 
 /* ── 图像生成：张数 · 质量 · 模型 · 比例 · 清晰度 ── */
 
+/** Ratios in the folded 图片比例 row (智能 included). */
+const RATIO_ROW = 6;
+
 // Remembered for the page session. The input box is unmounted/remounted when the
 // conversation switches between its empty (hero) and message-list layouts (e.g.
 // on the first send), which would otherwise reset the picker to its default.
@@ -252,6 +255,11 @@ export function ImageSettingsPicker({
     setResolution(value);
   };
   const [rw, rh] = ratio === IMAGE_AUTO_RATIO ? [1, 1] : ratio.split(":").map(Number);
+  // 图片比例 shows one row until 更多; a choice from the hidden rows takes the row's last place so it stays visible.
+  const [ratiosOpen, setRatiosOpen] = useState(false);
+  const allRatios: string[] = [IMAGE_AUTO_RATIO, ...IMAGE_RATIOS];
+  const firstRow = allRatios.slice(0, RATIO_ROW);
+  const shownRatios = ratiosOpen ? allRatios : firstRow.includes(ratio) ? firstRow : [...firstRow.slice(0, -1), ratio];
   const modelOptions = [...models].sort((a, b) => Number(isLingquImage(b.id)) - Number(isLingquImage(a.id)));
 
   return (
@@ -292,19 +300,32 @@ export function ImageSettingsPicker({
               </button>
             ))}
           </div>
-          <div className="media-section-title">{t("质量")}</div>
-          <div className="seg-track">
-            {IMAGE_QUALITIES.map((q) => (
-              <button
-                key={q.value}
-                type="button"
-                className={`seg ${q.value === quality ? "active" : ""}`}
-                onClick={() => pickQuality(q.value)}
-              >
-                {t(q.label)}
-              </button>
-            ))}
+          <div className="media-section-head">
+            <div className="media-section-title">{t("图片比例")}</div>
+            <button type="button" className="media-section-more" aria-expanded={ratiosOpen} onClick={() => setRatiosOpen((o) => !o)}>
+              {ratiosOpen ? t("收起") : t("更多")}
+              <ChevronIcon />
+            </button>
           </div>
+          <div className={`seg-track image-ratio-grid${ratiosOpen ? "" : " image-ratio-grid--folded"}`}>
+            {shownRatios.map((value) => {
+              const [w, h] = value === IMAGE_AUTO_RATIO ? [1, 1] : value.split(":").map(Number);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  className={`seg seg--stack ${value === ratio ? "active" : ""}`}
+                  onClick={() => pickRatio(value)}
+                >
+                  <span className="image-ratio-icon" aria-hidden>
+                    {value === IMAGE_AUTO_RATIO ? <AutoRatioIcon /> : <RatioGlyph w={w} h={h} size={18} />}
+                  </span>
+                  <span>{value === IMAGE_AUTO_RATIO ? t("智能") : value}</span>
+                </button>
+              );
+            })}
+          </div>
+          {ratio === IMAGE_AUTO_RATIO && <div className="media-hint">{t("有参考图时跟随第一张参考图的比例，否则为 1:1")}</div>}
           {onModelChange && (
             <>
               <div className="media-section-title">{t("模型")}</div>
@@ -334,26 +355,19 @@ export function ImageSettingsPicker({
               )}
             </>
           )}
-          <div className="media-section-title">{t("图片比例")}</div>
-          <div className="seg-track image-ratio-grid">
-            {[IMAGE_AUTO_RATIO, ...IMAGE_RATIOS].map((value) => {
-              const [w, h] = value === IMAGE_AUTO_RATIO ? [1, 1] : value.split(":").map(Number);
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  className={`seg seg--stack ${value === ratio ? "active" : ""}`}
-                  onClick={() => pickRatio(value)}
-                >
-                  <span className="image-ratio-icon" aria-hidden>
-                    {value === IMAGE_AUTO_RATIO ? <AutoRatioIcon /> : <RatioGlyph w={w} h={h} size={18} />}
-                  </span>
-                  <span>{value === IMAGE_AUTO_RATIO ? t("智能") : value}</span>
-                </button>
-              );
-            })}
+          <div className="media-section-title">{t("质量")}</div>
+          <div className="seg-track">
+            {IMAGE_QUALITIES.map((q) => (
+              <button
+                key={q.value}
+                type="button"
+                className={`seg ${q.value === quality ? "active" : ""}`}
+                onClick={() => pickQuality(q.value)}
+              >
+                {t(q.label)}
+              </button>
+            ))}
           </div>
-          {ratio === IMAGE_AUTO_RATIO && <div className="media-hint">{t("有参考图时跟随第一张参考图的比例，否则为 1:1")}</div>}
           {allowCount && (
             <>
               <div className="media-section-title">{t("图片张数")}</div>

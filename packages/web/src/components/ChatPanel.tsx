@@ -2,10 +2,11 @@ import type { PosterFields, PosterTemplate } from "@lot-agent/core/poster";
 import { DesktopWorkspace, DesktopWorkspaceBar, DesktopApprovalCards } from "./DesktopWorkspace.js";
 import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MarketingVideoStudio } from "../modules/marketing-video/MarketingVideoStudio.js";
 import { DigitalPresenterStudio } from "../modules/digital-presenter/DigitalPresenterStudio.js";
 import { GenerationCard } from "./GenerationCard.js";
+import { ImageComposeDialog, type ComposeImagesHandler } from "./ImageComposeDialog.js";
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
@@ -50,6 +51,8 @@ interface ChatPanelProps {
   /** Retry the download of a generation left in "下载失败". */
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
   onComposeGeneration?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
+  /** 图片合成 from the composer: join images picked from this conversation and 个人素材; resolves to an error text. */
+  onComposeImages?: ComposeImagesHandler;
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. */
@@ -164,6 +167,7 @@ export function ChatPanel({
   onModelChange,
   onRedownloadGeneration,
   onComposeGeneration,
+  onComposeImages,
   onRedoGeneration,
   onExportGeneration,
   onEditPoster,
@@ -222,6 +226,16 @@ export function ChatPanel({
     }
     : undefined;
 
+  // 图片合成 lists this conversation's finished images (and their composites), newest first.
+  const [composeOpen, setComposeOpen] = useState(false);
+  const conversationImages = useMemo(() => [...new Set(messages.flatMap((message) => {
+    const generation = message.generation;
+    if (generation?.mediaType !== "image" || generation.status !== "completed") return [];
+    const assets = (generation.assets ?? []).filter((asset) => asset.mime?.startsWith("image/")).map((asset) => asset.url);
+    return [...assets, ...(generation.composites ?? []).map((item) => item.url)];
+  }).reverse())], [messages]);
+  const composeImages = mode === "image" && !readOnly && onComposeImages ? () => setComposeOpen(true) : undefined;
+
   const modelList =
     mode === "image"
       ? modelCatalog?.image
@@ -257,7 +271,11 @@ export function ChatPanel({
         allowKnowledgeBase={agent?.id === "general"}
         knowledgeBases={knowledgeBases}
         onKnowledgeBasesChange={onKnowledgeBasesChange}
+        onComposeImages={composeImages}
       />
+      {composeOpen && onComposeImages && (
+        <ImageComposeDialog conversationImages={conversationImages} onCompose={onComposeImages} onClose={() => setComposeOpen(false)} />
+      )}
       <InputBranding />
     </>
   );

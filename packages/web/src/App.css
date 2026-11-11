@@ -919,6 +919,18 @@ html, body, #root {
 .media-section-title:first-child {
   margin-top: 0;
 }
+/* A section title with a toggle on the right (图片比例 · 更多). */
+.media-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 0 9px; }
+.media-section-head:first-child { margin-top: 0; }
+.media-section-head .media-section-title { margin: 0; }
+.media-section-more {
+  display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border: none; border-radius: 6px;
+  background: none; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+.media-section-more:hover { background: var(--bg-hover); color: var(--accent); }
+.media-section-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.media-section-more .media-chevron { width: 14px; height: 14px; margin: 0; transition: transform 0.15s; }
+.media-section-more[aria-expanded="true"] .media-chevron { transform: rotate(180deg); }
 
 /* Segmented control track shared by ratio / quality / duration rows. */
 .seg-track {
@@ -1102,7 +1114,7 @@ html, body, #root {
   height: 20px;
 }
 @media (max-width: 480px) {
-  .image-ratio-grid {
+  .image-ratio-grid:not(.image-ratio-grid--folded) {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
@@ -1471,6 +1483,10 @@ html, body, #root {
 }
 .input-box--scene textarea:focus { --mark: var(--accent); }
 .input-area--centered .input-box.input-box--scene textarea { min-height: 96px; }
+/* Below the prompt: inspiration chips on the left, 生成图片 at the frame's bottom-right corner. */
+.image-prompt-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 12px; }
+.image-prompt-footer .image-prompt-ideas { flex: 1 1 auto; min-width: 0; }
+.image-prompt-footer > :is(.btn-send, .btn-stop) { margin-left: auto; }
 .image-prompt-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .image-prompt-ideas > span { margin-right: 4px; color: var(--text-muted); font-size: 12px; }
 .image-prompt-ideas button {
@@ -1558,6 +1574,10 @@ html, body, #root {
   box-shadow: none;
 }
 .input-box--scene .btn-reference:hover:not(:disabled) { border-color: transparent; background: var(--bg-hover); box-shadow: none; }
+/* Tools that do not fit on one row (longer languages): show 参考图 / 选产品 as icons, then drop the selling-point tags. */
+.input-toolbar:is([data-fit="1"], [data-fit="2"]) .btn-reference-label,
+.input-toolbar[data-fit="2"] .btn-feature-badge { display: none; }
+.input-toolbar:is([data-fit="1"], [data-fit="2"]) .btn-reference:not(.btn-feature) { padding: 0 9px; }
 /* 「真实字体」开关：开启后图中文字用真实字体排版 */
 .btn-real-text-switch {
   position: relative; flex-shrink: 0; width: 26px; height: 15px; margin-left: 1px; border-radius: 999px;
@@ -1571,6 +1591,36 @@ html, body, #root {
 .btn-real-text.active .btn-real-text-switch { background: var(--accent); }
 .btn-real-text.active .btn-real-text-switch::after { transform: translateX(11px); }
 .btn-real-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 真实字体 / 图片合成：渐变图标块 + 卖点小标，比普通工具按钮更显眼 */
+.btn-reference.btn-feature { color: var(--text); font-weight: 500; }
+.btn-feature-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 7px;
+  background: var(--accent-grad); color: var(--text-on-accent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: transform 0.15s;
+}
+.btn-reference .btn-feature-icon svg { width: 13px; height: 13px; }
+.btn-feature:hover:not(:disabled) .btn-feature-icon { transform: rotate(-6deg) scale(1.08); }
+.btn-feature-badge {
+  position: relative; overflow: hidden; flex-shrink: 0;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--gen-card-from); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 16px;
+}
+.btn-feature-badge::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--bg-card) 75%, transparent) 50%, transparent 80%);
+  animation: btn-feature-shimmer 4.5s ease-in-out 1.2s infinite;
+}
+.btn-feature:disabled .btn-feature-badge::after { animation: none; }
+@keyframes btn-feature-shimmer {
+  0% { transform: translateX(-120%); }
+  30%, 100% { transform: translateX(120%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-feature-badge::after { animation: none; }
+  .btn-feature-icon { transition: none; }
+}
 .input-box--scene .media-trigger {
   height: auto;
   min-height: 36px;
@@ -4791,6 +4841,57 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .gen-white-notes p { margin: 0; }
 .gen-white-notes .gen-white-issue { color: var(--accent); }
 .gen-set .gen-white-notes { margin-top: 0; }
+/* 图片合成：从本对话和个人素材库挑图合成一张 */
+.image-compose { width: min(760px, calc(100vw - 32px)); }
+.image-compose-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.image-compose-body {
+  display: flex; flex-direction: column; gap: 16px; min-height: 160px; max-height: min(52vh, 520px);
+  overflow-y: auto; padding-right: 4px;
+}
+.image-compose-section { display: flex; flex-direction: column; gap: 10px; }
+.image-compose-section h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.image-compose-section-toggle {
+  display: flex; align-items: center; gap: 6px; padding: 8px 0; border: none; border-top: 1px solid var(--border);
+  background: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.image-compose-section-toggle svg { width: 16px; height: 16px; flex: none; transition: transform 0.15s; }
+.image-compose-section-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.image-compose-section-toggle { flex-wrap: wrap; }
+.image-compose-section-toggle strong { font-weight: 600; white-space: nowrap; }
+.image-compose-section-toggle span { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
+.image-compose-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.image-compose-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+@media (max-width: 480px) { .image-compose-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); } }
+.image-compose-tile {
+  position: relative; aspect-ratio: 1; padding: 0; overflow: hidden;
+  border: 2px solid transparent; border-radius: 10px; background: var(--bg-tool); cursor: pointer;
+}
+.image-compose-tile img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.2s; }
+.image-compose-tile.loaded img { opacity: 1; }
+.image-compose-tile:hover:not(:disabled) { border-color: var(--border-input); }
+.image-compose-tile.picked { border-color: var(--accent); }
+.image-compose-tile:disabled { cursor: default; opacity: 0.55; }
+.image-compose-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.image-compose-tile-failed {
+  display: flex; align-items: center; justify-content: center; height: 100%; padding: 6px;
+  color: var(--text-secondary); font-size: 12px;
+}
+.image-compose-check {
+  position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%;
+  border: 1.5px solid var(--login-hero-text); background: color-mix(in srgb, var(--login-hero) 45%, transparent);
+  color: var(--text-on-accent); font-size: 12px; font-weight: 600;
+}
+.image-compose-tile.picked .image-compose-check { border-color: var(--accent); background: var(--accent); }
+.image-compose-empty { margin: 4px 0; color: var(--text-secondary); font-size: 13px; }
+.image-compose-retry, .image-compose-clear {
+  padding: 0; border: none; background: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+}
+.image-compose-sentinel { height: 1px; }
+.image-compose-busy { z-index: 3; border-radius: inherit; font-size: 14px; }
+.image-compose-footer { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.image-compose-footer .gen-compose-layouts { align-items: center; }
+.image-compose-footer .gen-compose-gap { margin-left: 4px; }
 /* 选产品 */
 .product-picker { width: min(560px, calc(100vw - 32px)); }
 .product-picker-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }

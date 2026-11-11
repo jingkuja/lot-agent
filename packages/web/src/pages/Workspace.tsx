@@ -16,6 +16,7 @@ import type { ModelCatalog } from "../hooks/useModels.js";
 import { useDesktopShortcuts } from "../hooks/useDesktopShortcuts.js";
 import { api, type Conversation, type KnowledgeBaseRef, type User, type PickedFile } from "../api/client.js";
 import { GENERAL_ID } from "../lib/agent-order.js";
+import type { ComposeLayout } from "../lib/image-settings.js";
 import { EMPTY_SELECTED, fillModelDefaults, groupForKind, resolveImageSelection, resolveLlmSelection } from "../lib/model-defaults.js";
 
 /** Below this width the sidebar overlays the main area instead of sitting beside it. */
@@ -195,7 +196,7 @@ export function Workspace({
 
   const {
     channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear,
-    regenerate, generateMedia, redownloadGeneration, composeGeneration, redoGenerationImages, exportGeneration, editPoster,
+    regenerate, generateMedia, redownloadGeneration, composeGeneration, composeImages, redoGenerationImages, exportGeneration, editPoster,
   } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
@@ -344,6 +345,30 @@ export function Workspace({
     handleStartNewChat(openAgentId);
   }, [handleStartNewChat, openAgentId]);
 
+  // Creates the server conversation for a new chat and makes it the open one; null while one is already being made.
+  const createNewConversation = useCallback(async (): Promise<string | null> => {
+    if (!newAgentId || creatingConversation.current) return null;
+    const featureScope = newAgentId === lockedAgentId ? newConversationScope : undefined;
+    creatingConversation.current = true;
+    setIsCreatingConversation(true);
+    let conv;
+    try {
+      conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
+      if (newAgentId === "general") await window.lotDesktop?.bindLocalPermission(conv.id);
+    } finally {
+      creatingConversation.current = false;
+      setIsCreatingConversation(false);
+    }
+    activeIdRef.current = conv.id;
+    setActiveId(conv.id);
+    setNewAgentId(null);
+    // The server list omits 0-message conversations, so optimistically
+    // surface this one in the sidebar instead of refreshing (which wouldn't
+    // return it yet). stream_end triggers a real refresh once it has content.
+    addLocal(conv);
+    return conv.id;
+  }, [newAgentId, newProjectId, lockedAgentId, newConversationScope, setActiveId, addLocal]);
+
   // Send wrapper: creates the server conversation on first message if needed.
   const doSend = useCallback(
     async (
@@ -362,27 +387,11 @@ export function Workspace({
         }
       };
       if (newAgentId) {
-        const featureScope = newAgentId === lockedAgentId ? newConversationScope : undefined;
         if (creatingConversation.current) return;
         onSendStart?.();
-        creatingConversation.current = true;
-        setIsCreatingConversation(true);
-        let conv;
-        try {
-          conv = await api.createConversation(undefined, newAgentId, featureScope, newProjectId ?? undefined);
-          if (newAgentId === "general") await window.lotDesktop?.bindLocalPermission(conv.id);
-        } finally {
-          creatingConversation.current = false;
-          setIsCreatingConversation(false);
-        }
-        activeIdRef.current = conv.id;
-        setActiveId(conv.id);
-        setNewAgentId(null);
-        // The server list omits 0-message conversations, so optimistically
-        // surface this one in the sidebar instead of refreshing (which wouldn't
-        // return it yet). stream_end triggers a real refresh once it has content.
-        addLocal(conv);
-        await beforeDispatch?.(conv.id);
+        const id = await createNewConversation();
+        if (!id) return;
+        await beforeDispatch?.(id);
         dispatch();
         return;
       }
@@ -390,11 +399,23 @@ export function Workspace({
       if (activeIdRef.current) await beforeDispatch?.(activeIdRef.current);
       dispatch();
     },
-    [
-      newAgentId, newProjectId, setActiveId, addLocal, send, generateMedia, openAgent, selectedModels, modelCatalog,
-      lockedAgentId, newConversationScope, onSendStart, beforeDispatch,
-    ]
+    [newAgentId, send, generateMedia, openAgent, selectedModels, modelCatalog, onSendStart, beforeDispatch, createNewConversation]
   );
+
+  // 图片合成 from the composer works in a new chat too (picking from 个人素材), so it creates the conversation first.
+  const handleComposeImages = useCallback(async (urls: string[], layout: ComposeLayout, gap: boolean, prompt: string) => {
+    let id = activeIdRef.current;
+    if (newAgentId) {
+      if (creatingConversation.current) return "合成失败，请稍后重试";
+      try {
+        id = await createNewConversation();
+      } catch {
+        return "合成失败，请稍后重试";
+      }
+    }
+    if (!id) return "合成失败，请稍后重试";
+    return composeImages(id, urls, layout, gap, prompt);
+  }, [newAgentId, createNewConversation, composeImages]);
 
   // Edits happen inside an existing image conversation, so no conversation is created here.
   const handleEditImage = useCallback((prompt: string, imageUrl: string, settings?: unknown) => {
@@ -548,6 +569,7 @@ export function Workspace({
             onRegenerate={channel === "feishu" ? undefined : regenerate}
             onRedownloadGeneration={redownloadGeneration}
             onComposeGeneration={composeGeneration}
+            onComposeImages={handleComposeImages}
             onRedoGeneration={redoGenerationImages}
             onExportGeneration={exportGeneration}
             onEditPoster={editPoster}

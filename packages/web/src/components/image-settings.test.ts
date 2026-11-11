@@ -43,7 +43,18 @@ describe("image composer settings", () => {
     expect(document.querySelector('[aria-label="宽度"]')).toBeNull();
     expect(document.querySelector('.input-box .model-picker')).toBeNull();
     act(() => button("4K").click());
+    // 图片比例 shows one row (智能 … 4:3) until 更多; the section order is 清晰度, 图片比例, 模型, 质量.
+    const ratios = () => [...document.querySelectorAll(".image-ratio-grid .seg")].map((item) => item.textContent?.trim());
+    expect(ratios()).toEqual(["智能", "1:1", "3:2", "2:3", "3:4", "4:3"]);
+    expect([...document.querySelectorAll(".media-section-title")].map((item) => item.textContent)).toEqual([
+      "清晰度", "图片比例", "模型", "质量", "图片张数",
+    ]);
+    act(() => button("更多").click());
+    expect(ratios()).toHaveLength(11);
     act(() => button("9:16").click());
+    act(() => button("收起").click());
+    // A choice from the hidden rows stays in view as the folded row's last place.
+    expect(ratios()).toEqual(["智能", "1:1", "3:2", "2:3", "3:4", "9:16"]);
     const range = document.querySelector<HTMLInputElement>('input[type="range"]')!;
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(range, "3");

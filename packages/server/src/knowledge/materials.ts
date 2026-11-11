@@ -13,7 +13,7 @@ const personal = `a.user_id=$1::text AND NOT EXISTS (
 export class KnowledgeMaterials {
   constructor(readonly repository: KnowledgeRepository, readonly storage: PrivateKnowledgeStorage, readonly dataRoot: string) {}
   async list(owner: string, limit = 30, before?: string, beforeId?: string, filter: { type?: string; source?: string; tag?: string; query?: string } = {}) {
-    const { rows } = await this.repository.pool.query(`SELECT a.id,a.type,a.mime,a.original_name,a.size_bytes,a.width,a.height,a.duration_sec,a.created_at,a.created_at::text AS cursor_time,
+    const { rows } = await this.repository.pool.query(`SELECT a.id,a.type,a.mime,a.url,a.original_name,a.size_bytes,a.width,a.height,a.duration_sec,a.created_at,a.created_at::text AS cursor_time,
       (SELECT id FROM rag_items i WHERE i.owner_id=$1::uuid AND i.source_asset_id=a.id AND i.deleted_at IS NULL) AS archived_item_id
       FROM assets a WHERE ${personal} AND ($2::timestamptz IS NULL OR (a.created_at,a.id)<($2::timestamptz,COALESCE($4::uuid,'00000000-0000-0000-0000-000000000000'::uuid))) AND ($5::text IS NULL OR CASE WHEN a.mime LIKE 'image/%' THEN 'image' WHEN a.mime LIKE 'audio/%' THEN 'audio' WHEN a.mime LIKE 'video/%' THEN 'video' ELSE 'document' END=$5)
       AND ($6::text IS NULL OR ($6='upload' AND a.type='upload') OR ($6='generated' AND a.type<>'upload') OR ($6='archived' AND EXISTS(SELECT 1 FROM rag_items i WHERE i.owner_id=$1::uuid AND i.source_asset_id=a.id AND i.deleted_at IS NULL)))

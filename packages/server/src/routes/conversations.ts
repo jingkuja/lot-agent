@@ -944,6 +944,67 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     return c.json({ composite });
   });
 
+  // POST /:id/compose — 图片合成 from the composer: join images the user picked (this conversation's results or
+  // generated images from 个人素材) into one picture, in the order picked. Same local work as the per-generation
+  // compose: no model request, nothing metered. The result is posted to the conversation as a finished image message.
+  app.post("/:id/compose", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const body = await c.req.json().catch(() => null) as { urls?: unknown; layout?: unknown; gap?: unknown; prompt?: unknown } | null;
+    const layout = parseComposeLayout(body?.layout);
+    if (!layout) return c.json({ error: "unknown compose layout" }, 400);
+    const urls = Array.isArray(body?.urls) ? body.urls : [];
+    if (!urls.every((url): url is string => typeof url === "string") || new Set(urls).size !== urls.length) {
+      return c.json({ error: "urls must be distinct image URLs" }, 400);
+    }
+    if (!composeLayoutFits(layout, urls.length)) return c.json({ error: "这个版式不适用于当前图片数量" }, 400);
+    const gap = body?.gap === true;
+    if (!deps.assets) return c.json({ error: "图片合成暂不可用" }, 503);
+    const conv = await service.db.getConversation(conversationId);
+    if (!conv || (conv as { user_id?: string }).user_id !== userId) return c.json({ error: "Conversation not found" }, 404);
+    if (conv.channel === "feishu") return c.json({ error: "请在飞书中发送任务" }, 409);
+
+    // Every source must be this user's own generated image; the URLs sent are never fetched.
+    const sources: Buffer[] = [];
+    for (const url of urls) {
+      const key = outputStorageKey(url);
+      const stored = key ? await service.db.getGeneratedByStorageKey(key) : null;
+      if (!key || !stored || stored.user_id !== userId || !stored.mime?.startsWith("image/") || !await deps.assets.exists(key)) {
+        return c.json({ error: "有图片已不存在，无法合成" }, 409);
+      }
+      sources.push(await deps.assets.get(key));
+    }
+    let composed;
+    try {
+      composed = await composeImages(sources, layout, { gap });
+    } catch (error) {
+      console.warn("[image.compose] picked images failed", { conversationId, layout, errorType: (error as Error)?.name });
+      return c.json({ error: "图片合成失败，请稍后重试" }, 500);
+    }
+    const assetId = randomUUID();
+    const key = `${assetId}.jpg`;
+    const { url } = await deps.assets.put({ key, body: composed.body, contentType: composed.mime });
+    await service.db.createAsset({
+      id: assetId, taskId: null, userId, type: "image", storageKey: key, url,
+      mime: composed.mime, sizeBytes: composed.body.byteLength, width: composed.width, height: composed.height,
+    });
+    // The client sends the request line in the user's language; it is display text only.
+    const prompt = typeof body?.prompt === "string" && body.prompt.trim() ? body.prompt.trim().slice(0, 200) : "图片合成";
+    const userMessageId = randomUUID();
+    await service.db.addMessage(userMessageId, conversationId, "user", prompt);
+    const assistantMessageId = randomUUID();
+    const metadata = {
+      // No settings: the joined size is not a model size, so 编辑 on it uses the composer's settings.
+      kind: "generation", mediaType: "image", prompt, status: "completed", settings: {},
+      assets: [{ url, mime: composed.mime }], composedFrom: { layout, gap, count: urls.length },
+    };
+    await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", { metadata });
+    return c.json({
+      userMessage: { id: userMessageId, role: "user", content: prompt },
+      assistantMessage: { id: assistantMessageId, role: "assistant", status: "completed", metadata },
+    });
+  });
+
   // POST /:id/generations/:messageId/poster — 真实字体: change the wording (or template) of one typeset image and render
   // it again on its stored text-free background. Local work only: no model request, nothing metered. The picture is
   // stored under a key made from the background and the layout, so the same edit is rendered once.

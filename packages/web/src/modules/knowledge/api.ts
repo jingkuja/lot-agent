@@ -8,7 +8,10 @@ export interface Results { modeUsed: string; degraded: boolean; warnings: string
 export interface Page<T> { data: T[]; nextCursor: string | null }
 export interface Fact { id: string; key: string; value: string | number | boolean | string[]; value_type: string; category: string; source: string; active: boolean; current: boolean; share_with_api: boolean; valid_from: string | null; valid_until: string | null; version: number; collection_ids: string[] }
 export interface Candidate { id: string; key: string; value: string | null; operation: string }
-export interface Material { width: number | null; height: number | null; duration_sec: number | null; id: string; type: string; mime: string; original_name: string | null; size_bytes: number; created_at: string; cursor_time: string; archived_item_id: string | null }
+export interface Material {
+  url: string; width: number | null; height: number | null; duration_sec: number | null; id: string; type: string; mime: string;
+  original_name: string | null; size_bytes: number; created_at: string; cursor_time: string; archived_item_id: string | null;
+}
 export interface Source { content: string | null; description: string; blocks: Array<{ text: string; citation?: KnowledgeCitation }>; diagnostics: { warnings?: string[] } }
 export class DuplicateFileError extends Error { constructor(readonly duplicate: { id: string; title: string }) { super("已存在相同原件"); } }
 export const fileMime = (file: File) => ({ txt: "text/plain", md: "text/markdown", pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", mp4: "video/mp4", webm: "video/webm" } as Record<string, string>)[file.name.split(".").at(-1)?.toLowerCase() ?? ""] ?? file.type;

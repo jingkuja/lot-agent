@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n/index.js";
-import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VIDEO_DURATIONS, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
 import {
   DEFAULT_IMAGE_QUALITY,
@@ -91,6 +91,8 @@ interface InputBoxProps {
   imageScenes?: boolean;
   /** 图片工作台位于生成结果下方时打开：初始收成一行，发送和生成结束后自动收起，点击提示词或左侧类型展开。 */
   imageCollapsible?: boolean;
+  /** 图片合成: opens the picker for joining generated images. Shown in image mode only. */
+  onComposeImages?: () => void;
 }
 
 /** The composer remounts when a new chat gets its first message (and on conversation switches);
@@ -138,6 +140,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   imageCount = true,
   imageScenes = false,
   imageCollapsible = false,
+  onComposeImages,
 }: InputBoxProps, ref) {
   const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
@@ -596,6 +599,69 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   useEffect(() => { if (sceneTabs) handleInput(); }, [sceneTabs, promptValue, handleInput, collapsed]);
 
+  // The open workbench keeps its tools on one row in every language: when they do not fit, the bar first shows
+  // 参考图 / 选产品 as icons, then drops the small selling-point tags. Chinese fits as is. On a phone, where the settings
+  // take their own row, the tools still try to stay on one row. `data-fit` is not rendered by React, so it survives renders.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const bar = toolbarRef.current;
+    if (!sceneTabs || collapsed || !bar) { bar?.removeAttribute("data-fit"); return; }
+    const measure = () => {
+      const left = bar.querySelector<HTMLElement>(".input-toolbar-left");
+      const right = bar.querySelector<HTMLElement>(".input-toolbar-right");
+      const items = [...left?.children ?? []].filter((item) => item.tagName !== "DIALOG" && (item as HTMLElement).offsetWidth > 0);
+      const middle = (item: Element) => { const box = item.getBoundingClientRect(); return box.top + box.height / 2; };
+      const first = items[0] ? middle(items[0]) : 0;
+      const oneRow = items.every((item) => Math.abs(middle(item) - first) < 10);
+      return { oneRow, sameRow: oneRow && (!right || !items.length || Math.abs(middle(right) - first) < 10) };
+    };
+    let frame = 0;
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const levels = ["0", "1", "2"];
+        const tried = levels.map((level) => { bar.setAttribute("data-fit", level); return measure(); });
+        const level = tried.findIndex((row) => row.sameRow) >= 0 ? tried.findIndex((row) => row.sameRow)
+          : tried.findIndex((row) => row.oneRow) >= 0 ? tried.findIndex((row) => row.oneRow) : 2;
+        bar.setAttribute("data-fit", levels[level]);
+      });
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(bar);
+    const right = bar.querySelector(".input-toolbar-right");
+    if (right) observer.observe(right);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [sceneTabs, collapsed, t, realTextAvailable, onComposeImages]);
+
+  // 生成图片 / 停止. In the open image workbench it sits at the prompt's bottom-right; elsewhere at the end of the toolbar.
+  const sendInPrompt = sceneTabs && !collapsed;
+  const sendControl = !embedded && (disabled ? (
+    <button onClick={onStop} className="btn-stop" title={t("停止")}>
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+      {sceneTabs && <span>{t("停止生成")}</span>}
+    </button>
+  ) : (
+    <button
+      onClick={handleSend}
+      className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
+      disabled={checkingMedia || (
+        !promptValue.trim() && files.length === 0
+        && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
+        && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
+      )}
+      title={t(sceneTabs ? "生成图片" : "发送")}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5" />
+        <polyline points="5 12 12 5 19 12" />
+      </svg>
+      {sceneTabs && <span>{t("生成图片")}</span>}
+    </button>
+  ));
+
   return (
     <>
     <div className={[
@@ -777,11 +843,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         autoFocus={autoFocus}
       />
       {collapsed && files.length > 0 && <span className="image-studio-slate-refs">{t("参考图 {0}", [files.length])}</span>}
-      {sceneTabs && !promptValue.trim() && !disabled && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
-        setPromptValue(prompt);
-        textareaRef.current?.focus();
-      }} />}
-      <div className={`input-toolbar ${videoMode ? "input-toolbar--video" : ""}`}>
+      {sendInPrompt && (
+        <div className="image-prompt-footer">
+          {!promptValue.trim() && !disabled && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
+            setPromptValue(prompt);
+            textareaRef.current?.focus();
+          }} />}
+          {sendControl}
+        </div>
+      )}
+      <div ref={toolbarRef} className={`input-toolbar ${videoMode ? "input-toolbar--video" : ""}`}>
         <input
           ref={fileInputRef}
           type="file"
@@ -899,6 +970,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               }}
               disabled={disabled}
               title={t("最多5张")}
+              aria-label={t("参考图")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -906,27 +978,45 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 <path d="m17 13-4-4-7 7" />
                 <path d="M18.5 16.5v5M16 19h5" />
               </svg>
-              {t("参考图")}</button>
+              <span className="btn-reference-label">{t("参考图")}</span></button>
+          )}
+          {/* 真实字体 and 图片合成 are the features worth noticing: gradient icon tile and a short selling point. */}
+          {realTextAvailable && (
+            <button type="button" className={`btn-reference btn-feature btn-real-text${realText ? " active" : ""}`} disabled={disabled}
+              aria-pressed={realText} onClick={() => setRealText(!realText)}
+              title={t("开启后，图里的文字用真实字体排版，不会出现错字或模糊；出图后可以免费改字")}>
+              <span className="btn-feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 7V5h14v2M12 5v14M9 19h6" />
+                </svg>
+              </span>
+              {t("真实字体")}
+              <span className="btn-feature-badge">{t("不错字")}</span>
+              <span className="btn-real-text-switch" aria-hidden="true" />
+            </button>
+          )}
+          {mode === "image" && onComposeImages && (
+            <button type="button" className="btn-reference btn-feature" disabled={disabled} onClick={onComposeImages}
+              title={t("把本对话或个人素材库里生成的图片合成一张，不扣积分")}>
+              <span className="btn-feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="8" height="8" rx="1.5" />
+                  <rect x="13" y="3" width="8" height="8" rx="1.5" />
+                  <rect x="3" y="13" width="18" height="8" rx="1.5" />
+                </svg>
+              </span>
+              {t("图片合成")}
+              <span className="btn-feature-badge">{t("免费")}</span>
+            </button>
           )}
           {sceneTabs && (
             <button type="button" className="btn-reference" disabled={disabled} onClick={() => { setProductNotice(""); setProductPickerOpen(true); }}
-              title={t("从「获客宝」的产品资料里选，产品图和卖点自动带入")}>
+              title={t("从「获客宝」的产品资料里选，产品图和卖点自动带入")} aria-label={t("选产品")}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
                 <circle cx="7.5" cy="7.5" r="1.5" />
               </svg>
-              {t("选产品")}</button>
-          )}
-          {realTextAvailable && (
-            <button type="button" className={`btn-reference btn-real-text${realText ? " active" : ""}`} disabled={disabled} aria-pressed={realText}
-              onClick={() => setRealText(!realText)}
-              title={t("开启后，图里的文字用真实字体排版，不会出现错字或模糊；出图后可以免费改字")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 7V5h14v2M12 5v14M9 19h6" />
-              </svg>
-              {t("真实字体")}
-              <span className="btn-real-text-switch" aria-hidden="true" />
-            </button>
+              <span className="btn-reference-label">{t("选产品")}</span></button>
           )}
           {productPickerOpen && (
             <ProductPickerDialog
@@ -1143,31 +1233,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               onChange={handleSettingsChange}
             />
           )}
-          {!embedded && (disabled ? (
-            <button onClick={onStop} className="btn-stop" title={t("停止")}>
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-              {sceneTabs && <span>{t("停止生成")}</span>}
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-              disabled={checkingMedia || (
-                !promptValue.trim() && files.length === 0
-                && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
-                && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
-              )}
-              title={t(sceneTabs ? "生成图片" : "发送")}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-              {sceneTabs && <span>{t("生成图片")}</span>}
-            </button>
-          ))}
+          {!sendInPrompt && sendControl}
         </div>
       </div>
       {knowledgeOpen && (
