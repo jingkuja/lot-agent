@@ -9,10 +9,13 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
+import type { ImageInputContext } from "../api/client.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { AskUserCard } from "./AskUserCard.js";
+import { useFileLinks } from "../hooks/useFileLinks.js";
+import { IMAGE_SCENES } from "../lib/image-settings.js";
 import { FileLink } from "./FileLink.js";
 import { OutlineCard } from "./OutlineCard.js";
 import { PptArtifactCard } from "./PptArtifactCard.js";
@@ -49,6 +52,34 @@ interface MessageBubbleProps {
   /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+}
+
+function ImageInputDetails({ input }: { input: ImageInputContext }) {
+  const { t } = useI18n();
+  const refs = input.references ?? [];
+  const { ready, link } = useFileLinks(refs.filter((ref) => ref.kind !== "poster").map((ref) => ref.url));
+  const scene = IMAGE_SCENES.find((item) => item.value !== "free" && item.value === input.scene);
+  const labels = [
+    input.realText && "真实字体",
+    scene?.label,
+    refs.some((ref) => ref.kind === "output") && "编辑",
+  ].filter((label): label is string => !!label);
+  if (!labels.length && !refs.length) return null;
+  return <div className="message-image-input">
+    {labels.length > 0 && <div className="message-image-modes">
+      {labels.map((label) => <span key={label}>{t(label)}</span>)}
+    </div>}
+    {refs.length > 0 && <div className="message-attachments">
+      {refs.map((ref, index) => {
+        const label = ref.kind === "poster" ? t("爆款参考图") : ref.kind === "output" ? t("编辑原图") : t("参考图{0}", [index + 1]);
+        const url = ref.kind === "poster" ? ref.url : ready ? link(ref.url) : undefined;
+        return <a className="attachment-chip" key={index} href={url} target="_blank" rel="noreferrer">
+          {url && <img className="attachment-thumb" src={url} alt="" loading="lazy" />}
+          <span className="attachment-name">{label}</span>
+        </a>;
+      })}
+    </div>}
+  </div>;
 }
 
 export function MessageBubble({
@@ -98,6 +129,7 @@ export function MessageBubble({
     return (
       <div className="message-wrapper message-user">
         <div className="message-wrapper-inner">
+          {message.imageInput && <ImageInputDetails input={message.imageInput} />}
           {userContent && <div className="message-content">{userContent}</div>}
           {message.attachments && message.attachments.length > 0 && (
             <div className="message-attachments">

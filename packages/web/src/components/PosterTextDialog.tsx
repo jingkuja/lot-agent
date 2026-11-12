@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { POSTER_LIMITS, POSTER_TEMPLATES, type PosterFieldName, type PosterFields, type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
+import { POSTER_LIMITS, POSTER_TEMPLATES, posterTemplateFor, type PosterFieldName, type PosterFields, type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_TEMPLATE_LABELS: Record<PosterTemplate, string> = {
@@ -34,6 +34,9 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
   const [fields, setFields] = useState<PosterFields>(poster.fields);
   const [points, setPoints] = useState(poster.fields.points.join("\n"));
   const [template, setTemplate] = useState<PosterTemplate>(poster.template);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number }>();
+  const fit = (value: PosterTemplate) => dimensions ? posterTemplateFor(value, dimensions.width, dimensions.height) : value;
+  const effective = fit(template);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -54,7 +57,7 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     const lines = points.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, POSTER_LIMITS.points);
     let failure: string | undefined;
     try {
-      failure = await onSubmit({ ...fields, points: lines }, template);
+      failure = await onSubmit({ ...fields, points: lines }, effective);
     } catch {
       failure = "改字失败，请稍后重试";
     }
@@ -75,20 +78,25 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
       </header>
       <form className="poster-text-body" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="image-edit-preview poster-text-preview">
-          <img src={imageUrl} alt={t("当前生成图")} />
+          <img src={imageUrl} alt={t("当前生成图")} onLoad={({ currentTarget }) => {
+            setDimensions({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight });
+          }} />
         </div>
         <div className="poster-text-fields">
           {cleared.length > 0 && (
             <p className="poster-text-notice" role="status">{t("这些内容没在你的描述里找到，已留空，可以在这里填写：{0}", [cleared.join(t("、"))])}</p>
           )}
           <div className="gen-compose-layouts" role="radiogroup" aria-label={t("文字位置")}>
-            {POSTER_TEMPLATES.map((item) => (
-              <button key={item} type="button" role="radio" aria-checked={item === template}
-                className={`gen-compose-layout${item === template ? " active" : ""}`} onClick={() => setTemplate(item)}>
+            {POSTER_TEMPLATES.filter((item) => fit(item) === item).map((item) => (
+              <button key={item} type="button" role="radio" aria-checked={item === effective}
+                className={`gen-compose-layout${item === effective ? " active" : ""}`} onClick={() => setTemplate(item)}>
                 {t(POSTER_TEMPLATE_LABELS[item])}
               </button>
             ))}
           </div>
+          {effective !== fit(poster.template) && (
+            <p className="poster-text-notice" role="status">{t("改变文字位置后，文字可能遮挡图片主体。")}</p>
+          )}
           <label className="poster-text-field">
             <span>{t("标题")}</span>
             <input autoFocus value={fields.title} maxLength={POSTER_LIMITS.title} onChange={(event) => set("title", event.target.value)} />

@@ -355,6 +355,25 @@ describe("runGenerationJob", () => {
     expect(deps.urlToBytes).toHaveBeenCalledWith("/static/uploads/reference.png", { signal: undefined });
   });
 
+  it("reads an owned generated image from storage for a Base64 edit", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/png;base64,YQ==" })),
+    };
+    const readOwnOutput = vi.fn(async () => ({ body: Buffer.from("reference"), mime: "image/png" }));
+    const { deps } = fakeDeps(provider, { readOwnOutput });
+    const url = "/static/assets/reference.png";
+    await runGenerationJob(deps, {
+      ...job, input: { ...job.input, media: [{ type: "reference_image", url }] },
+    }, "image");
+
+    expect(readOwnOutput).toHaveBeenCalledWith(url);
+    expect(deps.urlToBytes).not.toHaveBeenCalledWith(url, expect.anything());
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+      media: [{ type: "reference_image", url: "data:image/png;base64,cmVmZXJlbmNl" }],
+    }));
+  });
+
   it.each(["linqu-image", "lingqu-image"])("sends %s Agent URLs in the gateway's image array", async (model) => {
     const output = "data:image/png;base64,YQ==";
     const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json({ data: [{ b64_json: "YQ==" }] }));

@@ -258,10 +258,12 @@ export function Workspace({
   // A link can open an Agent directly, for example a draft prepared in another Agent's chat.
   const linkedAgentId = useRef(isLocked ? null : new URLSearchParams(window.location.search).get("agent"));
 
+  const [imageDraftRevision, setImageDraftRevision] = useState(0);
   const handleStartNewChat = useCallback(
     (agentId: string) => {
       if (creatingConversation.current) return;
       setActiveAgentId(agentId);
+      setImageDraftRevision((value) => value + 1);
       if (agentId === "marketing_video" || agentId === "digital_presenter") setStudioRevision((value) => value + 1);
       setNewProjectId(null);
       setNewAgentId(agentId);
@@ -319,6 +321,7 @@ export function Workspace({
       // stream-event scoping both compare against activeIdRef synchronously.
       activeIdRef.current = id;
       setActiveId(id);
+      setImageDraftRevision((value) => value + 1);
       clear();
       loadMessages(id);
       setPreviewContent(null);
@@ -375,13 +378,14 @@ export function Workspace({
       content: string,
       files: PickedFile[] = [],
       settings?: unknown,
-      knowledgeBases: KnowledgeBaseRef[] = []
+      knowledgeBases: KnowledgeBaseRef[] = [],
+      requestId?: string,
     ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
           const modelId = kind === "image" ? resolveImageSelection(selectedModels.image, modelCatalog.image) : selectedModels.video;
-          generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined);
+          return generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined, [], requestId);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);
         }
@@ -392,12 +396,14 @@ export function Workspace({
         const id = await createNewConversation();
         if (!id) return;
         await beforeDispatch?.(id);
-        dispatch();
-        return;
+        if (activeIdRef.current !== id) return;
+        return dispatch();
       }
       onSendStart?.();
-      if (activeIdRef.current) await beforeDispatch?.(activeIdRef.current);
-      dispatch();
+      const id = activeIdRef.current;
+      if (id) await beforeDispatch?.(id);
+      if (activeIdRef.current !== id) return;
+      return dispatch();
     },
     [newAgentId, send, generateMedia, openAgent, selectedModels, modelCatalog, onSendStart, beforeDispatch, createNewConversation]
   );
@@ -560,6 +566,7 @@ export function Workspace({
             onManageKnowledge={knowledgeAvailable ? () => openKnowledge() : undefined}
             messages={messages}
             onSend={doSend}
+            imageDraftRevision={imageDraftRevision}
             onStop={stop}
             isStreaming={isStreaming}
             activeConversationId={activeId}

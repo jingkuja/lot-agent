@@ -10,12 +10,12 @@ import { ImageComposeDialog, type ComposeImagesHandler } from "./ImageComposeDia
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
-import type { ImageSettings, VideoSettings } from "./MediaSettings.js";
+import type { ImageSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
-import type { Agent, CatalogModel, KnowledgeBaseRef, PickedFile } from "../api/client.js";
+import type { Agent, CatalogModel, KnowledgeBaseRef } from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
@@ -27,7 +27,8 @@ interface ChatPanelProps {
   onAttachmentConsumed?: () => void;
   onManageKnowledge?: () => void;
   messages: DisplayMessage[];
-  onSend: (content: string, files: PickedFile[], settings?: ImageSettings | VideoSettings, knowledgeBases?: KnowledgeBaseRef[]) => void | Promise<void>;
+  imageDraftRevision?: number;
+  onSend: NonNullable<React.ComponentProps<typeof InputBox>["onSend"]>;
   onStop: () => void;
   isStreaming: boolean;
   activeConversationId: string | null;
@@ -154,6 +155,7 @@ export function ChatPanel({
   activeConversationId, onNewVideo, videoPublication,
   messages,
   onSend,
+  imageDraftRevision,
   onStop,
   isStreaming,
   onRegenerate,
@@ -249,6 +251,7 @@ export function ChatPanel({
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <DesktopWorkspaceBar disabled={isStreaming} control={desktopControl} />
       <InputBox
+        key={mode === "image" ? imageDraftRevision : undefined}
         ref={inputRef}
         toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
         onDraftChange={onDraftChange}
@@ -292,8 +295,17 @@ export function ChatPanel({
   // Presenter videos are durable drafts with their own jobs, never chat messages.
   if (agent?.id === "digital_presenter") return <DigitalPresenterStudio key={userId ?? "anonymous"} ownerId={userId} onDraftChange={onDraftChange} />;
 
-  // Empty conversation: center the (enlarged) input in the page.
-  if (isEmpty) {
+  const emptyGreeting = <>
+    <p className="chat-empty-greeting">
+      {t(timeGreeting())}
+      {userName ? `，${userName}` : ""}
+    </p>
+    <h1 className="chat-empty-title">{t(agent?.name) ?? t("借势智算")}</h1>
+    {agent?.description && <p className="chat-empty-desc">{t(agent.description)}</p>}
+  </>;
+  const emptyImage = isEmpty && mode === "image";
+  // Keep the same input mounted through the first image submission.
+  if (isEmpty && !emptyImage) {
     if (emptyDashboard) {
       return (
         <div className="chat-panel chat-panel--empty chat-panel--digital-home">
@@ -308,14 +320,7 @@ export function ChatPanel({
       <div className="chat-panel chat-panel--empty">
         <LandscapeBackdrop className="chat-empty-landscape" />
         <div className="chat-empty-hero">
-          <p className="chat-empty-greeting">
-            {t(timeGreeting())}
-            {userName ? `，${userName}` : ""}
-          </p>
-          <h1 className="chat-empty-title">{t(agent?.name) ?? t("借势智算")}</h1>
-          {agent?.description && (
-            <p className="chat-empty-desc">{t(agent.description)}</p>
-          )}
+          {emptyGreeting}
           <div className="input-area input-area--centered">{inputEl}</div>
         </div>
       </div>
@@ -323,8 +328,9 @@ export function ChatPanel({
   }
 
   return (
-    <div className="chat-panel">
-      <div className="chat-messages">
+    <div className={emptyImage ? "chat-panel chat-panel--empty" : "chat-panel"}>
+      {emptyImage && <LandscapeBackdrop className="chat-empty-landscape" />}
+      {!emptyImage && <div className="chat-messages">
         {messages.map((msg, i) => {
           const hasInteractive =
             msg.role === "assistant" &&
@@ -344,7 +350,7 @@ export function ChatPanel({
                 msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
               }
               onSelectForPreview={onSelectForPreview}
-              onQuickReply={isStreaming || readOnly ? undefined : (text) => onSend(text, [])}
+              onQuickReply={isStreaming || readOnly ? undefined : (text) => { void onSend(text, []); }}
               askAnswer={askAnswer}
               askInteractive={hasInteractive && askAnswer === undefined && !isStreaming}
               failedToolNames={failedTools}
@@ -366,8 +372,11 @@ export function ChatPanel({
         )}
         <DesktopApprovalCards control={desktopControl} />
         <div ref={messagesEndRef} />
+      </div>}
+      <div className={emptyImage ? "chat-empty-hero" : "chat-composer"}>
+        {emptyImage && emptyGreeting}
+        <div className={`input-area${emptyImage ? " input-area--centered" : ""}`}>{inputEl}</div>
       </div>
-      <div className="input-area">{inputEl}</div>
     </div>
   );
 }

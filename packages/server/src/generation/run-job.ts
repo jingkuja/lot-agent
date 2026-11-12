@@ -151,6 +151,11 @@ async function prepareImageReferences(
     return Promise.all(media.map(async (item) => ({ ...item, url: await agentImageReferenceUrl(deps, item.url) })));
   }
   return Promise.all(media.map(async (item) => {
+    const localOutput = item.url.startsWith("/static/assets/") || item.url.startsWith(publicStaticUrl("/static/assets/"));
+    if (deps.readOwnOutput && localOutput) {
+      const { body, mime } = await deps.readOwnOutput(item.url);
+      return { ...item, url: `data:${mime};base64,${body.toString("base64")}` };
+    }
     const source = await publicReference(deps, item.url) as string;
     return { ...item, url: await imageReferenceDataUrl(deps, source) };
   }));
@@ -296,7 +301,7 @@ async function downloadAndFinalize(
         try {
           const rendered = await renderPoster(body, layout);
           ({ body, mime } = rendered);
-          posters.push(rendered.overflow ? { ...layout, overflow: true } : layout);
+          posters.push({ ...layout, template: rendered.template, ...(rendered.overflow ? { overflow: true } : {}) });
         } catch (err) {
           // Best effort: the picture is kept without text and the card can typeset it again.
           console.warn("[image.poster] render failed", { taskId: job.id, errorType: (err as Error)?.name });

@@ -58,7 +58,7 @@ export function useChat(
   // touch the view while its conversation is the one on screen, otherwise a
   // concurrent chat bleeds its reply into whatever conversation is displayed.
   const streamsRef = useRef<Map<string, AbortController>>(new Map());
-  const genPollRef = useRef<{ cancelled: boolean } | null>(null);
+  const genPollRef = useRef<{ cancelled: boolean; submission?: AbortController } | null>(null);
   /** Set below; loadMessages resumes watching redos through it. */
   const pollRedoRef = useRef<((cid: string, taskId: string) => void) | null>(null);
   useEffect(() => {
@@ -197,6 +197,7 @@ export function useChat(
               settings: parsedMeta.mediaType === "image" ? generationSettings(parsedMeta.settings) : undefined,
               scene: sceneOf(parsedMeta),
               composites: generationComposites(parsedMeta.composites),
+              longImage: parsedMeta.composedFrom?.layout === "vertical",
               redo: generationRedo(parsedMeta.redo),
               whiteChecks: whiteBackgroundChecks(parsedMeta.whiteChecks),
               posters: storedPosters(parsedMeta.posters),
@@ -212,6 +213,7 @@ export function useChat(
         runStatus: parsedMeta?.runStatus as DisplayMessage["runStatus"],
         thinking: parsedMeta?.thinking as string | undefined,
         knowledgeSources: parsedMeta?.knowledgeSources as DisplayMessage["knowledgeSources"],
+        imageInput: role === "user" ? parsedMeta?.imageInput : undefined,
         attachments:
           role === "user"
             ? (parsedMeta?.attachments as UploadedAttachment[] | undefined)
@@ -514,18 +516,22 @@ export function useChat(
     streamMessage(lastUserContent, [], lastUserAttachments, undefined, lastUserKnowledgeBases);
   }, [state.messages, state.isStreaming, conversationId, streamMessage]);
 
+  const imageUploads = useRef(new WeakMap<File, UploadedAttachment>());
   const generateMedia = useCallback(
     // `references` are image URLs the server already stores (e.g. a generated
     // image being edited), sent as reference images without a re-upload.
-    (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string, references: string[] = []) => {
+    async (
+      prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [],
+      modelId?: string, references: string[] = [], requestId?: string,
+    ): Promise<"accepted" | "rejected" | "unknown"> => {
       const cid = cidRef.current;
-      if (!cid || !prompt.trim() || state.isStreaming) return;
+      if (!cid || !prompt.trim() || state.isStreaming) return "rejected";
       const imageSettings: Partial<ImageSettings> = mediaType === "image" && settings && typeof settings === "object" ? settings as ImageSettings : {};
       const { scene, posterReference, realText, ...imageParameters } = imageSettings;
       dispatch({ type: "stream_started" });
 
       if (genPollRef.current) genPollRef.current.cancelled = true;
-      const token = { cancelled: false };
+      const token = { cancelled: false, submission: requestId ? new AbortController() : undefined };
       genPollRef.current = token;
 
       // Optimistically render the user message + a "生成中" bubble immediately —
@@ -533,11 +539,14 @@ export function useChat(
       // user sees "图片/视频生成中" right away instead of a stuck input box.
       // The placeholders are reconciled with server ids once /generations returns
       // (or flipped to "failed" if the request errors).
-      const tempUserId = `user-${randomId()}`;
-      const tempGenId = `assistant-${randomId()}`;
+      const tempUserId = `user-${requestId ?? randomId()}`;
+      const tempGenId = `assistant-${requestId ?? randomId()}`;
       dispatch({
         type: "generation_pair_appended",
-        userMessage: { id: tempUserId, role: "user", content: prompt },
+        userMessage: {
+          id: tempUserId, role: "user", content: prompt,
+          ...(mediaType === "image" ? { imageInput: { scene, realText, references: [] } } : {}),
+        },
         genMessage: {
           id: tempGenId,
           role: "assistant",
@@ -549,76 +558,94 @@ export function useChat(
         },
       });
 
-      (async () => {
-        try {
-          const uploaded = files.length
-            ? await Promise.all(files.map(async (f) => ({ slot: f.slot, uploaded: await api.uploadFile(f.file) })))
-            : [];
-          const media = [
-            ...(mediaType === "image" ? references : []),
-            ...uploaded.filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/")).map((f) => f.uploaded.url),
-          ].map((url) => ({ type: "reference_image" as const, url }));
-          const urlsFor = (slot: PickedFile["slot"]) =>
-            uploaded.filter((f) => f.slot === slot).map((f) => f.uploaded.url);
-          const inputReference = urlsFor("video_reference_image");
-          const referenceVideo = urlsFor("video_reference_video");
-          const referenceAudio = urlsFor("video_reference_audio");
-          const firstFrame = urlsFor("video_first_frame")[0];
-          const lastFrame = urlsFor("video_last_frame")[0];
+      let submitted = false;
+      try {
+        const uploaded = await Promise.all(files.map(async ({ file, slot }) => {
+          const saved = mediaType === "image" ? imageUploads.current.get(file) : undefined;
+          const uploaded = saved ?? await api.uploadFile(file, token.submission?.signal);
+          if (mediaType === "image") imageUploads.current.set(file, uploaded);
+          return { slot, uploaded };
+        }));
+        if (token.cancelled || cidRef.current !== cid) return "rejected";
+        const media = [
+          ...(mediaType === "image" ? references : []),
+          ...uploaded.filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/")).map((f) => f.uploaded.url),
+        ].map((url) => ({ type: "reference_image" as const, url }));
+        const urlsFor = (slot: PickedFile["slot"]) =>
+          uploaded.filter((f) => f.slot === slot).map((f) => f.uploaded.url);
+        const inputReference = urlsFor("video_reference_image");
+        const referenceVideo = urlsFor("video_reference_video");
+        const referenceAudio = urlsFor("video_reference_audio");
+        const firstFrame = urlsFor("video_first_frame")[0];
+        const lastFrame = urlsFor("video_last_frame")[0];
 
-          const res = await api.generate(cid, {
-            prompt,
+        submitted = true;
+        const res = await api.generate(cid, {
+          prompt,
+          mediaType,
+          settings: mediaType === "image" ? imageParameters : settings,
+          media: media.length ? media : undefined,
+          input_reference: inputReference.length ? inputReference : undefined,
+          reference_video: referenceVideo.length ? referenceVideo : undefined,
+          reference_audio: referenceAudio.length ? referenceAudio : undefined,
+          first_frame: firstFrame,
+          last_frame: lastFrame,
+          model: modelId,
+          // Settings stay whitelisted on the server; the scene travels on its own.
+          scene, requestId,
+          ...(scene === "poster_remix" ? { posterReference } : {}),
+          ...(realText === true ? { realText: true } : {}),
+        }, token.submission?.signal);
+        if (token.cancelled || cidRef.current !== cid) return "accepted";
+        // Reconcile the optimistic placeholders with the server-assigned ids
+        // + vendor taskId, keeping the bubble in its "generating" state.
+        dispatch({
+          type: "generation_ids_reconciled",
+          tempUserId,
+          userMessageId: res.userMessage.id,
+          imageInput: res.userMessage.metadata?.imageInput,
+          tempGenId,
+          assistantMessageId: res.assistantMessage.id,
+          generation: {
             mediaType,
-            settings: mediaType === "image" ? imageParameters : settings,
-            media: media.length ? media : undefined,
-            input_reference: inputReference.length ? inputReference : undefined,
-            reference_video: referenceVideo.length ? referenceVideo : undefined,
-            reference_audio: referenceAudio.length ? referenceAudio : undefined,
-            first_frame: firstFrame,
-            last_frame: lastFrame,
-            model: modelId,
-            // Settings stay whitelisted on the server; the scene travels on its own.
-            scene,
-            ...(scene === "poster_remix" ? { posterReference } : {}),
-            ...(realText === true ? { realText: true } : {}),
-          });
-          if (token.cancelled) return;
-          // Reconcile the optimistic placeholders with the server-assigned ids
-          // + vendor taskId, keeping the bubble in its "generating" state.
-          dispatch({
-            type: "generation_ids_reconciled",
-            tempUserId,
-            userMessageId: res.userMessage.id,
-            tempGenId,
-            assistantMessageId: res.assistantMessage.id,
-            generation: {
-              mediaType,
-              status: "generating",
-              progress: 0,
-              supportsProgress: res.assistantMessage.metadata?.supportsProgress,
-              taskId: res.taskId,
-              // The server's finalized settings; the reducer keeps the sent ones if absent.
-              settings: mediaType === "image" ? generationSettings(res.assistantMessage.metadata?.settings) : undefined,
-            },
-          });
-          if (res.title) onTitleRef.current?.(cid, res.title);
-          pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
-        } catch (e) {
-          if (genPollRef.current === token) genPollRef.current = null;
-          // The create request itself failed (non-2xx / network). Flip the
-          // optimistic bubble to "failed" so the attempt + error stay visible.
-          const msg = e instanceof Error ? e.message : String(e);
-          // A scene request that was off-topic or could not be prepared sent no image: say why on the card.
-          const sceneNotice = e instanceof ApiClientError && (
-            e.code === "IMAGE_SCENE_MISMATCH" || e.code === "IMAGE_SCENE_UNAVAILABLE" || e.code?.startsWith("IMAGE_POSTER_")
-          );
-          dispatch({
-            type: "generation_finished",
-            messageId: tempGenId,
-            generation: { mediaType, status: "failed", error: `生成请求失败：${msg}`, ...(sceneNotice ? { notice: msg } : {}) },
-          });
-        }
-      })();
+            status: "generating",
+            progress: 0,
+            supportsProgress: res.assistantMessage.metadata?.supportsProgress,
+            taskId: res.taskId,
+            // The server's finalized settings; the reducer keeps the sent ones if absent.
+            settings: mediaType === "image" ? generationSettings(res.assistantMessage.metadata?.settings) : undefined,
+          },
+        });
+        if (res.title) onTitleRef.current?.(cid, res.title);
+        pollGeneration(res.taskId, res.assistantMessage.id, mediaType, token);
+        return "accepted";
+      } catch (e) {
+        const unknown = !!requestId && submitted && (
+          !(e instanceof ApiClientError) || e.code === "IMAGE_SUBMISSION_PENDING" || e.status === 408
+          || (e.status >= 500 && !e.code?.startsWith("IMAGE_"))
+        );
+        if (genPollRef.current === token) genPollRef.current = null;
+        const stopped = !!token.submission?.signal.aborted;
+        if (cidRef.current !== cid || (token.cancelled && !stopped)) return unknown ? "unknown" : "rejected";
+        // The create request itself failed (non-2xx / network). Flip the
+        // optimistic bubble to "failed" so the attempt + error stay visible.
+        const msg = e instanceof Error ? e.message : String(e);
+        // A scene request that was off-topic or could not be prepared sent no image: say why on the card.
+        const sceneNotice = e instanceof ApiClientError && (
+          e.code === "IMAGE_SCENE_MISMATCH" || e.code === "IMAGE_SCENE_UNAVAILABLE" || e.code?.startsWith("IMAGE_POSTER_")
+        );
+        dispatch({
+          type: "generation_finished",
+          messageId: tempGenId,
+          generation: {
+            mediaType, status: stopped && !submitted ? "cancelled" : "failed", error: `生成请求失败：${msg}`,
+            notice: unknown ? "图片提交结果待确认，请稍后核对"
+              : requestId && !submitted ? "参考图上传失败，草稿已保留"
+              : (sceneNotice || requestId) && e instanceof ApiClientError ? msg : undefined,
+          },
+        });
+        return unknown ? "unknown" : "rejected";
+      }
     },
     [state.isStreaming, pollGeneration]
   );
@@ -770,7 +797,9 @@ export function useChat(
           userMessage: { ...userMessage, dbId: userMessage.id },
           genMessage: {
             id: assistantMessage.id, dbId: assistantMessage.id, role: "assistant", content: "",
-            generation: { mediaType: "image", status: "completed", assets: assistantMessage.metadata.assets },
+            generation: {
+              mediaType: "image", status: "completed", assets: assistantMessage.metadata.assets, longImage: layout === "vertical",
+            },
           },
         });
       }
@@ -789,7 +818,11 @@ export function useChat(
       streamsRef.current.get(cid)?.abort();
       streamsRef.current.delete(cid);
     }
-    if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    if (genPollRef.current) {
+      genPollRef.current.cancelled = true;
+      genPollRef.current.submission?.abort();
+      genPollRef.current = null;
+    }
     dispatch({ type: "stream_stopped" });
   }, []);
 

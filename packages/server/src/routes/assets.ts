@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AgentService } from "../services/agent-service.js";
-import { documentAssetKey, parseFileUrl, signPrivateFile, signPrivateMaterial } from "../generation/private-materials.js";
+import { documentAssetKey, parseFileUrl, resolveImageReferenceUrl, signPrivateFile, signPrivateMaterial } from "../generation/private-materials.js";
 
 type Variables = { userId: string };
 
@@ -37,6 +37,10 @@ export function createAssetRoutes(service: AgentService) {
     }
     const links: Record<string, string> = {};
     for (const url of new Set(urls as string[])) {
+      if (/\/static\/assets\//.test(url)) {
+        links[url] = await resolveImageReferenceUrl(service.db, userId, url, { allowRelative: true }).catch(() => url);
+        continue;
+      }
       const file = parseFileUrl(url);
       const asset = !file ? null : file.folder === "uploads"
         ? await service.db.getUploadByStorageKey(file.key)

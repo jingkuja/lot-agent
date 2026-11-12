@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../i18n/index.js";
 
 export interface ViewerImage {
@@ -7,6 +7,7 @@ export interface ViewerImage {
   name: string;
   /** What the image is (封面 / 主图 / 长图 …), shown as the title. */
   label?: string;
+  long?: boolean;
 }
 
 interface Props {
@@ -16,14 +17,18 @@ interface Props {
   onClose: () => void;
   /** Start editing the image on screen; undefined hides 编辑. */
   onEdit?: (index: number) => void;
+  onRetext?: (index: number) => void;
+  onRedo?: (index: number) => void;
 }
 
 /** Enlarged view of one generated image, with its own download and stepping through the rest of the set. */
-export function ImageViewerDialog({ images, index, onIndexChange, onClose, onEdit }: Props) {
+export function ImageViewerDialog({ images, index, onIndexChange, onClose, onEdit, onRetext, onRedo }: Props) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const image = images[index] ?? images[0];
+  const [fit, setFit] = useState<{ url: string; width: boolean }>();
+  const fitWidth = fit?.url === image.url ? fit.width : !!image.long;
   const many = images.length > 1;
   const step = (delta: number) => onIndexChange((index + delta + images.length) % images.length);
 
@@ -54,7 +59,10 @@ export function ImageViewerDialog({ images, index, onIndexChange, onClose, onEdi
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 6-6 6 6 6" /></svg>
           </button>
         )}
-        <img src={image.url} alt={image.name} />
+        <div key={image.url} className={`image-viewer-scroll${fitWidth ? " image-viewer-scroll--width" : ""}`}
+          tabIndex={fitWidth ? 0 : undefined} aria-label={fitWidth ? t("图片预览") : undefined}>
+          <img src={image.url} alt={image.name} />
+        </div>
         {many && (
           <button type="button" className="image-viewer-nav image-viewer-nav--next" onClick={() => step(1)} aria-label={t("下一张")}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
@@ -62,6 +70,10 @@ export function ImageViewerDialog({ images, index, onIndexChange, onClose, onEdi
         )}
       </div>
       <footer className="image-viewer-actions">
+        <button type="button" className="image-viewer-edit" aria-pressed={fitWidth}
+          onClick={() => setFit({ url: image.url, width: !fitWidth })}>{t("适合宽度")}</button>
+        {onRetext && <button type="button" className="image-viewer-edit" onClick={() => onRetext(index)}>{t("改字")}</button>}
+        {onRedo && <button type="button" className="image-viewer-edit" onClick={() => onRedo(index)}>{t("重做")}</button>}
         {onEdit && <button type="button" className="image-viewer-edit" onClick={() => onEdit(index)}>{t("编辑")}</button>}
         <a className="gen-asset-download" href={image.url} download={image.name} target="_blank" rel="noreferrer">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

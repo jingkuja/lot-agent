@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { estimateCost, MAX_IMAGE_EDIT_REFERENCES, type ObjectStorage } from "@lot-agent/core";
 import { activeMarketingVideoProfile } from "../marketing-video/model.js";
 import type { AgentService } from "../services/agent-service.js";
+import { staticPrefix } from "../util/public-base.js";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
@@ -14,7 +15,7 @@ import { agentExtension, AgentConversationError } from "../services/agent-extens
 import {
   ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixPrompt,
 } from "../generation/image-scene.js";
-import { parsePosterReference, POSTER_UNAVAILABLE, type PosterLibrary } from "../generation/poster-library.js";
+import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE, type PosterLibrary } from "../generation/poster-library.js";
 import { resolveImageReferenceUrl } from "../generation/private-materials.js";
 import {
   composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
@@ -611,6 +612,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       posterReference?: unknown;
       /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 only. */
       realText?: unknown;
+      requestId?: unknown;
     };
     try {
       body = await c.req.json();
@@ -629,15 +631,31 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "posterReference is only accepted in poster_remix" }, 400);
     }
     const realText = mediaType === "image" && scene === "free" && body.realText === true;
-    // The mini program and marketing studio create one conversation per paid video attempt. Use a
-    // database lease (shared across server processes) plus its durable message
-    // to replay retries, including a retry after enqueue returned no response.
+    // A Web image draft uses the same request id when the caller did not get its receipt.
+    const requestId = mediaType === "image" && typeof body.requestId === "string"
+      && /^[a-zA-Z0-9-]{16,64}$/.test(body.requestId) ? body.requestId : undefined;
+    if (mediaType === "image" && body.requestId !== undefined && !requestId) {
+      return c.json({ error: "Invalid requestId" }, 400);
+    }
+    // Mini program and marketing videos use one conversation per paid attempt.
     const videoRunId = mediaType === "video" && (conv.agent_id === "marketing_video" || isMiniprogramClient(c.req.header("x-lot-client")))
       ? randomUUID() : null;
-    if (videoRunId && !await service.db.claimConversationRun(conversationId, videoRunId, RUN_LEASE_STALE_MS)) {
+    const submissionLease = requestId ? randomUUID() : videoRunId;
+    if (submissionLease && !await service.db.claimConversationRun(conversationId, submissionLease, RUN_LEASE_STALE_MS)) {
+      if (requestId) return c.json({ error: "图片提交结果待确认，请稍后核对", code: "IMAGE_SUBMISSION_PENDING" }, 409);
       return c.json({ error: "视频提交结果待确认，请查询原任务，勿重复生成" }, 409);
     }
     try {
+      if (requestId) {
+        const existing = await service.db.getImageSubmission(conversationId, requestId);
+        if (existing) {
+          const { submissionTaskId: taskId, userMessageId, imageInput } = existing.metadata;
+          if (typeof taskId !== "string" || typeof userMessageId !== "string") {
+            return c.json({ error: "图片提交结果待确认，请稍后核对", code: "IMAGE_SUBMISSION_PENDING" }, 409);
+          }
+          return c.json({ userMessage: { id: userMessageId, metadata: { imageInput } }, assistantMessage: existing, taskId }, 202);
+        }
+      }
       if (videoRunId) {
         const messages = await service.db.getMessages(conversationId);
         const existing = messages.find((m) => m.role === "assistant" && m.metadata?.kind === "generation" && m.metadata?.mediaType === "video");
@@ -715,13 +733,26 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           return c.json({ error: "爆款参考图暂时无法读取", code: "IMAGE_POSTER_LIBRARY_UNAVAILABLE" }, 503);
         }
         if (!posterReference) return c.json({ error: POSTER_UNAVAILABLE, code: "IMAGE_POSTER_REFERENCE_UNAVAILABLE" }, 422);
+      }
+
+      const references: { url: string; kind: "poster" | "output" | "upload" }[] = [];
+      if (posterReference) references.push({ url: posterImageUrl(posterReference, posterReference.revision), kind: "poster" });
+      if (mediaType === "image") {
         try {
-          await Promise.all((media ?? []).map((item) => {
-            if (item?.type !== "reference_image" || typeof item.url !== "string") throw new Error("invalid product image");
-            return resolveImageReferenceUrl(service.db, userId, item.url, { allowRelative: true });
-          }));
+          for (const item of media ?? []) {
+            const url = item?.url;
+            const local = typeof url === "string" && (
+              url.startsWith("/static/") || url.startsWith(staticPrefix("/static/"))
+            );
+            if (!local && !posterReference) continue;
+            if (item?.type !== "reference_image" || typeof url !== "string") throw new Error("invalid reference");
+            const canonical = await resolveImageReferenceUrl(service.db, userId, url, { allowRelative: true, unsigned: true });
+            references.push({ url: canonical, kind: outputStorageKey(canonical) ? "output" : "upload" });
+          }
         } catch {
-          return c.json({ error: "产品图不可用，请重新上传", code: "IMAGE_POSTER_PRODUCT_UNAVAILABLE" }, 422);
+          return posterReference
+            ? c.json({ error: "产品图不可用，请重新上传", code: "IMAGE_POSTER_PRODUCT_UNAVAILABLE" }, 422)
+            : c.json({ error: "参考图不可用，请重新选择", code: "IMAGE_REFERENCE_UNAVAILABLE" }, 422);
         }
       }
 
@@ -788,7 +819,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
 
       // Persist user message.
       const userMessageId = randomUUID();
-      await service.db.addMessage(userMessageId, conversationId, "user", prompt);
+      const imageInput = mediaType === "image" ? { scene, realText, references } : undefined;
+      await service.db.addMessage(userMessageId, conversationId, "user", prompt, imageInput ? { metadata: { imageInput } } : undefined);
 
       // Persist pending assistant generation message, born 'generating' (the
       // status column would otherwise default to 'completed'). Setting it at
@@ -798,6 +830,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       const supportsProgress = service.generationSupportsProgress[mediaType];
       const baseMeta = {
         kind: "generation", mediaType, prompt, settings, supportsProgress, ...(scene !== "free" ? { scene } : {}), ...(poster ? { poster } : {}),
+        ...(requestId ? { requestId, userMessageId, imageInput } : {}),
       };
       await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", {
         metadata: { ...baseMeta, status: "generating" },
@@ -856,14 +889,14 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
 
       return c.json(
         {
-          userMessage: { id: userMessageId, role: "user", content: prompt },
+          userMessage: { id: userMessageId, role: "user", content: prompt, metadata: imageInput ? { imageInput } : undefined },
           assistantMessage: { id: assistantMessageId, role: "assistant", status: "generating", metadata },
           taskId,
         },
         202
       );
     } finally {
-      if (videoRunId) await service.db.releaseConversationRun(conversationId, videoRunId);
+      if (submissionLease) await service.db.releaseConversationRun(conversationId, submissionLease);
     }
   });
 
@@ -1063,14 +1096,16 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (!backgroundKey || !owned || owned.user_id !== userId || !await deps.assets.exists(backgroundKey)) {
       return c.json({ error: "背景图已不存在，无法改字" }, 409);
     }
-    const layout = editPosterLayout(stored, { fields: body.fields, template: body.template });
-    const key = `poster-${posterRenderKey(backgroundKey, layout)}.png`;
-    const existing = await service.db.getGeneratedByStorageKey(key);
-    if (existing && existing.user_id !== userId) return c.json({ error: "改字失败，请稍后重试" }, 500);
+    let layout = editPosterLayout(stored, { fields: body.fields, template: body.template });
     let asset: { url: string; mime: string };
     let overflow = false;
     try {
-      const rendered = await renderPoster(await deps.assets.get(backgroundKey), layout);
+      const background = await deps.assets.get(backgroundKey);
+      const rendered = await renderPoster(background, layout);
+      layout = { ...layout, template: rendered.template };
+      const key = `poster-${posterRenderKey(backgroundKey, layout)}.png`;
+      const existing = await service.db.getGeneratedByStorageKey(key);
+      if (existing && existing.user_id !== userId) return c.json({ error: "改字失败，请稍后重试" }, 500);
       overflow = rendered.overflow;
       if (existing && await deps.assets.exists(key)) {
         asset = { url: existing.url, mime: rendered.mime };

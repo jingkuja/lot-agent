@@ -37,6 +37,7 @@ import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
 import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.js";
 import { ProductPickerDialog } from "./ProductPickerDialog.js";
+import { randomId } from "../lib/uuid.js";
 import { productPromptText, withProductText } from "../lib/product-reference.js";
 import { ImageComposerHeader, ImageComposerSlate, ImagePromptIdeas } from "./ImageComposer.js";
 import { PosterReferencePicker, type PosterSelection } from "./PosterReferencePicker.js";
@@ -64,8 +65,9 @@ interface InputBoxProps {
     content: string,
     files: PickedFile[],
     settings?: ImageSettings | VideoSettings,
-    knowledgeBases?: KnowledgeBaseRef[]
-  ) => void;
+    knowledgeBases?: KnowledgeBaseRef[],
+    requestId?: string,
+  ) => void | Promise<void | "accepted" | "rejected" | "unknown">;
   onStop?: () => void;
   disabled?: boolean;
   placeholder?: string;
@@ -124,7 +126,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   toolbarStart, attachment, onAttachmentConsumed, onManageKnowledge, onDraftChange,
   onSend,
   onStop,
-  disabled = false,
+  disabled: streaming = false,
   placeholder,
   autoFocus,
   mode = "default",
@@ -144,6 +146,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   onComposeImages,
 }: InputBoxProps, ref) {
   const { t } = useI18n();
+  const [submittingImage, setSubmittingImage] = useState(false);
+  const [pendingImage, setPendingImage] = useState(false);
+  const imageSubmission = useRef<{ id: string; prompt: string; files: PickedFile[]; settings?: ImageSettings } | null>(null);
+  const submittingImageRef = useRef(false);
+  const disabled = streaming || submittingImage;
+  const draftLocked = disabled || pendingImage;
   const [internalValue, setInternalValue] = useState("");
   const [imageScene, setImageSceneState] = useState<ImageScene>(() => lastImageScene);
   const setImageScene = (scene: ImageScene) => {
@@ -287,7 +295,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   useEffect(() => revokeAll, [revokeAll]);
 
   const addFiles = useCallback((picked: FileList | File[] | null) => {
-    if (!picked) return;
+    if (!picked || (mode === "image" && imageSubmission.current)) return;
     const incoming = Array.from(picked);
     setFiles((prev) => {
       const room = Math.max(0, maxFiles - prev.length);
@@ -539,8 +547,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     },
   }), [collectPickedFiles, mode, mediaMode, currentImageSettings, missingMentions, noModels, effectiveImageModel]);
 
-  const handleSend = useCallback(() => {
-    if (checkingMediaRef.current) return;
+  const handleSend = useCallback(async () => {
+    if (checkingMediaRef.current || submittingImageRef.current) return;
     const trimmed = promptValue.trim();
     if (noModels) {
       setNoModelNotice(true);
@@ -554,7 +562,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       return;
     }
     const hasFiles = picked.length > 0;
-    if ((!trimmed && !hasFiles) || disabled || !onSend) return;
+    if ((!trimmed && !hasFiles && !(posterRemix && poster)) || disabled || !onSend) return;
     if (posterRemix && !poster) {
       setAttachmentError("请先选择一张爆款参考图");
       return;
@@ -569,7 +577,32 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       return;
     }
     const prompt = posterRemix && !trimmed ? t("按爆款参考图生成我的品牌海报") : trimmed;
-    onSend(prompt, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
+    if (sceneTabs) {
+      const attempt = imageSubmission.current ?? {
+        id: randomId(), prompt, files: picked, settings: currentImageSettings(),
+      };
+      imageSubmission.current = attempt;
+      submittingImageRef.current = true;
+      setSubmittingImage(true);
+      let result: Awaited<ReturnType<NonNullable<InputBoxProps["onSend"]>>>;
+      try {
+        result = await onSend(attempt.prompt, attempt.files, attempt.settings, knowledgeBases, attempt.id);
+      } catch {
+        result = "rejected";
+        setAttachmentError("提交失败，草稿已保留，请稍后重试");
+      } finally {
+        submittingImageRef.current = false;
+        setSubmittingImage(false);
+      }
+      setPendingImage(result === "unknown");
+      if (result !== "unknown") imageSubmission.current = null;
+      if (result !== "accepted") {
+        setFolded(false);
+        return;
+      }
+    } else {
+      void onSend(prompt, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
+    }
     setPromptValue("");
     setPoster(null);
     setAttachmentError("");
@@ -659,7 +692,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   // 生成图片 / 停止. In the open image workbench it sits at the prompt's bottom-right; elsewhere at the end of the toolbar.
   const sendInPrompt = sceneTabs && !collapsed;
   const promptLabel = posterRemix ? "描述你的品牌" : "描述你的画面";
-  const sendControl = !embedded && (disabled ? (
+  const sendControl = !embedded && (submittingImage && !streaming ? (
+    <button type="button" className="btn-send btn-send--grad" disabled>{t("正在提交…")}</button>
+  ) : disabled ? (
     <button onClick={onStop} className="btn-stop" title={t("停止")}>
       <svg viewBox="0 0 24 24" fill="currentColor">
         <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -671,17 +706,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       onClick={handleSend}
       className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
       disabled={checkingMedia || (
-        !promptValue.trim() && files.length === 0
+        !promptValue.trim() && files.length === 0 && !(posterRemix && poster)
         && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
         && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
       )}
-      title={t(sceneTabs ? "生成图片" : "发送")}
+      title={t(sceneTabs ? pendingImage ? "核对提交" : "生成图片" : "发送")}
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="19" x2="12" y2="5" />
         <polyline points="5 12 12 5 19 12" />
       </svg>
-      {sceneTabs && <span>{t("生成图片")}</span>}
+      {sceneTabs && <span>{t(pendingImage ? "核对提交" : "生成图片")}</span>}
     </button>
   ));
 
@@ -691,11 +726,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       "input-box", embedded && "input-box--embedded", sceneTabs && "input-box--scene", sceneTabs && disabled && "input-box--busy",
       collapsed && "input-box--collapsed", sceneTabs && imageCollapsible && !collapsed && "input-box--unfolded",
     ].filter(Boolean).join(" ")}>
-      {collapsed && <ImageComposerSlate scene={imageScene} onUnfold={() => { setFolded(false); if (!disabled) textareaRef.current?.focus(); }} />}
+      {collapsed && <ImageComposerSlate scene={imageScene} realText={realTextAvailable && realText}
+        onUnfold={() => { setFolded(false); if (!draftLocked) textareaRef.current?.focus(); }} />}
       {sceneTabs && !collapsed && <>
-        <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={disabled}
+        <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={draftLocked}
           onFold={imageCollapsible ? () => setFolded(true) : undefined} />
-        {posterRemix && <PosterReferencePicker selected={poster} disabled={disabled} onChange={(selection) => {
+        {posterRemix && <PosterReferencePicker selected={poster} disabled={draftLocked} onChange={(selection) => {
           setPoster(selection);
           setAttachmentError("");
         }} />}
@@ -712,6 +748,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         </p>
       )}
       {videoMode && twinOpen && <DigitalTwinPicker onSelect={selectTwin} onClose={() => setTwinOpen(false)} />}
+      {pendingImage && <p className="input-modal-hint" role="status">{t("图片提交结果待确认，请稍后核对")}</p>}
       {attachmentError && <p className="input-modal-hint" role="alert">{t(attachmentError)}</p>}
       {productNotice && <p className="input-modal-hint" role="status">{t(productNotice)}</p>}
       {!mediaMode && files.some((f) => f.type.startsWith("image/")) && (
@@ -841,6 +878,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               <span className="attachment-name" title={f.name}>{f.name}</span>
               <button
                 className="attachment-remove"
+                disabled={sceneTabs && draftLocked}
                 onClick={() => removeFile(i)}
                 title={t("移除")}
                 type="button"
@@ -867,14 +905,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
         aria-label={sceneTabs ? t(promptLabel) : undefined}
-        disabled={disabled}
+        disabled={draftLocked}
         rows={1}
         autoFocus={autoFocus}
       />
       {collapsed && files.length > 0 && <span className="image-studio-slate-refs">{t("参考图 {0}", [files.length])}</span>}
       {sendInPrompt && (
         <div className="image-prompt-footer">
-          {!promptValue.trim() && !disabled && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
+          {!promptValue.trim() && !draftLocked && <ImagePromptIdeas scene={imageScene} onPick={(prompt) => {
             setPromptValue(prompt);
             textareaRef.current?.focus();
           }} />}
@@ -997,7 +1035,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 }
                 fileInputRef.current?.click();
               }}
-              disabled={disabled}
+              disabled={draftLocked}
               title={t(posterRemix ? "上传产品图" : "最多5张")}
               aria-label={t(posterRemix ? "上传产品图" : "参考图")}
             >
@@ -1011,7 +1049,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {/* 真实字体 and 图片合成 are the features worth noticing: gradient icon tile and a short selling point. */}
           {realTextAvailable && (
-            <button type="button" className={`btn-reference btn-feature btn-real-text${realText ? " active" : ""}`} disabled={disabled}
+            <button type="button" className={`btn-reference btn-feature btn-real-text${realText ? " active" : ""}`} disabled={draftLocked}
               aria-pressed={realText} onClick={() => setRealText(!realText)}
               title={t("开启后，图里的文字用真实字体排版，不会出现错字或模糊；出图后可以免费改字")}>
               <span className="btn-feature-icon" aria-hidden="true">
@@ -1039,7 +1077,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             </button>
           )}
           {sceneTabs && (
-            <button type="button" className="btn-reference" disabled={disabled} onClick={() => { setProductNotice(""); setProductPickerOpen(true); }}
+            <button type="button" className="btn-reference" disabled={draftLocked} onClick={() => { setProductNotice(""); setProductPickerOpen(true); }}
               title={t("从「获客宝」的产品资料里选，产品图和卖点自动带入")} aria-label={t("选产品")}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
@@ -1240,7 +1278,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {mode === "image" && (
             <ImageSettingsPicker
-              disabled={disabled}
+              disabled={draftLocked}
               models={pickerModels}
               selectedModel={effectiveImageModel}
               onModelChange={onModelChange}

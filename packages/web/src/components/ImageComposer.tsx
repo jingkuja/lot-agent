@@ -35,7 +35,10 @@ const SCENE_DETAILS: Record<ImageScene, { caption: string; icon: string; ideas: 
   poster_remix: {
     caption: "参考爆款，生成品牌海报",
     icon: "M8 4h12v12M4 8h12v12H4ZM4 17l4-4 3 3 2-2 3 3",
-    ideas: [],
+    ideas: [
+      { label: "品牌上新", prompt: "品牌：山岚茶饮。产品：冷萃茉莉茶。卖点：清爽花香，茶味回甘。海报文案：新品上市。" },
+      { label: "商品卖点", prompt: "品牌：晨光家居。产品：便携保温杯。卖点：轻巧好握，适合日常通勤。保留参考图的构图。" },
+    ],
   },
 };
 
@@ -89,13 +92,14 @@ export function ImageComposerHeader({ scene, onChange, disabled, onFold }: {
 }
 
 /** The folded workbench's handle: shows the current image type and opens the workbench. */
-export function ImageComposerSlate({ scene, onUnfold }: { scene: ImageScene; onUnfold: () => void }) {
+export function ImageComposerSlate({ scene, realText, onUnfold }: { scene: ImageScene; realText?: boolean; onUnfold: () => void }) {
   const { t } = useI18n();
   const label = IMAGE_SCENES.find((item) => item.value === scene)?.label;
   return <button type="button" className="image-studio-slate" onClick={onUnfold} aria-expanded="false" title={t("展开工作台")}
-    aria-label={`${t(label)} · ${t("展开工作台")}`}>
+    aria-label={[t(label), realText && t("真实字体已开启"), t("展开工作台")].filter(Boolean).join(" · ")}>
     <SceneIcon scene={scene} />
     <strong>{t(label)}</strong>
+    {realText && <span className="image-studio-slate-status">{t("真实字体已开启")}</span>}
     <FoldChevron up />
   </button>;
 }

@@ -183,6 +183,12 @@ export interface UploadedAttachment {
   slot?: AttachmentSlot;
 }
 
+export interface ImageInputContext {
+  scene?: string;
+  realText?: boolean;
+  references: { url: string; kind: "poster" | "output" | "upload" }[];
+}
+
 export interface KnowledgeBaseRef {
   sourceTypes?: KnowledgeSourceType[];
   source?: "local" | "remote";
@@ -583,10 +589,12 @@ export const api = {
       posterReference?: PosterReference;
       /** 真实字体: typeset the wording on a text-free picture. */
       realText?: boolean;
-    }
+      requestId?: string;
+    },
+    signal?: AbortSignal,
   ) =>
     request<{
-      userMessage: { id: string; role: "user"; content: string };
+      userMessage: { id: string; metadata?: { imageInput?: ImageInputContext } };
       assistantMessage: {
         id: string;
         role: "assistant";
@@ -605,6 +613,7 @@ export const api = {
     }>(`/conversations/${conversationId}/generations`, {
       method: "POST",
       body: JSON.stringify(body),
+      signal,
     }),
 
   // Retry only the download of a generation whose vendor media succeeded but

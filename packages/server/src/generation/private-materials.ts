@@ -264,7 +264,7 @@ export async function resolveImageReferenceUrl(
   db: ImageReferenceLookup,
   userId: string,
   url: string,
-  options: PrivateMaterialOptions & { allowRelative?: boolean } = {},
+  options: PrivateMaterialOptions & { allowRelative?: boolean; unsigned?: boolean } = {},
 ): Promise<string> {
   const base = publicBase(options);
   if (!base && !options.allowRelative) {
@@ -282,11 +282,11 @@ export async function resolveImageReferenceUrl(
     if (asset?.type !== "upload" || asset.storage_key !== key || asset.user_id !== userId || !asset.mime.startsWith("image/")) {
       throw new Error("素材不存在。");
     }
-    return signPrivateMaterial({ ...asset, url: canonical }, options);
+    return options.unsigned ? canonical : signPrivateMaterial({ ...asset, url: canonical }, options);
   }
   const asset = await db.getGeneratedByStorageKey(key);
   if (!asset || asset.user_id !== userId || !asset.mime.startsWith("image/")) throw new Error("素材不存在。");
-  if (!asset.is_private) return canonical;
+  if (options.unsigned || !asset.is_private) return canonical;
   const signed = signPrivateOutput(userId, canonical, options);
   if (signed === canonical) throw new Error("私有素材访问服务未配置。");
   return signed;

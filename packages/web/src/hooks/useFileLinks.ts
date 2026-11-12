@@ -3,7 +3,7 @@ import { api } from "../api/client.js";
 
 /** Well inside the server's six hours, so a link about to be used is never close to expiring. */
 const REFRESH_AFTER_MS = 60 * 60_000;
-const SIGNED_FILE = /\/static\/(documents|uploads)\//;
+const SIGNED_FILE = /\/static\/(documents|uploads|assets)\//;
 
 /**
  * Stored file URLs stay as they are; private ones need a short-lived link from the server to open

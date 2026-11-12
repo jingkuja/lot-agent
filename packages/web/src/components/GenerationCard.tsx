@@ -35,17 +35,19 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
-function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext }: {
+function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext, long }: {
   /** 真实字体: the wording typeset on this image, and how to change it. Both are needed for 改字. */
   poster?: PosterLayout | null;
   onRetext?: RetextHandler;
   asset: Asset;
+  long?: boolean;
   mediaType: "image" | "video";
   index: number;
   settings?: GenerationSettings;
   onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
 }) {
   const { t } = useI18n();
+  const [viewing, setViewing] = useState(false);
   const [errored, setErrored] = useState(false);
   const [editing, setEditing] = useState(false);
   const [retexting, setRetexting] = useState(false);
@@ -68,7 +70,11 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
         </div>
       ) : (
         <div className="gen-asset-frame">
-          <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
+          {mediaType === "image" && asset.mime.startsWith("image/") ? (
+            <button type="button" className="gen-set-open" aria-label={t("放大查看")} onClick={() => setViewing(true)}>
+              <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />
+            </button>
+          ) : <img className="gen-asset" src={asset.url} alt={name} onError={() => setErrored(true)} />}
           {(onEdit || (poster && onRetext)) && (
             <div className="gen-asset-actions">
               {onEdit && <button type="button" className="gen-asset-edit" onClick={() => setEditing(true)}>{t("编辑")}</button>}
@@ -78,6 +84,10 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
         </div>
       )}
       <DownloadLink href={asset.url} name={name} />
+      {viewing && <ImageViewerDialog images={[{ url: asset.url, name, long }]} index={0} onIndexChange={() => {}}
+        onClose={() => setViewing(false)}
+        onEdit={onEdit ? () => { setViewing(false); setEditing(true); } : undefined}
+        onRetext={poster && onRetext ? () => { setViewing(false); setRetexting(true); } : undefined} />}
       {editing && onEdit && (
         <ImageEditDialog imageUrl={asset.url} size={settings?.size}
           onSubmit={(prompt) => onEdit(asset.url, prompt, settings)} onClose={() => setEditing(false)} />
@@ -95,17 +105,19 @@ type RetextHandler = (index: number, fields: PosterFields, template: PosterTempl
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
 function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
   const { t } = useI18n();
-  const cleared = [...new Set((posters ?? []).flatMap((poster) => poster?.cleared ?? []))];
-  const overflow = (posters ?? []).some((poster) => poster?.overflow);
-  if (!cleared.length && !overflow) return null;
+  if (!posters?.some((poster) => poster?.overflow || poster?.cleared?.length)) return null;
   return (
     <div className="gen-white-notes" role="status">
-      {cleared.length > 0 && (
-        <p className="gen-white-issue">
-          {t("这些内容没在你的描述里找到，没有写到图上：{0}。点图上的「改字」可以补上，不扣积分。", [cleared.map((name) => t(POSTER_FIELD_LABELS[name])).join(t("、"))])}
-        </p>
-      )}
-      {overflow && <p className="gen-white-issue">{t("文字太多，缩到最小字号仍放不下，建议点「改字」删减。")}</p>}
+      {posters.map((poster, index) => {
+        if (!poster?.overflow && !poster?.cleared?.length) return null;
+        const names = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name])).join(t("、"));
+        const label = posters.length > 1 ? <strong>{t("第 {0} 张", [index + 1])} </strong> : null;
+        return <div key={index} className="gen-white-issue">
+          {label}
+          {names && <p>{t("这些内容没在你的描述里找到，没有写到图上：{0}。点图上的「改字」可以补上，不扣积分。", [names])}</p>}
+          {poster.overflow && <p>{t("文字太多，缩到最小字号仍放不下，建议点「改字」删减。")}</p>}
+        </div>;
+      })}
     </div>
   );
 }
@@ -267,7 +279,9 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       <PosterNotes posters={generation.posters} />
       {exportAll && !running && <ExportMenu onExport={exportAll} />}
       {viewing !== null && (
-        <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit} />
+        <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit}
+          onRetext={onRetext && generation.posters?.[viewing] ? (index) => { setViewing(null); setRetexting(index); } : undefined}
+          onRedo={canRedo ? (index) => { setViewing(null); void start({ index }, 1); } : undefined} />
       )}
       {editing !== null && onEdit && (
         <ImageEditDialog imageUrl={assets[editing].url} size={generation.settings?.size}
@@ -376,7 +390,7 @@ function ComposePanel({ count, composites, onCompose, disabled, onComposingChang
   const labelOf = (item: GenerationComposite) => compositeLabel(t, item);
   const [viewing, setViewing] = useState<number | null>(null);
   const composed: ViewerImage[] = composites.map((item) => ({
-    url: item.url, label: labelOf(item), name: `${labelOf(item)}.${fileExtension(item.url, "jpg")}`,
+    url: item.url, label: labelOf(item), long: item.layout === "vertical", name: `${labelOf(item)}.${fileExtension(item.url, "jpg")}`,
   }));
   const submit = async () => {
     if (busy) return;
@@ -514,7 +528,7 @@ export function GenerationCard({
           {assets.map((a, i) => (
             <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
               onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
-              poster={generation.posters?.[i]} onRetext={retext} />
+              poster={generation.posters?.[i]} onRetext={retext} long={generation.longImage} />
           ))}
         </div>
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}

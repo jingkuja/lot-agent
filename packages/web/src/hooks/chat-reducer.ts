@@ -22,6 +22,7 @@ export interface GenerationView {
   scene?: string;
   /** Pictures joined from this generation's images (长图 / 宫格 / 一大多小). */
   composites?: GenerationComposite[];
+  longImage?: boolean;
   /** Images of a set that were not made; 补齐 makes them. */
   missing?: number;
   /** 重做 / 补齐 in progress on this set, or why the last one made nothing. */
@@ -79,6 +80,7 @@ export interface DisplayMessage {
   isStreaming?: boolean;
   rating?: number | null;
   attachments?: import("../api/client.js").UploadedAttachment[];
+  imageInput?: import("../api/client.js").ImageInputContext;
   knowledgeBases?: import("../api/client.js").KnowledgeBaseRef[];
   generation?: GenerationView;
 }
@@ -141,6 +143,7 @@ export type ChatAction =
       type: "generation_ids_reconciled";
       tempUserId: string;
       userMessageId: string;
+      imageInput?: DisplayMessage["imageInput"];
       tempGenId: string;
       assistantMessageId: string;
       generation: GenerationView;
@@ -244,7 +247,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "generation_pair_appended":
       return {
         ...state,
-        messages: [...state.messages, action.userMessage, action.genMessage],
+        messages: [
+          ...state.messages.filter((message) => message.id !== action.userMessage.id && message.id !== action.genMessage.id),
+          action.userMessage, action.genMessage,
+        ],
       };
 
     case "generation_ids_reconciled":
@@ -252,7 +258,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: state.messages.map((m) => {
           if (m.id === action.tempUserId)
-            return { ...m, id: action.userMessageId, dbId: action.userMessageId };
+            return {
+              ...m, id: action.userMessageId, dbId: action.userMessageId, imageInput: action.imageInput ?? m.imageInput,
+            };
           if (m.id === action.tempGenId)
             return {
               ...m,

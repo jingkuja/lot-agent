@@ -636,9 +636,16 @@ export class DB {
     // `m.status = 'generating'` makes the transition one-way: once a worker
     // has written completed/failed/cancelled, a slower writer (e.g. the
     // route's post-enqueue taskId write racing a cache-hit completion) can't
-    // drag the message back to 'generating' and drop its assets.
+    // drag the message back to 'generating' and drop its assets. The image
+    // submission receipt survives worker updates and later download retries.
     await this.pool.query(
-      `UPDATE messages m SET status = $1, metadata = $2
+      `UPDATE messages m SET status = $1, metadata = $2::jsonb ||
+         CASE WHEN m.metadata ? 'requestId' THEN jsonb_build_object(
+           'requestId', m.metadata->'requestId',
+           'userMessageId', m.metadata->'userMessageId',
+           'imageInput', m.metadata->'imageInput',
+           'submissionTaskId', COALESCE(m.metadata->>'submissionTaskId', $2::jsonb->>'taskId')
+         ) ELSE '{}'::jsonb END
        FROM conversations c
        WHERE m.id = $3
          AND m.conversation_id = $4
@@ -806,6 +813,16 @@ export class DB {
       [messageId, owner.conversationId, owner.userId]
     );
     return (rowCount ?? 0) > 0;
+  }
+
+  async getImageSubmission(conversationId: string, requestId: string): Promise<StoredMessage | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM messages WHERE conversation_id = $1 AND role = 'assistant'
+        AND metadata->>'kind' = 'generation' AND metadata->>'mediaType' = 'image'
+        AND metadata->>'requestId' = $2 LIMIT 1`,
+      [conversationId, requestId],
+    );
+    return rows[0] ?? null;
   }
 
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
