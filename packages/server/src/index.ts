@@ -69,6 +69,7 @@ import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
+import { initializePosterFonts } from "./generation/poster-render.js";
 import { rateLimit, clientIp, splitReadsAndChanges } from "./middleware/rate-limit.js";
 import { RedisRateLimitStore } from "./middleware/redis-rate-limit-store.js";
 
@@ -83,6 +84,7 @@ const UPLOADS_DIR = resolve(ROOT, "data/uploads");
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "https://aigc.todoucloud.com"];
 
 async function main() {
+  initializePosterFonts();
   const serviceConfig = await loadServiceConfig(ROOT);
 
   if (!serviceConfig.llm.openai.apiKey && !serviceConfig.llm.anthropic.apiKey) {

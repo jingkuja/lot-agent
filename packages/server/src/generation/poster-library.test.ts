@@ -7,6 +7,31 @@ const HEADER = "\uFEFF品类,商品名,图片本地路径,图片原始URL\r\n";
 const food = "食品零食,饼干,/workspace/posters/食品零食/cookies.png,https://untrusted.example/cookies.png";
 
 describe("poster library", () => {
+  it("coalesces failures, backs off, recovers and aborts an on-demand request on shutdown", async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(async () => HEADER + food).mockRejectedValueOnce(new Error("offline"));
+    const library = new PosterLibrary(load, () => 0.5);
+    try {
+      await Promise.all([library.ensureAvailable(), library.ensureAvailable(), library.ensureAvailable()]);
+      expect(load).toHaveBeenCalledTimes(1);
+      await library.ensureAvailable();
+      expect(load).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await library.ensureAvailable();
+      expect(library.categories()).toEqual(["食品零食"]);
+      expect(load).toHaveBeenCalledTimes(2);
+      let signal: AbortSignal | undefined;
+      const pending = new PosterLibrary(async s => {
+        signal = s;
+        return new Promise<string>((_, reject) => s?.addEventListener("abort", () => reject(new Error("stopped"))));
+      });
+      const request = pending.ensureAvailable();
+      pending.stop();
+      await request;
+      expect(signal?.aborted).toBe(true);
+      expect(pending.categories()).toBeUndefined();
+    } finally { library.stop(); vi.useRealTimers(); }
+  });
   it("groups CSV rows by their local folder and pages the hosted images", async () => {
     const rows = [
       '家居日用,"礼盒, ""新品""",/workspace/posters/食品零食/茶 #1.webp,https://untrusted.example/a',
@@ -20,7 +45,7 @@ describe("poster library", () => {
     ];
     const library = new PosterLibrary(async () => HEADER + rows.join("\r\n"));
     const app = createPosterLibraryRoutes(library);
-    expect((await app.request("/categories")).status).toBe(503);
+    expect((await app.request("/categories")).status).toBe(200);
     await library.refresh();
     expect(await (await app.request("/categories")).json()).toEqual({ categories: ["食品零食", "家居日用"] });
     const query = `/images?category=${encodeURIComponent("食品零食")}`;

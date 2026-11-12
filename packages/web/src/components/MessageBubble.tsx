@@ -43,8 +43,10 @@ interface MessageBubbleProps {
   failedToolNames?: string[];
   /** 生成媒体「下载失败」时重新下载(仅重拉下载,不重新计费生成)。 */
   onRedownloadGeneration?: (messageId: string, mediaType: "image" | "video") => void;
+  onCancelGeneration?: (taskId?: string) => void;
+  onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** 编辑生成的图片：以该图为参考图、沿用其生成设置发起图生图，返回错误时留在编辑框。 */
-  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void | Promise<string | void>;
   /** 把一次生成的多张图合成为一张（长图 / 宫格 / 一大多小），本地完成、不计费；返回错误文案。 */
   onComposeGeneration?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   /** 重做套图中的一张或补齐缺少的图（按张计费）；返回错误文案。 */
@@ -91,6 +93,8 @@ export function MessageBubble({
   askInteractive,
   failedToolNames,
   onRedownloadGeneration,
+  onCancelGeneration,
+  onWhiteBackground,
   onEditImage,
   onComposeGeneration,
   onRedoGeneration,
@@ -106,6 +110,8 @@ export function MessageBubble({
             generation={message.generation}
             messageId={message.id}
             onRedownload={onRedownloadGeneration}
+            onCancelGeneration={onCancelGeneration}
+            onWhiteBackground={onWhiteBackground}
             onEditImage={onEditImage}
             onCompose={onComposeGeneration}
             onRedo={onRedoGeneration}

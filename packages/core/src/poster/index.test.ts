@@ -7,6 +7,29 @@ import {
 const request = "做一张火锅店开业海报，全场 8 折，套餐 199 元，11 月 20 日开业，地址人民路 88 号";
 
 describe("verifyPosterFields", () => {
+  it.each([
+    ["本周末", "周末促销", false], ["十一月二十日", "十一月二十日开业", true],
+    ["11月20日", "11件商品，20元", false], ["this weekend", "sale this weekend", true],
+    ["akhir pekan", "promo akhir pekan", true],
+  ])("checks full date %s in %s", (date, source, keep) => {
+    expect(verifyPosterFields({ ...emptyPosterFields(), date }, source).fields.date).toBe(keep ? date : "");
+  });
+
+  it.each([
+    ["¥1299", "售价 ￥１，２９９", true], ["Rp25000", "Harga Rp25.000", true],
+    ["$2550", "price $25.50", false], ["¥25", "price $25", false], ["8折", "8件", false],
+  ])("checks complete amount and unit %s in %s", (price, source, keep) => {
+    expect(verifyPosterFields({ ...emptyPosterFields(), price }, source).fields.price).toBe(keep ? price : "");
+  });
+
+  it("keeps price roles separate in Chinese, English and Indonesian", () => {
+    for (const source of ["原价 ¥299，现价 ¥199", "original price ¥299, now ¥199", "harga normal ¥299; harga promo ¥199"]) {
+      const fields = { ...emptyPosterFields(), price: "¥199", originalPrice: "¥299" };
+      expect(verifyPosterFields(fields, source).fields).toEqual(fields);
+      expect(verifyPosterFields({ ...fields, price: "¥299", originalPrice: "¥199" }, source).fields)
+        .toMatchObject({ price: "", originalPrice: "" });
+    }
+  });
   it("keeps prices, rates and dates whose digits the user wrote", () => {
     const fields = { ...emptyPosterFields(), title: "火锅店盛大开业", price: "199 元", discount: "8 折", date: "11 月 20 日", address: "人民路 88 号" };
     expect(verifyPosterFields(fields, request)).toEqual({ fields, cleared: [] });

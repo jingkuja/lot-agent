@@ -13,6 +13,7 @@ export interface GenerationView {
   supportsProgress?: boolean;
   assets?: { url: string; mime: string; durationSec?: number }[];
   error?: string;
+  unknownResult?: boolean;
   /** Shown on the card itself: why an e-commerce scene request was not sent, or how many set images are missing. */
   notice?: string;
   taskId?: string;

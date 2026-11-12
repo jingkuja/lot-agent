@@ -20,7 +20,8 @@ export interface ReferenceMedia {
 
 /** A vendor reference may be a URL or provider asset ID, singly or as a list. */
 export type ReferenceInput = string | string[];
-export interface CreateResult { taskId: string; status: string; progress: number }
+export interface CreateResult { taskId: string; status: string; progress: number; result?: PollResult }
+export interface GenerationCallOptions { signal?: AbortSignal; slot?: number }
 export interface PollResult {
   status: string;
   progress: number;
@@ -118,14 +119,16 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     for (let attempt = 0; ; attempt++) {
       try {
-        return await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
+        const timeout = AbortSignal.timeout(timeoutMs);
+        const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+        return await fetch(url, { ...init, redirect: "error", signal });
       } catch (e) {
         if (attempt >= retries) throw new ProviderError("generation", phase, phase === "create" && failedBeforeSend(e) ? "CONNECT_ERROR" : "TRANSPORT_ERROR");
       }
     }
   }
 
-  async create(req: Req): Promise<CreateResult> {
+  async create(req: Req, options?: GenerationCallOptions): Promise<CreateResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const model = req.model ?? this.opts.model;
     const url = `${baseUrl}${adapter.createPath()}`;
@@ -135,6 +138,7 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       method: "POST",
       headers: { ...this.opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
+      signal: options?.signal,
     }, 0, "create");
     console.log("[generation.create] response", { status: res.status });
     const text = await res.text();

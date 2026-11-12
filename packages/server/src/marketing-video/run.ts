@@ -57,7 +57,7 @@ export const REAL_PERSON_MESSAGE = "所传素材有真人，未能通过服务�
 const realPersonRejected = (cause: unknown) => new MarketingRunError("REAL_PERSON_REJECTED", REAL_PERSON_MESSAGE, { cause });
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;
-  generation(job: { userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
+  generation(job: { id: string; userId: string; input: Record<string, unknown> }, signal: AbortSignal): Promise<RunJobDeps>;
   compose?: typeof composeMarketingVideo;
   /** Clips submitted and polled at once within this render (MARKETING_VIDEO_SEGMENT_CONCURRENCY). */
   segmentConcurrency?: number;

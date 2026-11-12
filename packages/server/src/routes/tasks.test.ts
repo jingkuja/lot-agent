@@ -24,6 +24,21 @@ function app(service: any) {
 }
 
 describe("POST /tasks input whitelisting", () => {
+  it("prechecks quota for the validated image count before enqueueing", async () => {
+    const service = fakeService();
+    service.modelRegistry.getConfig.mockReturnValue({ unitPrice: 2, billingUnit: "image" });
+    const post = (n: number) => app(service).request("/tasks", {
+      method: "POST", body: JSON.stringify({ type: "image.generate", input: { prompt: "product", n } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect((await post(1)).status).toBe(202);
+    const single = service.usageMeter.checkQuota.mock.calls[0][1];
+    expect(single).toBeGreaterThan(0);
+    expect((await post(3)).status).toBe(202);
+    expect(service.usageMeter.checkQuota.mock.calls[1][1]).toBe(single * 3);
+    expect((await post(-1)).status).toBe(400);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledTimes(2);
+  });
   it("enqueues only whitelisted business fields", async () => {
     const service = fakeService();
     const res = await app(service).request("/tasks", {

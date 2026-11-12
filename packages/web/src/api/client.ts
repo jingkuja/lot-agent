@@ -618,6 +618,18 @@ export const api = {
     }),
 
   // Retry only the download of a generation whose vendor media succeeded but
+  getImageSubmission: (conversationId: string, requestId: string) =>
+    request<{
+      taskId: string; title?: string;
+      userMessage: { id: string; content?: string; metadata?: { imageInput?: ImageInputContext } };
+      assistantMessage: { id: string; metadata?: { supportsProgress?: boolean; settings?: unknown; scene?: string } };
+    }>(`/conversations/${conversationId}/generations/submissions/${encodeURIComponent(requestId)}`),
+
+  whiteBackground: (conversationId: string, messageId: string, index: number, restore: boolean) =>
+    request(`/conversations/${conversationId}/generations/${messageId}/white-background`, {
+      method: "POST", body: JSON.stringify({ index, restore }),
+    }),
+
   // whose server-side download failed (card in "下载失败" state). Returns the
   // new taskId to poll.
   redownloadGeneration: (conversationId: string, messageId: string) =>

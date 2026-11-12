@@ -31,18 +31,21 @@ function escapeXml(text: string): string {
 }
 
 /**
- * Point fontconfig at the bundled font directory only, before sharp renders its first text. A font that is not found
- * falls back silently, so with system fonts in play the same poster could look different on a laptop and in the
- * container; with this whitelist both resolve to the same files. An operator's own FONTCONFIG_FILE is left alone.
+ * Register the bundled primary fonts with system fallback before the first Pango render.
+ * An operator's own FONTCONFIG_FILE is left alone; importing this module has no environment side effects.
  */
-function registerPosterFonts(): string | null {
+export function initializePosterFonts(): string | null {
   const fonts = findFontDirectory();
   if (!fonts || process.env.FONTCONFIG_FILE) return fonts;
   try {
     const dir = join(tmpdir(), `lot-agent-fonts-${createHash("sha256").update(fonts).digest("hex").slice(0, 12)}`);
     mkdirSync(join(dir, "cache"), { recursive: true });
     const file = join(dir, "fonts.conf");
-    writeFileSync(file, `<?xml version="1.0"?>\n<fontconfig><dir>${escapeXml(fonts)}</dir><cachedir>${escapeXml(join(dir, "cache"))}</cachedir></fontconfig>\n`);
+    const system = ["/etc/fonts/fonts.conf", "/opt/homebrew/etc/fonts/fonts.conf", "/usr/local/etc/fonts/fonts.conf"].find(existsSync);
+    const fallback = system ? `<include ignore_missing="yes">${escapeXml(system)}</include>`
+      : "<dir>/System/Library/Fonts</dir><dir>/Library/Fonts</dir>";
+    writeFileSync(file, `<?xml version="1.0"?>\n<fontconfig>${fallback}<dir>${escapeXml(fonts)}</dir>`
+      + `<cachedir>${escapeXml(join(dir, "cache"))}</cachedir></fontconfig>\n`);
     process.env.FONTCONFIG_FILE = file;
   } catch (error) {
     console.warn("[poster.fonts] fontconfig setup failed", { errorType: (error as Error)?.name });
@@ -50,11 +53,16 @@ function registerPosterFonts(): string | null {
   return fonts;
 }
 
-const FONT_DIRECTORY = registerPosterFonts();
-
 /** Whether the bundled fonts were found; without them a poster would be set in whatever the system offers. */
 export function posterFontsAvailable(): boolean {
-  return !!FONT_DIRECTORY;
+  return !!findFontDirectory();
+}
+
+/** Subprocesses select a font environment explicitly; never swap process globals around concurrent renders. */
+export function mediaFontEnvironment(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (process.env.MEDIA_FONTCONFIG_FILE) env.FONTCONFIG_FILE = process.env.MEDIA_FONTCONFIG_FILE;
+  return env;
 }
 
 type Rgb = [number, number, number];

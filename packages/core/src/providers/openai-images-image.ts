@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { extractVendorError, isRealPersonRejection, type CreateResult, type PollResult } from "./generation-common.js";
+import { extractVendorError, isRealPersonRejection, type CreateResult, type PollResult, type GenerationCallOptions } from "./generation-common.js";
 import { ProviderError } from "./provider-error.js";
 import type { ImageGenerationProvider, ImageGenerationRequest } from "./image-generation.js";
 
@@ -36,6 +36,7 @@ export interface OpenAIImagesImageOpts {
   apiKey: string;
   headers?: Record<string, string>;
   model: string;
+  timeoutMs?: number;
 }
 
 /** Keep a well-formed `WxH` size as-is. Malformed values fall back to the
@@ -58,13 +59,23 @@ export const MAX_IMAGE_EDIT_REFERENCES = 5;
  * Synchronous provider for Tokenhub's OpenAI-compatible Images API. Text-only
  * requests use `/images/generations`; requests with reference images use
  * `/images/edits`. It adapts the completed response to the worker's existing
- * create/poll contract using an in-memory synthetic task id.
+ * contract by returning the result directly; the server persists it before returning a recoverable receipt ID.
  */
 export class OpenAIImagesImageProvider implements ImageGenerationProvider {
-  private results = new Map<string, string[]>();
   constructor(private opts: OpenAIImagesImageOpts) {}
 
-  async create(req: ImageGenerationRequest): Promise<CreateResult> {
+  async create(req: ImageGenerationRequest, options?: GenerationCallOptions): Promise<CreateResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 15 * 60_000);
+    timer.unref?.();
+    const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    try {
+      signal.throwIfAborted();
+      return await this.request(req, signal);
+    } finally { clearTimeout(timer); }
+  }
+
+  private async request(req: ImageGenerationRequest, signal: AbortSignal): Promise<CreateResult> {
     const model = req.model ?? this.opts.model;
     const references = req.media ?? [];
     if (references.length > MAX_IMAGE_EDIT_REFERENCES) {
@@ -92,6 +103,8 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
       method: "POST",
       headers: { ...this.opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${this.opts.apiKey}` },
       body: payload,
+      signal,
+      redirect: "error",
     });
     const text = await res.text();
     if (!res.ok) {
@@ -101,7 +114,9 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
         // Unstructured error bodies can contain private image material.
         if (isRealPersonRejection(text)) diagnostic = new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: res.status }).message;
       }
-      throw new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
+      const error = new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
+      Object.assign(error, { httpStatus: res.status, confirmedRejection: res.status >= 400 && res.status < 500 && res.status !== 408 });
+      throw error;
     }
 
     let response: unknown;
@@ -114,13 +129,10 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     if (!urls.length) throw new Error("image generation failed: no image url or b64_json in response");
 
     const taskId = `images_${randomUUID()}`;
-    this.results.set(taskId, urls);
-    return { taskId, status: "completed", progress: 100 };
+    return { taskId, status: "completed", progress: 100, result: { status: "completed", progress: 100, url: urls[0], urls } };
   }
 
-  async poll(taskId: string): Promise<PollResult> {
-    const urls = this.results.get(taskId);
-    if (!urls?.length) return { status: "failed", progress: 0, error: "unknown task" };
-    return { status: "completed", progress: 100, url: urls[0], urls };
+  async poll(_taskId: string): Promise<PollResult> {
+    return { status: "failed", progress: 0, failureUnconfirmed: true, error: "IMAGE_RESULT_UNKNOWN" };
   }
 }

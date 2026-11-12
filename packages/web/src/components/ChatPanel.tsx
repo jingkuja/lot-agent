@@ -29,7 +29,7 @@ interface ChatPanelProps {
   messages: DisplayMessage[];
   imageDraftRevision?: number;
   onSend: NonNullable<React.ComponentProps<typeof InputBox>["onSend"]>;
-  onStop: () => void;
+  onStop: (taskId?: string) => void;
   isStreaming: boolean;
   activeConversationId: string | null;
   onNewVideo?: () => void;
@@ -58,6 +58,7 @@ interface ChatPanelProps {
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. */
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+  onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
   onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;
   knowledgeBases?: KnowledgeBaseRef[];
@@ -173,6 +174,7 @@ export function ChatPanel({
   onRedoGeneration,
   onExportGeneration,
   onEditPoster,
+  onWhiteBackground,
   onEditImage,
   knowledgeBases,
   onKnowledgeBasesChange,
@@ -220,9 +222,9 @@ export function ChatPanel({
   // Editing a generated image sends from its own dialog with that image's settings,
   // checked against the selected model the way the composer checks a send.
   const editImage = mode === "image" && !readOnly && onEditImage
-    ? (imageUrl: string, prompt: string, original?: GenerationSettings): string | void => {
+    ? async (imageUrl: string, prompt: string, original?: GenerationSettings): Promise<string | void> => {
       if (isStreaming) return "当前有任务正在进行，请完成后再修改";
-      const prepared = inputRef.current?.prepareImageSend(original) ?? {};
+      const prepared = await inputRef.current?.prepareImageSend(original, imageUrl) ?? {};
       if (prepared.error) return prepared.error;
       onEditImage(prompt, imageUrl, prepared.settings);
     }
@@ -287,7 +289,8 @@ export function ChatPanel({
     return <MarketingVideoStudio key={activeConversationId ?? "new"} ownerId={userId}
       onDraftChange={onDraftChange} onNewVideo={onNewVideo} busy={isStreaming} hasMessages={!isEmpty} publication={videoPublication}>
       {messages.map((message) => message.generation
-        ? <GenerationCard key={message.id} generation={message.generation} messageId={message.id} onRedownload={onRedownloadGeneration} />
+        ? <GenerationCard key={message.id} generation={message.generation} messageId={message.id}
+          onCancelGeneration={onStop} onRedownload={onRedownloadGeneration} />
         : message.role === "user" ? <details className="mv-script-review" key={message.id}><summary>{t("查看生成要求")}</summary><p>{message.content}</p></details> : null)}
     </MarketingVideoStudio>;
   }
@@ -359,7 +362,9 @@ export function ChatPanel({
               onRedoGeneration={readOnly ? undefined : onRedoGeneration}
               onExportGeneration={onExportGeneration}
               onEditPoster={readOnly ? undefined : onEditPoster}
+              onWhiteBackground={readOnly ? undefined : onWhiteBackground}
               onEditImage={editImage}
+              onCancelGeneration={onStop}
             />
           );
         })}

@@ -8,7 +8,7 @@ import sharp from "sharp";
 
 /** Why an image may still not pass a marketplace's white-background check. */
 export type WhiteBackgroundIssue = "busy_background" | "small_subject" | "cropped";
-export interface WhiteBackgroundCheck { corrected: boolean; issues: WhiteBackgroundIssue[] }
+export interface WhiteBackgroundCheck { corrected: boolean; issues: WhiteBackgroundIssue[]; unknown?: boolean }
 
 /** Near-white: bright and nearly grey. A faint contact shadow is darker than this and stays. */
 const MIN_CHANNEL = 228;
@@ -19,7 +19,7 @@ const EDGE_WHITE_SHARE = 0.6;
 /** The product's longer side should cover at least this share of the image. */
 const MIN_SUBJECT_SHARE = 0.5;
 
-export async function whitenBackground(image: Buffer): Promise<{ body: Buffer; mime: "image/png"; check: WhiteBackgroundCheck }> {
+export async function whitenBackground(image: Buffer, apply = true): Promise<{ body: Buffer; mime: "image/png"; check: WhiteBackgroundCheck }> {
   const { data, info } = await sharp(image).rotate().flatten({ background: "#ffffff" }).removeAlpha().raw()
     .toBuffer({ resolveWithObject: true });
   const { width, height } = info;
@@ -92,6 +92,6 @@ export async function whitenBackground(image: Buffer): Promise<{ body: Buffer; m
     const touches = minX < margin || minY < margin || maxX > width - 1 - margin || maxY > height - 1 - margin;
     if (touches && !issues.includes("busy_background")) issues.push("cropped");
   }
-  const body = await sharp(data, { raw: { width, height, channels: 3 } }).png().toBuffer();
-  return { body, mime: "image/png", check: { corrected: changed > 0, issues } };
+  const body = apply ? await sharp(data, { raw: { width, height, channels: 3 } }).png().toBuffer() : image;
+  return { body, mime: "image/png", check: { corrected: apply && changed > 0, issues } };
 }

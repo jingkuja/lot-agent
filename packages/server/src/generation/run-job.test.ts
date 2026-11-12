@@ -1092,7 +1092,7 @@ describe("image set redo", () => {
 });
 
 describe("white-background check", () => {
-  it("stores the 白底图 with a pure white background and records the check on the message", async () => {
+  it("keeps the original 白底图 and records the check before optional correction", async () => {
     const grey = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#f0efed" } })
       .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 3, background: "#c0392b" } }).png().toBuffer(), left: 12, top: 12 }])
       .png().toBuffer();
@@ -1102,9 +1102,9 @@ describe("white-background check", () => {
     const out = await runGenerationJob(deps, { ...job, input: { ...job.input, scene: "white_background", n: 1 } }, "image");
     const stored = put.mock.calls[0][0].body as Buffer;
     const { data } = await sharp(stored).raw().toBuffer({ resolveWithObject: true });
-    expect(Array.from(data.subarray(0, 3))).toEqual([255, 255, 255]);
-    expect(out.whiteChecks).toEqual([{ corrected: true, issues: [] }]);
-    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", whiteChecks: [{ corrected: true, issues: [] }] });
+    expect(Array.from(data.subarray(0, 3))).toEqual([240, 239, 237]);
+    expect(out.whiteChecks).toEqual([{ corrected: false, issues: [] }]);
+    expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", whiteChecks: [{ corrected: false, issues: [] }] });
   });
 
   it("leaves other image types exactly as the model made them", async () => {
@@ -1150,4 +1150,3 @@ describe("真实字体 posters", () => {
     expect(new Set(keys).size).toBe(2);
   });
 });
-

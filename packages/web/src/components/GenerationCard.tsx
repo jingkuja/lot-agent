@@ -1,7 +1,6 @@
 import { useI18n } from "../i18n/index.js";
 import { useRef, useState } from "react";
 import { randomId } from "../lib/uuid.js";
-import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
@@ -45,7 +44,7 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
   mediaType: "image" | "video";
   index: number;
   settings?: GenerationSettings;
-  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void | Promise<string | void>;
 }) {
   const { t } = useI18n();
   const [viewing, setViewing] = useState(false);
@@ -186,11 +185,12 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext }: {
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onWhite }: {
+  onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
   onRetext?: RetextHandler;
   generation: GenerationView;
   assets: Asset[];
-  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void | Promise<string | void>;
   onCompose?: ComposeHandler;
   onExport?: ExportHandler;
   /** Only for sets with a role per image (产品套图 / 主副图). */
@@ -240,6 +240,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
   const canRedo = !!onRedo && !running && !starting;
   return (
     <div className="gen-set">
+      {generation.unknownResult && <p className="gen-card-notice" role="status">{t("图片结果待核实，请联系客服")}</p>}
       <div className="gen-set-stage" aria-busy={composing}>
         <div className="gen-set-grid">
           {images.map((image, index) => (
@@ -275,7 +276,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
         <ComposePanel count={assets.length} composites={generation.composites ?? []} onCompose={onCompose} disabled={running}
           onComposingChange={setComposing} />
       )}
-      <WhiteCheckNotes checks={generation.whiteChecks} />
+      <WhiteCheckNotes checks={generation.whiteChecks} onWhite={onWhite} />
       <PosterNotes posters={generation.posters} />
       {exportAll && !running && <ExportMenu onExport={exportAll} />}
       {viewing !== null && (
@@ -356,16 +357,29 @@ function ExportMenu({ onExport }: { onExport: (preset: ExportPreset) => Promise<
 }
 
 /** 白底图: what the automatic check found, per image. Nothing is shown for an image that passed as it was. */
-function WhiteCheckNotes({ checks }: { checks?: WhiteBackgroundCheck[] }) {
+function WhiteCheckNotes({ checks, onWhite }: {
+  checks?: WhiteBackgroundCheck[];
+  onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
+}) {
   const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
   if (!checks?.length) return null;
   const many = checks.length > 1;
   const issues = checks.flatMap((check, index) => check.issues.map((issue) => ({ index, issue })));
   const corrected = checks.some((check) => check.corrected);
-  if (!issues.length && !corrected) return null;
   return (
     <div className="gen-white-notes" role="status">
-      {corrected && <p>{t("背景已自动校正为纯白。")}</p>}
+      <p>{t(corrected ? "白底校正已应用，原图已保留" : "已保留原图；白底校正可能影响浅色商品，请对照检查")}</p>
+      {checks.some(check => check.unknown) && <p>{t("白底检测未完成，请人工检查")}</p>}
+      {onWhite && checks.map((check, index) => <button key={index} type="button" className="gen-compose-toggle" disabled={busy}
+        onClick={async () => {
+          setBusy(true); setError(undefined);
+          try { setError(await onWhite(index, check.corrected)); }
+          catch { setError("白底处理失败，原图已保留"); }
+          finally { setBusy(false); }
+        }}>{many ? `${t("第 {0} 张", [index + 1])}：` : ""}{t(check.corrected ? "恢复原图" : "应用白底校正")}</button>)}
+      {error && <p role="alert">{t(error)}</p>}
       {issues.map(({ index, issue }) => (
         <p key={`${index}-${issue}`} className="gen-white-issue">
           {many ? `${t("第 {0} 张", [index + 1])}：` : ""}{t(WHITE_BACKGROUND_ISSUES[issue])}
@@ -489,8 +503,12 @@ export function GenerationCard({
   onRedo,
   onExport,
   onEditPoster,
+  onCancelGeneration,
+  onWhiteBackground,
 }: {
   generation: GenerationView;
+  onCancelGeneration?: (taskId?: string) => void;
+  onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   messageId?: string;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
@@ -502,14 +520,13 @@ export function GenerationCard({
   onCompose?: (messageId: string, layout: ComposeLayout, gap: boolean) => Promise<string | undefined>;
   /** Edit a generated image: image-to-image with it as the reference and this
    * generation's settings. Returns an error to show in the editor; undefined hides the button. */
-  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void;
+  onEditImage?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void | Promise<string | void>;
   /** Retry only the download of a "下载失败" generation (vendor media already
    * succeeded). Undefined disables the re-download button. */
   onRedownload?: (messageId: string, mediaType: "image" | "video") => void;
 }) {
   const { t } = useI18n();
   const { mediaType, status, assets, error, taskId } = generation;
-  const [cancelRequested, setCancelRequested] = useState(false);
   const [regenerateDialog, confirmRegenerate] = useConfirm();
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string>();
@@ -536,15 +553,16 @@ export function GenerationCard({
 
   const retext: RetextHandler | undefined = messageId && onEditPoster
     ? (index, fields, template) => onEditPoster(messageId, index, fields, template) : undefined;
+  const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
     // keep their own card.
     const imageSet = !!imageSetRole(generation.scene, 0);
     if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
       return (
-        <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext}
+        <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onWhite={onWhite}
           onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
-          onRedo={messageId && onRedo && imageSet ? (request) => onRedo(messageId, request) : undefined}
+          onRedo={messageId && onRedo && imageSet && !generation.unknownResult ? (request) => onRedo(messageId, request) : undefined}
           onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
       );
     }
@@ -559,7 +577,7 @@ export function GenerationCard({
           ))}
         </div>
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
-        {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} />}
+        {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} onWhite={onWhite} />}
         {singleImage && <PosterNotes posters={generation.posters} />}
         {singleImage && messageId && (
           <div className="gen-single-actions">
@@ -585,19 +603,21 @@ export function GenerationCard({
   const failed = status === "failed" || status === "completed";
   const generating = !failed && !cancelled && !downloadFailed;
   // Local polling/submission failures do not establish the vendor's outcome.
-  const resultUnknown = error === "生成状态获取失败" || status === "completed";
+  const resultUnknown = generation.unknownResult || error === "IMAGE_RESULT_UNKNOWN" || error === "生成状态获取失败" || status === "completed";
   const videoFailed = mediaType === "video" && failed;
   // The server classifies the vendor rejection; raw patterns cover older messages.
   const realPersonRejected = /REAL_PERSON_REJECTED|\.PrivacyInformation\b|may contain (?:a )?real person/i.test(error ?? "");
   const contentBlocked = /CONTENT_BLOCKED/.test(error ?? "");
-  const showFailureHint = videoFailed || (failed && (realPersonRejected || contentBlocked));
+  const showFailureHint = failed || cancelled || downloadFailed;
   const failureHint = realPersonRejected
     ? "上传的参考图包含真人，需要先完成真人认证后再使用。"
     : contentBlocked
-      ? "出图模型的安全审核拒绝了这次请求，常见原因是知名动漫或影视角色、品牌标志、真人或敏感内容。请换成自有产品的图片和描述后重试，这次不扣积分。"
+      ? "出图模型的安全审核拒绝了这次请求，请调整参考图和描述后重试。"
     : resultUnknown
-      ? "暂时无法确认视频生成结果，请刷新会话查看，或联系客服。"
-      : "请稍后再试，或联系客服。";
+       ? mediaType === "image" ? "图片结果待核实，请联系客服" : "暂时无法确认视频生成结果，请刷新会话查看，或联系客服。"
+       : cancelled ? "已停止后续处理，上游已受理请求的费用以网关为准"
+       : downloadFailed ? "图片已生成，可重新下载，无需再次生成"
+       : "请稍后再试，或联系客服。";
   const showNoCharge = videoFailed && status === "failed" && !!taskId && !resultUnknown;
   const label = cancelled
     ? LABELS[mediaType].cancelled
@@ -609,16 +629,8 @@ export function GenerationCard({
           ? `${mediaType === "video" ? "视频" : "图片"}生成中 ${generation.progress ?? 0}%`
           : LABELS[mediaType].loading;
 
-  // Fire the cancel request; the ongoing task poll observes the terminal
-  // 'cancelled' status and finalizes the card, so no local state juggling.
-  const onCancel = () => {
-    if (!taskId || cancelRequested) return;
-    setCancelRequested(true);
-    api.cancelTask(taskId).catch(() => setCancelRequested(false));
-  };
-
   return (
-    <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`} title={t(error) ?? undefined}>
+    <div className={`gen-card ${mediaType} ${generating ? "gen-card--loading" : "gen-card--failed"}`}>
       <MediaIcon mediaType={mediaType} />
       <div className="gen-card-label">{t(label)}</div>
       {failed && generation.notice && (
@@ -630,9 +642,9 @@ export function GenerationCard({
           {showNoCharge && <p>{t("温馨提示：视频未成功生成，不会扣除积分。")}</p>}
         </div>
       )}
-      {generating && taskId && (
-        <button type="button" className="gen-card-cancel" onClick={onCancel} disabled={cancelRequested}>
-          {cancelRequested ? t("取消中…") : t("取消")}
+      {generating && onCancelGeneration && (
+        <button type="button" className="gen-card-cancel" onClick={() => onCancelGeneration(taskId)}>
+          {t("取消")}
         </button>
       )}
       {downloadFailed && messageId && onRedownload && (

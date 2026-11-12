@@ -4662,7 +4662,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .gen-card-icon { width: 40px; height: 40px; }
 .gen-card-label { font-size: 16px; font-weight: 600; color: var(--accent); }
 .gen-card--failed { color: var(--accent); opacity: 0.92; }
-.gen-card.video.gen-card--failed { aspect-ratio: auto; min-height: 240px; padding: 24px 20px; box-sizing: border-box; }
+.gen-card.gen-card--failed { aspect-ratio: auto; min-height: 240px; padding: 24px 20px; box-sizing: border-box; }
 .gen-card-error { max-width: 100%; color: var(--text-secondary); font-size: 14px; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
 .gen-card-error p { margin: 0; }
 .gen-card-notice { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
@@ -4683,7 +4683,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
   border: 1px solid var(--accent);
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 13px;
   cursor: pointer;
 }

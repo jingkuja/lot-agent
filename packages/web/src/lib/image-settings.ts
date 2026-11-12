@@ -22,6 +22,12 @@ export const IMAGE_QUALITY_VALUES: readonly string[] = IMAGE_QUALITIES.map((q) =
 export const DEFAULT_IMAGE_SIZE = "1024x1024";
 export const DEFAULT_IMAGE_QUALITY = "auto";
 
+/** Poster remix reserves one upstream reference slot for its selected poster. */
+export function imageReferenceCapacity(count: number, posterRemix: boolean) {
+  const limit = 5 - Number(posterRemix);
+  return { limit, remaining: Math.max(0, limit - count), overflow: count > limit };
+}
+
 /** Vendor (gpt-image) pixel budget. 1024x576 = 589824 is below the minimum. */
 export const IMAGE_MIN_PIXELS = 655_360;
 export const IMAGE_MAX_PIXELS = 8_294_400;
@@ -118,7 +124,7 @@ export type ExportPreset = typeof EXPORT_PRESETS[number]["value"];
 
 /** 白底图 check per image: whether the background was made pure white, and what may still fail a listing check. */
 export type WhiteBackgroundIssue = "busy_background" | "small_subject" | "cropped";
-export interface WhiteBackgroundCheck { corrected: boolean; issues: WhiteBackgroundIssue[] }
+export interface WhiteBackgroundCheck { corrected: boolean; issues: WhiteBackgroundIssue[]; unknown?: boolean }
 
 export const WHITE_BACKGROUND_ISSUES: Record<WhiteBackgroundIssue, string> = {
   busy_background: "背景不是纯白，没能完全校正，平台审核可能不通过，建议重新生成",
@@ -130,9 +136,9 @@ export const WHITE_BACKGROUND_ISSUES: Record<WhiteBackgroundIssue, string> = {
 export function whiteBackgroundChecks(raw: unknown): WhiteBackgroundCheck[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   return raw.map((item) => {
-    const { corrected, issues } = (item ?? {}) as Record<string, unknown>;
+    const { corrected, issues, unknown } = (item ?? {}) as Record<string, unknown>;
     const known = Array.isArray(issues) ? issues.filter((issue): issue is WhiteBackgroundIssue => issue in WHITE_BACKGROUND_ISSUES) : [];
-    return { corrected: corrected === true, issues: known };
+    return { corrected: corrected === true, issues: known, ...(unknown === true ? { unknown: true } : {}) };
   });
 }
 

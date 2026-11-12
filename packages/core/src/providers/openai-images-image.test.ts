@@ -152,7 +152,7 @@ describe("OpenAIImagesImageProvider", () => {
     const provider = new OpenAIImagesImageProvider({ baseUrl: "https://api/v1", apiKey: "k", model: "m" });
 
     const created = await provider.create({ prompt: "cat" });
-    const result = await provider.poll(created.taskId);
+    const result = created.result;
 
     expect(result).toMatchObject({
       status: "completed",

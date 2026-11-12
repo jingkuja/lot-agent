@@ -11,6 +11,7 @@ import {
   type ImageScene,
   imageSizeError,
   nearestImageRatio,
+  imageReferenceCapacity,
 } from "../lib/image-settings.js";
 import { ModelPicker } from "./ModelPicker.js";
 import {
@@ -31,7 +32,7 @@ import { KnowledgeBaseModal } from "./KnowledgeBaseModal.js";
 import {
   MAX_VIDEO_REFERENCE_IMAGES, MAX_VIDEO_REFERENCE_VIDEOS, MAX_VIDEO_REFERENCE_AUDIOS, MAX_KLING_REFERENCE_VIDEOS, MAX_GROK_REFERENCE_VIDEOS,
   GROK_REFERENCE_VIDEO_MAX_SECONDS, durationsUpTo, grokReferencesIssue, checkKlingReferenceImage, klingReferenceImagesIssue,
-  klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration, cachedImageSize, readImageSize,
+  klingReferenceVideosIssue, validateReferenceMedia, readMediaDuration, cachedImageSize, readImageSize, readImageUrlSize,
 } from "../lib/video-references.js";
 import { shouldSubmitComposer } from "../lib/composer-keyboard.js";
 import { DigitalTwinPicker } from "../modules/digital-twin/DigitalTwinPanel.js";
@@ -52,7 +53,7 @@ export interface InputBoxHandle {
   /** Image settings for a send that bypasses the composer (editing a generated
    * image): `original` (the image's own settings) when known, else the composer's,
    * checked against the selected model like the send button; or the error to show. */
-  prepareImageSend: (original?: GenerationSettings) => { settings?: ImageSettings; error?: string };
+  prepareImageSend: (original?: GenerationSettings, imageUrl?: string) => Promise<{ settings?: ImageSettings; error?: string }>;
 }
 
 interface InputBoxProps {
@@ -105,7 +106,6 @@ let lastImageScene: ImageScene = DEFAULT_IMAGE_SCENE;
 let lastRealText = false;
 
 const MAX_FILES = 5;
-const MAX_IMAGE_REFERENCE_IMAGES = 5;
 const ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.txt,.md,.csv,.json,application/pdf,.docx,.xlsx,.xls";
 /** ppt 模式内容文件的可选类型（不含图片；旧 pptx 可作素材）。 */
@@ -151,7 +151,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const imageSubmission = useRef<{ id: string; prompt: string; files: PickedFile[]; settings?: ImageSettings } | null>(null);
   const submittingImageRef = useRef(false);
   const disabled = streaming || submittingImage;
-  const draftLocked = disabled || pendingImage;
+  const draftLocked = disabled || pendingImage || submittingImage;
   const [internalValue, setInternalValue] = useState("");
   const [imageScene, setImageSceneState] = useState<ImageScene>(() => lastImageScene);
   const setImageScene = (scene: ImageScene) => {
@@ -212,11 +212,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         audios: referenceAudioFiles.length,
       })
     : [];
+  const imageCapacity = imageReferenceCapacity(files.length, posterRemix);
   const maxFiles = videoMode
     ? MAX_VIDEO_REFERENCE_IMAGES
     : mode === "image"
-      ? MAX_IMAGE_REFERENCE_IMAGES - Number(posterRemix)
+      ? imageCapacity.limit
       : MAX_FILES;
+  const overflow = mode === "image" && imageCapacity.overflow;
+  useEffect(() => { if (overflow) setFolded(false); }, [overflow]);
+  const inputVersion = useRef(0);
+  useEffect(() => { inputVersion.current++; return () => { inputVersion.current++; }; }, [files, imageScene, poster]);
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -302,7 +307,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (!picked || (mode === "image" && imageSubmission.current)) return;
     const incoming = Array.from(picked);
     setFiles((prev) => {
-      const room = Math.max(0, maxFiles - prev.length);
+      const room = mode === "image" ? imageReferenceCapacity(prev.length, posterRemix).remaining : Math.max(0, maxFiles - prev.length);
       if (mode === "image" && incoming.length > room) setUploadLimitNotice(true);
       if (mode === "video" && incoming.length > room) setAttachmentError(`参考图最多 ${maxFiles} 张`);
       const next = [...prev];
@@ -319,7 +324,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         urlsRef.current.set(f, URL.createObjectURL(f));
       }
     }
-  }, [maxFiles, mode]);
+  }, [maxFiles, mode, posterRemix]);
 
   const consumedAttachment = useRef("");
   const [attachmentError, setAttachmentError] = useState("");
@@ -535,7 +540,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     getFiles: collectPickedFiles,
     getSettings: () => mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined,
     getMissingMentions: () => missingMentions,
-    prepareImageSend: (original) => {
+    prepareImageSend: async (original, imageUrl) => {
       if (noModels) return { error: "模型目录暂时不可用，请稍后重试或联系管理员" };
       const n = original?.n ?? 1;
       const quality = original?.quality ?? DEFAULT_IMAGE_QUALITY;
@@ -547,7 +552,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       }
       // Editing a generated image: 智能 has no composer reference to follow.
       const current = settingsRef.current as ImageSettings | undefined;
-      return { settings: current?.ratio === IMAGE_AUTO_RATIO ? { ...current, ratio: DEFAULT_IMAGE_RATIO } : current };
+      if (current?.ratio !== IMAGE_AUTO_RATIO) return { settings: current };
+      try {
+        const size = imageUrl ? await readImageUrlSize(imageUrl) : undefined;
+        return { settings: { ...current, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO } };
+      } catch { return { error: "无法读取图片尺寸，请更换图片" }; }
     },
   }), [collectPickedFiles, mode, mediaMode, currentImageSettings, missingMentions, noModels, effectiveImageModel]);
 
@@ -581,19 +590,25 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       return;
     }
     const prompt = posterRemix && !trimmed ? t("按爆款参考图生成我的品牌海报") : trimmed;
-    if (sceneTabs) {
-      const attempt = imageSubmission.current ?? {
-        id: randomId(), prompt, files: picked, settings: currentImageSettings(),
-      };
-      imageSubmission.current = attempt;
+    if (mode === "image") {
       submittingImageRef.current = true;
       setSubmittingImage(true);
       let result: Awaited<ReturnType<NonNullable<InputBoxProps["onSend"]>>>;
       try {
+        const version = inputVersion.current;
+        if (!imageSubmission.current && (settingsRef.current as ImageSettings)?.ratio === IMAGE_AUTO_RATIO && files[0] && !posterRemix) {
+          await readImageSize(files[0]);
+          if (version !== inputVersion.current) return;
+        }
+        const attempt = imageSubmission.current ?? {
+          id: randomId(), prompt, files: picked, settings: currentImageSettings(),
+        };
+        imageSubmission.current = attempt;
         result = await onSend(attempt.prompt, attempt.files, attempt.settings, knowledgeBases, attempt.id);
-      } catch {
+      } catch (error) {
         result = "rejected";
-        setAttachmentError("提交失败，草稿已保留，请稍后重试");
+        setAttachmentError(error instanceof Error && error.message === "无法读取图片尺寸，请更换图片"
+          ? error.message : "提交失败，草稿已保留，请稍后重试");
       } finally {
         submittingImageRef.current = false;
         setSubmittingImage(false);
@@ -605,7 +620,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         return;
       }
     } else {
-      void onSend(prompt, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
+      void onSend(prompt, picked, mediaMode ? settingsRef.current : undefined, knowledgeBases);
     }
     setPromptValue("");
     setPoster(null);
@@ -699,7 +714,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const sendControl = !embedded && (submittingImage && !streaming ? (
     <button type="button" className="btn-send btn-send--grad" disabled>{t("正在提交…")}</button>
   ) : disabled ? (
-    <button onClick={onStop} className="btn-stop" title={t("停止")}>
+    <button onClick={() => onStop?.()} className="btn-stop" title={t("停止")}>
       <svg viewBox="0 0 24 24" fill="currentColor">
         <rect x="6" y="6" width="12" height="12" rx="2" />
       </svg>
@@ -709,7 +724,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     <button
       onClick={handleSend}
       className={`btn-send ${mediaMode ? "btn-send--grad" : ""}`}
-      disabled={checkingMedia || (
+      disabled={checkingMedia || overflow || (
         !promptValue.trim() && files.length === 0 && !(posterRemix && poster)
         && (!videoMode || (referenceVideoFiles.length === 0 && referenceAudioFiles.length === 0 && !firstFrameFile && !lastFrameFile))
         && !templateFile && backgroundFiles.length === 0 && !oldContractFile && !newContractFile
@@ -765,7 +780,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           <span aria-hidden>⚠️</span>
           {t("模型目录暂时不可用，请稍后重试或联系管理员")}</div>
       )}
-      {mode === "image" && (uploadLimitNotice || files.length >= maxFiles) && (
+      {mode === "image" && (uploadLimitNotice || overflow) && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
           {posterRemix ? t("爆款复刻最多可上传 {0} 张产品图", [maxFiles]) : <>{t("参考图最多")}{maxFiles} {t("张，不能再上传")}</>}</div>
@@ -1091,18 +1106,20 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {productPickerOpen && (
             <ProductPickerDialog
-              room={maxFiles - files.length}
+              room={imageCapacity.remaining}
               onClose={() => setProductPickerOpen(false)}
               onPick={(product, images, failedImages) => {
                 setProductPickerOpen(false);
                 if (images.length) addFiles(images);
                 setPromptValue(withProductText(promptValue, productPromptText(product)));
                 setAttachmentError("");
-                const room = maxFiles - files.length;
+                const room = imageCapacity.remaining;
                 setProductNotice(
-                  failedImages > 0 ? "有产品图读取失败，已带入能读取的图片和产品说明"
+                  failedImages > 0 && images.length === 0 ? "产品图读取失败，本次只带入了产品说明"
+                    : failedImages > 0 ? "有产品图读取失败，已带入能读取的图片和产品说明"
                     : !(product.images ?? []).length ? "这个产品还没有图片，只带入了产品说明；可以再上传产品图"
-                    : (product.images ?? []).length > room ? "参考图已到上限，只带入了部分产品图"
+                    : room === 0 ? "已到上限，本次未带入产品图"
+                    : (product.images ?? []).length > room ? t("带入 {0} 张产品图，跳过 {1} 张", [images.length, product.images!.length - images.length])
                     : ""
                 );
               }}

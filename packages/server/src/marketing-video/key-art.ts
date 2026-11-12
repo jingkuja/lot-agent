@@ -168,11 +168,13 @@ export class MarketingKeyArtist {
         if (!taskId) {
           const media = await this.references(owner, draft);
           const request = { prompt: marketingKeyArtPrompt(draft), model, size: SIZES[draft.ratio], n: 1, ...(media.length ? { media } : {}) };
-          ({ taskId } = await provider.create(request));
+          const created = await provider.create(request);
+          taskId = created.taskId;
+          source = created.result?.urls?.[0] ?? created.result?.url;
           stage = "wait";
           await this.touch(id, ",vendor_task_id=$2", [taskId]);
         }
-        source = await this.wait(id, provider, taskId, deadline);
+        source ??= await this.wait(id, provider, taskId, deadline);
         // An image returned inline cannot fail to download, and is too large to keep in the row.
         if (!source.startsWith("data:")) await this.touch(id, ",result_url=$2", [source]);
       }

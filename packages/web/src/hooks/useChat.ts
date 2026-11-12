@@ -39,6 +39,16 @@ function missingNotice(missing: number): string {
   return `套图中有 ${missing} 张未生成成功`;
 }
 
+interface GenerationToken {
+  cancelled: boolean;
+  submission?: AbortController;
+  taskId?: string;
+  stopRequested?: boolean;
+  submitted?: boolean;
+  tempUserId?: string;
+  tempGenId?: string;
+}
+
 export function useChat(
   conversationId: string | null,
   onStreamEnd?: () => void,
@@ -58,7 +68,8 @@ export function useChat(
   // touch the view while its conversation is the one on screen, otherwise a
   // concurrent chat bleeds its reply into whatever conversation is displayed.
   const streamsRef = useRef<Map<string, AbortController>>(new Map());
-  const genPollRef = useRef<{ cancelled: boolean; submission?: AbortController } | null>(null);
+  const genPollRef = useRef<GenerationToken | null>(null);
+  const pendingSubmissions = useRef(new Map<string, GenerationToken>());
   /** Set below; loadMessages resumes watching redos through it. */
   const pollRedoRef = useRef<((cid: string, taskId: string) => void) | null>(null);
   useEffect(() => {
@@ -80,7 +91,8 @@ export function useChat(
   // resuming an in-flight generation after a conversation (re)load. The caller
   // owns the cancellation `token` (stored in genPollRef) so switching away stops it.
   const pollGeneration = useCallback(
-    (taskId: string, messageId: string, mediaType: "image" | "video", token: { cancelled: boolean }) => {
+    (taskId: string, messageId: string, mediaType: "image" | "video", token: GenerationToken) => {
+      token.taskId = taskId;
       let failures = 0;
       const poll = async () => {
         if (token.cancelled) return;
@@ -120,6 +132,7 @@ export function useChat(
                 progress: 100,
                 assets: out?.assets,
                 error: downloadFailed ? (out?.error as string | undefined) : t.error,
+                unknownResult: out?.unknownResult === true || t.error === "IMAGE_RESULT_UNKNOWN",
                 ...(typeof out?.missing === "number" && out.missing > 0 ? { notice: missingNotice(out.missing), missing: out.missing } : {}),
                 whiteChecks: whiteBackgroundChecks(out?.whiteChecks),
                 posters: storedPosters(out?.posters),
@@ -191,6 +204,7 @@ export function useChat(
               supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
               error: parsedMeta.error,
+              unknownResult: parsedMeta.unknownResult === true || parsedMeta.errorCode === "IMAGE_RESULT_UNKNOWN",
               ...(typeof parsedMeta.missing === "number" && parsedMeta.missing > 0
                 ? { notice: missingNotice(parsedMeta.missing), missing: parsedMeta.missing } : {}),
               taskId: parsedMeta.taskId as string | undefined,
@@ -526,12 +540,15 @@ export function useChat(
     ): Promise<"accepted" | "rejected" | "unknown"> => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || state.isStreaming) return "rejected";
+      if (mediaType === "image") requestId ??= randomId();
       const imageSettings: Partial<ImageSettings> = mediaType === "image" && settings && typeof settings === "object" ? settings as ImageSettings : {};
       const { scene, posterReference, realText, ...imageParameters } = imageSettings;
       dispatch({ type: "stream_started" });
 
       if (genPollRef.current) genPollRef.current.cancelled = true;
-      const token = { cancelled: false, submission: requestId ? new AbortController() : undefined };
+      const submissionKey = `${cid}:${requestId}`;
+      const previous = requestId ? pendingSubmissions.current.get(submissionKey) : undefined;
+      const token: GenerationToken = { cancelled: false, submission: new AbortController(), stopRequested: previous?.stopRequested };
       genPollRef.current = token;
 
       // Optimistically render the user message + a "生成中" bubble immediately —
@@ -539,34 +556,38 @@ export function useChat(
       // user sees "图片/视频生成中" right away instead of a stuck input box.
       // The placeholders are reconciled with server ids once /generations returns
       // (or flipped to "failed" if the request errors).
-      const tempUserId = `user-${requestId ?? randomId()}`;
-      const tempGenId = `assistant-${requestId ?? randomId()}`;
-      dispatch({
-        type: "generation_pair_appended",
-        userMessage: {
-          id: tempUserId, role: "user", content: prompt,
-          ...(mediaType === "image" ? { imageInput: { scene, realText, references: [] } } : {}),
-        },
-        genMessage: {
-          id: tempGenId,
-          role: "assistant",
-          content: "",
-          generation: {
-            mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined,
-            scene,
-          },
-        },
-      });
+       const tempUserId = previous?.tempUserId ?? `user-${requestId ?? randomId()}`;
+       const tempGenId = previous?.tempGenId ?? `assistant-${requestId ?? randomId()}`;
+       token.tempUserId = tempUserId;
+       token.tempGenId = tempGenId;
+       if (!previous) {
+         dispatch({
+           type: "generation_pair_appended",
+           userMessage: {
+             id: tempUserId, role: "user", content: prompt,
+             ...(mediaType === "image" ? { imageInput: { scene, realText, references: [] } } : {}),
+           },
+           genMessage: {
+             id: tempGenId,
+             role: "assistant",
+             content: "",
+             generation: {
+               mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined,
+               scene,
+             },
+           },
+         });
+       }
 
       let submitted = false;
       try {
-        const uploaded = await Promise.all(files.map(async ({ file, slot }) => {
+        const uploaded = await Promise.all((previous ? [] : files).map(async ({ file, slot }) => {
           const saved = mediaType === "image" ? imageUploads.current.get(file) : undefined;
           const uploaded = saved ?? await api.uploadFile(file, token.submission?.signal);
           if (mediaType === "image") imageUploads.current.set(file, uploaded);
           return { slot, uploaded };
         }));
-        if (token.cancelled || cidRef.current !== cid) return "rejected";
+        if (token.cancelled || token.stopRequested && !previous || cidRef.current !== cid) return "rejected";
         const media = [
           ...(mediaType === "image" ? references : []),
           ...uploaded.filter((f) => mediaType === "image" && f.uploaded.mime.startsWith("image/")).map((f) => f.uploaded.url),
@@ -580,7 +601,9 @@ export function useChat(
         const lastFrame = urlsFor("video_last_frame")[0];
 
         submitted = true;
-        const res = await api.generate(cid, {
+        token.submitted = true;
+        if (requestId) pendingSubmissions.current.set(submissionKey, token);
+        const res = previous && requestId ? await api.getImageSubmission(cid, requestId) : await api.generate(cid, {
           prompt,
           mediaType,
           settings: mediaType === "image" ? imageParameters : settings,
@@ -596,6 +619,12 @@ export function useChat(
           ...(scene === "poster_remix" ? { posterReference } : {}),
           ...(realText === true ? { realText: true } : {}),
         }, token.submission?.signal);
+        token.taskId = res.taskId;
+        if (token.stopRequested) {
+          try { await api.cancelTask(res.taskId); }
+          catch { showAlert(translateRef.current("取消失败，请重试；仍在查询任务状态")); }
+        }
+        pendingSubmissions.current.delete(submissionKey);
         if (token.cancelled || cidRef.current !== cid) return "accepted";
         // Reconcile the optimistic placeholders with the server-assigned ids
         // + vendor taskId, keeping the bubble in its "generating" state.
@@ -626,6 +655,7 @@ export function useChat(
           !(e instanceof ApiClientError) || e.code === "IMAGE_SUBMISSION_PENDING" || e.status === 408
           || (e.status >= 500 && !e.code?.startsWith("IMAGE_"))
         );
+        if (!unknown) pendingSubmissions.current.delete(submissionKey);
         if (genPollRef.current === token) genPollRef.current = null;
         const stopped = !!token.submission?.signal.aborted;
         if (cidRef.current !== cid || (token.cancelled && !stopped)) return unknown ? "unknown" : "rejected";
@@ -642,7 +672,7 @@ export function useChat(
           generation: {
             mediaType, status: stopped && !submitted ? "cancelled" : "failed", error: `生成请求失败：${msg}`,
             notice: unknown ? "图片提交结果待确认，请稍后核对"
-              : requestId && !submitted ? "参考图上传失败，草稿已保留"
+               : requestId && !submitted && !stopped ? "参考图上传失败，草稿已保留"
               : (sceneNotice || requestId) && e instanceof ApiClientError ? msg : undefined,
           },
         });
@@ -819,7 +849,7 @@ export function useChat(
     }
   }, []);
 
-  const stop = useCallback(() => {
+  const stop = useCallback(async (taskId?: string) => {
     // Stop only the conversation on screen — a concurrent stream in another
     // conversation keeps running.
     const cid = cidRef.current;
@@ -827,13 +857,31 @@ export function useChat(
       streamsRef.current.get(cid)?.abort();
       streamsRef.current.delete(cid);
     }
-    if (genPollRef.current) {
-      genPollRef.current.cancelled = true;
-      genPollRef.current.submission?.abort();
-      genPollRef.current = null;
+    const token = genPollRef.current ?? (cid
+      ? [...pendingSubmissions.current.entries()].find(([key]) => key.startsWith(`${cid}:`))?.[1]
+      : undefined);
+    const target = taskId ?? token?.taskId;
+    if (target) {
+      try { await api.cancelTask(target); }
+      catch { showAlert(translateRef.current("取消失败，请重试；仍在查询任务状态")); }
+      return;
+    }
+    if (token) {
+      token.stopRequested = true;
+      // Keep the submitted request alive to receive its task ID and cancel that exact task.
+      if (!token.submitted) token.submission?.abort();
     }
     dispatch({ type: "stream_stopped" });
   }, []);
+
+  const whiteBackground = useCallback(async (messageId: string, index: number, restore: boolean) => {
+    const cid = cidRef.current;
+    if (!cid) return "白底处理暂不可用";
+    try {
+      await api.whiteBackground(cid, messageId, index, restore);
+      await loadMessages(cid);
+    } catch { return "白底处理失败，原图已保留"; }
+  }, [loadMessages]);
 
   const clear = useCallback(() => {
     // Cancel any in-flight generation poll and drop the streaming lock so a
@@ -863,6 +911,7 @@ export function useChat(
     composeGeneration,
     composeImages,
     editPoster,
+    whiteBackground,
     redoGenerationImages,
     exportGeneration,
   };

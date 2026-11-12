@@ -1116,10 +1116,11 @@ export class DB {
     durationSec?: number | null;
     originalName?: string | null;
     isPrivate?: boolean;
+    idempotent?: boolean;
   }): Promise<void> {
     await this.pool.query(
       `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name, is_private)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)${a.idempotent ? " ON CONFLICT (id) DO NOTHING" : ""}`,
       [
         a.id,
         a.taskId ?? null,

@@ -23,6 +23,7 @@ import {
 } from "../generation/compose.js";
 import { IMAGE_REDO_TASK } from "../generation/run-job.js";
 import { posterRenderKey, renderPoster } from "../generation/poster-render.js";
+import { whitenBackground } from "../generation/white-background.js";
 import {
   editPosterLayout, parsePosterLayout, planPoster, posterBackgroundPrompt, PosterPlanError, posterTemplateFor, type PosterLayout,
 } from "@lot-agent/core/poster";
@@ -603,6 +604,21 @@ async function originalImageTask(
 export function createGenerationRoutes(service: AgentService, deps: { assets?: ObjectStorage; posterLibrary?: PosterLibrary } = {}) {
   const app = new Hono<{ Variables: GenVariables }>();
 
+  app.get("/:id/generations/submissions/:requestId", async (c) => {
+    const conversationId = c.req.param("id");
+    const conv = await service.db.getConversation(conversationId);
+    if (!conv || conv.user_id !== c.get("userId")) return c.json({ error: "Conversation not found" }, 404);
+    const requestId = c.req.param("requestId");
+    if (!/^[a-zA-Z0-9-]{16,64}$/.test(requestId)) return c.json({ error: "Invalid requestId" }, 400);
+    const existing = await service.db.getImageSubmission(conversationId, requestId);
+    const meta = existing?.metadata;
+    if (!existing || typeof meta?.submissionTaskId !== "string" || typeof meta.userMessageId !== "string") {
+      return c.json({ error: "图片提交结果待确认，请稍后核对", code: "IMAGE_SUBMISSION_PENDING" }, 409);
+    }
+    return c.json({ taskId: meta.submissionTaskId, assistantMessage: existing,
+      userMessage: { id: meta.userMessageId, content: meta.prompt, metadata: { imageInput: meta.imageInput } } });
+  });
+
   app.post("/:id/generations", async (c) => {
     const userId = c.get("userId");
     const conversationId = c.req.param("id");
@@ -976,6 +992,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
 
     const original = mediaType === "image" ? await originalImageTask(service.db, meta, conversationId, messageId, userId) : null;
     const originalContext = {
+      ...(meta.unknownResult === true ? { unknownResult: true } : {}),
       ...(original ? { originalTaskId: original.id } : {}),
       ...(typeof meta.missing === "number" && meta.missing > 0 ? { missing: meta.missing } : {}),
     };
@@ -1217,8 +1234,59 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     return c.json({ index, asset, poster });
   });
 
-  // POST /:id/generations/:messageId/export — 打包下载: this generation's images and composites in one zip, as stored
-  // (`original`) or resized for a selling platform. Names come from the card (roles / layouts) and are sanitized here.
+  // White-background correction is local and reversible; the original stays owned by the same user.
+  app.post("/:id/generations/:messageId/white-background", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null);
+    const index = body?.index;
+    if (!Number.isInteger(index) || index < 0 || typeof body?.restore !== "boolean") return c.json({ error: "Invalid operation" }, 400);
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    if (!deps.assets || meta.kind !== "generation" || meta.mediaType !== "image" || meta.scene !== "white_background"
+      || meta.status !== "completed" || !Array.isArray(meta.assets)) {
+      return c.json({ error: "白底处理暂不可用" }, 409);
+    }
+    const assets = meta.assets as { url: string; mime: string }[];
+    const originals = (meta.whiteOriginals ?? assets) as typeof assets;
+    const original = originals[index];
+    const key = original && outputStorageKey(original.url);
+    const owned = key ? await service.db.getGeneratedByStorageKey(key) : null;
+    if (!key || !owned || owned.user_id !== userId || !assets[index]) return c.json({ error: "Image not found" }, 404);
+    let asset = original;
+    let check;
+    try {
+      if (body.restore) {
+        // Restoring the original must remain possible even when detection cannot decode it.
+        check = await whitenBackground(await deps.assets.get(key), false).then(result => result.check)
+          .catch(() => ({ corrected: false, issues: [], unknown: true }));
+      } else {
+        const result = await whitenBackground(await deps.assets.get(key));
+        check = { ...result.check, corrected: true };
+        const id = randomUUID();
+        const storageKey = `${id}.png`;
+        const { url } = await deps.assets.put({ key: storageKey, body: result.body, contentType: result.mime });
+        await service.db.createAsset({ id, userId, type: "image", storageKey, url, mime: result.mime, sizeBytes: result.body.length });
+        asset = { url, mime: result.mime };
+      }
+    } catch { return c.json({ error: "白底处理失败，原图已保留" }, 500); }
+    const saved = await service.db.updateGenerationMetadata(messageId, { userId, conversationId }, current => {
+      const currentAssets = Array.isArray(current.assets) ? [...current.assets] : [];
+      if (current.status !== "completed" || (currentAssets[index] as { url?: string })?.url !== assets[index].url) return null;
+      currentAssets[index] = asset;
+      const checks = Array.isArray(current.whiteChecks) ? [...current.whiteChecks] : [];
+      checks[index] = check;
+      const { composites: _composites, ...rest } = current;
+      return { ...rest, assets: currentAssets, whiteChecks: checks, whiteOriginals: originals };
+    });
+    if (!saved) return c.json({ error: "图片已变化，请刷新后重试" }, 409);
+    return c.json({ ok: true });
+  });
+
+  // Export the generation's images and composites as stored (`original`) or resized for a selling platform.
+  // Names come from the card (roles / layouts) and are sanitized here.
   // Local work only: no model request, nothing metered.
   app.post("/:id/generations/:messageId/export", async (c) => {
     const userId = c.get("userId");
@@ -1296,6 +1364,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "只有已完成的产品套图和主副图可以重做" }, 409);
     }
     if ((meta.redo as { status?: unknown } | undefined)?.status === "running") return c.json({ error: "这组图正在重做，请稍候" }, 409);
+    if (meta.unknownResult === true) return c.json({ error: "图片结果待核实，请联系客服", code: "IMAGE_RESULT_UNKNOWN" }, 409);
     if (body?.instruction !== undefined && (typeof body.instruction !== "string" || body.instruction.length > 600 || body.missing === true)) {
       return c.json({ error: "修改要求最多 600 字，仅适用于单张重做" }, 400);
     }
@@ -1328,7 +1397,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const setReference = !media.length && typeof keep?.url === "string" ? keep.url : undefined;
 
     const claimed = await service.db.updateGenerationMetadata(messageId, owner, (current) =>
-      current.status === "completed" && (current.redo as { status?: unknown } | undefined)?.status !== "running"
+      current.status === "completed" && current.unknownResult !== true && (current.redo as { status?: unknown } | undefined)?.status !== "running"
         ? { ...current, redo: { status: "running", indexes } } : null);
     if (!claimed) return c.json({ error: "这组图正在重做，请稍候" }, 409);
     let taskId: string;

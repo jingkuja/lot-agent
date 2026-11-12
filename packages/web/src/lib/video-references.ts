@@ -121,14 +121,17 @@ export function klingReferenceVideosIssue(files: readonly File[]): string | unde
 export interface ImageSize { width: number; height: number }
 
 const imageSizeCache = new WeakMap<File, ImageSize>();
+const imageSizePending = new WeakMap<File, Promise<ImageSize>>();
 /** A size `readImageSize` already measured, without waiting. */
 export function cachedImageSize(file: File): ImageSize | undefined {
   return imageSizeCache.get(file);
 }
 export function readImageSize(file: File): Promise<ImageSize> {
   const cached = imageSizeCache.get(file);
-  if (cached !== undefined) return Promise.resolve(cached);
-  return new Promise((resolve, reject) => {
+  if (cached !== undefined) return cached.width && cached.height ? Promise.resolve(cached) : Promise.reject(new Error("无法读取图片尺寸，请更换图片"));
+  const pending = imageSizePending.get(file);
+  if (pending) return pending;
+  const result = new Promise<ImageSize>((resolve, reject) => {
     const image = new Image();
     const url = URL.createObjectURL(file);
     const cleanup = () => {
@@ -149,6 +152,23 @@ export function readImageSize(file: File): Promise<ImageSize> {
       cleanup();
       imageSizeCache.set(file, size);
       resolve(size);
+    };
+    image.onerror = fail;
+    image.src = url;
+  }).finally(() => imageSizePending.delete(file));
+  imageSizePending.set(file, result);
+  return result;
+}
+
+export function readImageUrlSize(url: string): Promise<ImageSize> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const cleanup = () => { clearTimeout(timer); image.onload = image.onerror = null; };
+    const fail = () => { cleanup(); reject(new Error("无法读取图片尺寸，请更换图片")); };
+    const timer = setTimeout(fail, 10_000);
+    image.onload = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return fail();
+      cleanup(); resolve({ width: image.naturalWidth, height: image.naturalHeight });
     };
     image.onerror = fail;
     image.src = url;

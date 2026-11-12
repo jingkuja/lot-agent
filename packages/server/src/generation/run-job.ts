@@ -1,6 +1,7 @@
 import { ProviderError } from "@lot-agent/core";
 import { GenerationError } from "./errors.js";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { ImageResultUnknown } from "./image-receipts.js";
 import { genCacheKey } from "../billing/gen-cache.js";
 import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
@@ -10,7 +11,7 @@ import { renderPoster } from "./poster-render.js";
 import { parsePosterLayout, type PosterLayout } from "@lot-agent/core/poster";
 import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE } from "./poster-library.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
-import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
+import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia, GenerationCallOptions } from "@lot-agent/core";
 
 /**
  * Media-neutral view of a generation provider. Both `ImageGenerationProvider`
@@ -36,7 +37,7 @@ export interface JobGenerationProvider {
     first_frame?: string;
     last_frame?: string;
     media?: ReferenceMedia[];
-  }): Promise<CreateResult>;
+  }, options?: GenerationCallOptions): Promise<CreateResult>;
   poll(taskId: string): Promise<PollResult>;
 }
 
@@ -88,6 +89,9 @@ export interface RunJobDeps {
   pollIntervalMs?: number;
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Receipt-backed tasks must resume before consulting cross-task output caches. */
+  hasImageReceipts?: () => Promise<boolean>;
+  hasImageReceipt?: (slot: number) => Promise<boolean>;
 }
 
 /** Thrown when a job observes its own cancellation; the task row is already
@@ -198,6 +202,7 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
     taskId: job.id,
     ...(typeof input.originalTaskId === "string" ? { originalTaskId: input.originalTaskId } : {}),
     ...(typeof input.missing === "number" && input.missing > 0 ? { missing: input.missing } : {}),
+    ...(input.unknownResult === true ? { unknownResult: true } : {}),
     settings: {
       size: input.size,
       n: input.n,
@@ -257,10 +262,12 @@ function producedUrls(mediaType: MediaType, input: Record<string, unknown>, p: P
 
 async function storeGeneratedAsset(deps: RunJobDeps, job: JobLike, type: MediaType, file: { body: Buffer; mime: string }, durationSec?: number) {
   const { body, mime } = file;
-  const id = randomUUID();
+  const hash = createHash("sha256").update(job.userId).update(job.id).update(body).digest("hex");
+  const id = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   const key = `${id}.${deps.extFor(mime)}`;
   const { url } = await deps.storage.put({ key, body, contentType: mime });
-  await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type, storageKey: key, url, mime, sizeBytes: body.byteLength, durationSec });
+  await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type, storageKey: key, url, mime,
+    sizeBytes: body.byteLength, durationSec, idempotent: true });
   return { id, asset: durationSec != null ? { url, mime, durationSec } : { url, mime } };
 }
 
@@ -316,12 +323,11 @@ async function downloadAndFinalize(
       if (whiteBackground) {
         // Best effort: an image that cannot be checked is stored as the model made it.
         try {
-          const fixed = await whitenBackground(body);
-          ({ body, mime } = fixed);
+          const fixed = await whitenBackground(body, false);
           whiteChecks.push(fixed.check);
         } catch (err) {
           console.warn("[image.white_background] check failed", { taskId: job.id, errorType: (err as Error)?.name });
-          whiteChecks.push({ corrected: false, issues: [] });
+          whiteChecks.push({ corrected: false, issues: [], unknown: true });
         }
       }
       const { id, asset } = await storeGeneratedAsset(deps, job, mediaType, { body, mime }, durationSec);
@@ -329,7 +335,8 @@ async function downloadAndFinalize(
       assets.push(asset);
     }
     const outputCount = mediaType === "video" ? (durationSec ?? 1) : assets.length;
-    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount } });
+    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount },
+      idempotencyKey: `generation:${job.userId}:${job.input.originalTaskId ?? job.id}` });
     const checks = { ...(whiteChecks.length ? { whiteChecks } : {}), ...(posters.length ? { posters } : {}) };
     const out: GenOut = { assetIds, assets, ...checks };
     if (cacheKey) await deps.cache.set(cacheKey, out);
@@ -421,7 +428,8 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       last_frame: lastFrame,
       media: media?.map((m) => m.url), model: deps.vendorModel,
     });
-    const cached = cacheKey ? await deps.cache.get(cacheKey) as GenOut | null : null;
+    const resuming = mediaType === "image" && await deps.hasImageReceipts?.();
+    const cached = cacheKey && !resuming ? await deps.cache.get(cacheKey) as GenOut | null : null;
     const cachedAssets = cached ? await Promise.all(cached.assetIds.map((id) => deps.db.getAsset(id))) : [];
     if (cached && cachedAssets.length > 0 && cachedAssets.every((asset) => asset?.user_id === job.userId)) {
       await setMsg("completed", {
@@ -444,6 +452,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     // reuse the persisted vendor task id and keep polling instead of paying to
     // create a duplicate generation.
     let vendorTaskId = await deps.db.getTaskVendorId(job.id);
+    let immediate: PollResult | undefined;
     if (!vendorTaskId) {
       let publicMedia = mediaType === "image"
         ? await prepareImageReferences(deps, media)
@@ -503,13 +512,18 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
           durationSec: createRequest.durationSec,
         }));
       }
-      const created = await deps.provider.create(createRequest);
+      const imageOptions = mediaType === "image" && (deps.signal || deps.hasImageReceipt || deps.hasImageReceipts)
+        ? { signal: deps.signal, slot: 0 } : undefined;
+      const created = mediaType === "image" && imageOptions
+        ? await deps.provider.create(createRequest, imageOptions)
+        : await deps.provider.create(createRequest);
+      immediate = created.result;
       vendorTaskId = created.taskId;
       await deps.db.setTaskVendorId(job.id, vendorTaskId);
     }
 
     const start = Date.now();
-    let p = await deps.provider.poll(vendorTaskId);
+    let p = immediate ?? await deps.provider.poll(vendorTaskId);
     for (;;) {
       await deps.updateProgress(job.id, p.progress);
       if (p.status === "completed") break;
@@ -521,6 +535,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
     }
     const sourceUrls = producedUrls(mediaType, input, p);
     if (!sourceUrls.length) throw new Error("generation completed without a url");
+    await assertNotCancelled();
 
     return await downloadAndFinalize(deps, job, mediaType, sourceUrls, cacheKey, setMsg);
   } catch (err) {
@@ -528,19 +543,20 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       await setMsg("cancelled", {});
       throw new JobCancelledError();
     } else {
-      await setMsg("failed", { error: err instanceof Error ? err.message : String(err) });
+      await setMsg("failed", { error: err instanceof Error ? err.message : String(err),
+        ...(err instanceof ImageResultUnknown ? { errorCode: err.errorCode } : {}) });
     }
     throw err;
   }
 }
 
 async function pollToCompletion(deps: RunJobDeps, vendorTaskId: string, onProgress: (progress: number) => Promise<void>,
-  assertNotCancelled: () => Promise<void>): Promise<PollResult> {
+  assertNotCancelled: () => Promise<void>, immediate?: PollResult): Promise<PollResult> {
   const sleep = deps.sleep ?? realSleep;
   const pollIntervalMs = deps.pollIntervalMs ?? 3000;
   const maxWaitMs = deps.maxWaitMs ?? 15 * 60 * 1000;
   const start = Date.now();
-  let p = await deps.provider.poll(vendorTaskId);
+  let p = immediate ?? await deps.provider.poll(vendorTaskId);
   for (;;) {
     await onProgress(p.progress);
     if (p.status === "completed") return p;
@@ -582,15 +598,22 @@ async function submitEach(
   nextReference?: (firstUrl: string) => Promise<ReferenceMedia[] | undefined>
 ): Promise<{ sourceUrls: string[]; failure?: unknown }> {
   const persisted = parseSetVendorIds(await deps.db.getTaskVendorId(job.id));
+  const resuming = !!persisted || !!await deps.hasImageReceipts?.();
   const vendorIds = persisted ?? [];
   const sourceUrls: string[] = [];
   let media = request.media;
   let referenced = false;
   for (let index = 0; index < prompts.length; index++) {
     let vendorTaskId: string | undefined = vendorIds[index];
+    let immediate: PollResult | undefined;
     try {
       if (!vendorTaskId) {
-        if (persisted) break;
+        if (resuming) {
+          if (!await deps.hasImageReceipt?.(index)) break;
+          vendorTaskId = `receipt:${index}`;
+        }
+      }
+      if (!vendorTaskId) {
         await assertNotCancelled();
         let prompt = prompts[index];
         if (index > 0 && nextReference && !media?.length && !referenced) {
@@ -600,14 +623,20 @@ async function submitEach(
         }
         if (referenced && media?.length) prompt = SET_REFERENCE_NOTE + prompt;
         console.log("[image.generate] set request", JSON.stringify({ taskId: job.id, model: deps.vendorModel, index, reference: !!media?.length }));
-        const created = await deps.provider.create({ prompt, size: request.size, n: 1, quality: request.quality, media });
+        const imageOptions = deps.signal || deps.hasImageReceipt || deps.hasImageReceipts
+          ? { signal: deps.signal, slot: index } : undefined;
+        const created = imageOptions
+          ? await deps.provider.create({ prompt, size: request.size, n: 1, quality: request.quality, media }, imageOptions)
+          : await deps.provider.create({ prompt, size: request.size, n: 1, quality: request.quality, media });
+        immediate = created.result;
         vendorTaskId = created.taskId;
         vendorIds.push(vendorTaskId);
         await deps.db.setTaskVendorId(job.id, JSON.stringify(vendorIds));
       }
       const share = 100 / prompts.length;
       const done = await pollToCompletion(deps, vendorTaskId,
-        (progress) => deps.updateProgress(job.id, Math.min(99, Math.round(index * share + progress * share / 100))), assertNotCancelled);
+        (progress) => deps.updateProgress(job.id, Math.min(99, Math.round(index * share + progress * share / 100))), assertNotCancelled, immediate);
+      await assertNotCancelled();
       const url = done.urls?.find(Boolean) ?? done.url;
       if (!url) throw new Error("generation completed without a url");
       sourceUrls.push(url);
@@ -655,11 +684,13 @@ async function runImageSet(
   if (!sourceUrls.length) throw failure ?? new Error("generation completed without a url");
   const partial = sourceUrls.length < prompts.length;
   const finalize = partial
-    ? (status: string, extra: Record<string, unknown>) => setMsg(status, { ...extra, missing: prompts.length - sourceUrls.length })
+    ? (status: string, extra: Record<string, unknown>) => setMsg(status, { ...extra, missing: prompts.length - sourceUrls.length,
+      ...(failure instanceof ImageResultUnknown ? { error: failure.message, errorCode: failure.errorCode, unknownResult: true } : {}) })
     : setMsg;
   // A partial set is not cached: sending the same request again should try for the whole set.
   const out = await downloadAndFinalize(deps, job, "image", sourceUrls, partial ? null : cacheKey, finalize, firstAsset);
-  return partial && !out.downloadFailed ? { ...out, missing: prompts.length - sourceUrls.length } : out;
+  return partial ? { ...out, missing: prompts.length - sourceUrls.length,
+    ...(failure instanceof ImageResultUnknown ? { error: failure.message, unknownResult: true } : {}) } : out;
 }
 
 /** Queue job type of a 重做 / 补齐 request on a finished image set. */
@@ -769,22 +800,27 @@ export async function runImageSetRedo(deps: RunJobDeps, job: JobLike): Promise<G
     const assetIds: string[] = [];
     const images: StoredImage[] = [];
     for (const { body, mime } of files) {
-      const assetId = randomUUID();
-      const key = `${assetId}.${deps.extFor(mime)}`;
-      const { url } = await deps.storage.put({ key, body, contentType: mime });
-      await deps.db.createAsset({ id: assetId, taskId: job.id, userId: job.userId, type: "image", storageKey: key, url, mime, sizeBytes: body.byteLength });
-      assetIds.push(assetId);
-      images.push({ url, mime });
+      await assertNotCancelled();
+      const stored = await storeGeneratedAsset(deps, job, "image", { body, mime });
+      assetIds.push(stored.id);
+      images.push(stored.asset);
     }
-    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: images.length } });
-    await change((metadata) => applyImageRedo(metadata, job.id, redo.indexes.slice(0, images.length), images));
+    await deps.meter.record({ userId: job.userId, taskId: job.id, modelId: deps.modelId, usage: { inputCount: 0, outputCount: images.length },
+      idempotencyKey: `generation:${job.userId}:${job.id}` });
+    await change((metadata) => {
+      const next = applyImageRedo(metadata, job.id, redo.indexes.slice(0, images.length), images);
+      return next && failure instanceof ImageResultUnknown ? { ...next, unknownResult: true, error: failure.message } : next;
+    });
     await deps.updateProgress(job.id, 100);
     const missing = redo.indexes.length - images.length;
     return { assetIds, assets: images, ...(missing > 0 ? { missing } : {}) };
   } catch (err) {
     const cancelled = err instanceof JobCancelledError || !!deps.signal?.aborted;
     const message = cancelled ? undefined : err instanceof Error ? err.message : String(err);
-    await change((metadata) => settleImageRedo(metadata, job.id, message));
+    await change((metadata) => {
+      const next = settleImageRedo(metadata, job.id, message);
+      return next && err instanceof ImageResultUnknown ? { ...next, unknownResult: true } : next;
+    });
     throw cancelled ? new JobCancelledError() : err;
   }
 }
@@ -802,5 +838,6 @@ export async function redownloadGenerationJob(deps: RunJobDeps, job: JobLike, me
     throw new JobCancelledError();
   }
   const output = await downloadAndFinalize(deps, job, mediaType, sourceUrls, null, setMsg);
-  return typeof input.missing === "number" && input.missing > 0 ? { ...output, missing: input.missing } : output;
+  return { ...output, ...(typeof input.missing === "number" && input.missing > 0 ? { missing: input.missing } : {}),
+    ...(input.unknownResult === true ? { unknownResult: true } : {}) };
 }

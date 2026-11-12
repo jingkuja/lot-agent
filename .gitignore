@@ -10,6 +10,7 @@ data/documents
 data/uploads
 data/localstorage
 data/tmp
+data/image-receipts/
 packages/*/dist/
 packages/*/data/
 .env

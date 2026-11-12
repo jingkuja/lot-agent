@@ -21,6 +21,8 @@ import { loadGenerationConfig, loadKlingVoiceConfig, makeKlingVoiceProvider, mak
 import { IMAGE_REDO_TASK, runGenerationJob, runImageSetRedo, redownloadGenerationJob, type RunJobDeps } from "../generation/run-job.js";
 import { outputStorageKey } from "../generation/compose.js";
 import { GenerationError } from "../generation/errors.js";
+import { initializePosterFonts } from "../generation/poster-render.js";
+import { DurableImageProvider, PgImageCallStore, imageCallFingerprint } from "../generation/image-receipts.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
 import { DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
@@ -99,6 +101,7 @@ function workerPoolMax() {
 const PRODUCT_PARSE_TIMEOUT_MS = 60_000;
 
 async function main() {
+  initializePosterFonts();
   const pgPassword = process.env.PG_PASSWORD;
   if (!pgPassword) throw new Error("PG_PASSWORD is required");
   if (process.env.NEW_API_MANAGED_KEYS === "1" && !process.env.SECRET_MASTER_KEY) {
@@ -216,7 +219,7 @@ async function main() {
   // selected model drives the actual generation and the per-model cache key.
   const genDeps = async (
     mediaType: "image" | "video",
-    job: { userId: string; input: Record<string, unknown> },
+    job: { id: string; userId: string; input: Record<string, unknown> },
     signal?: AbortSignal
   ): Promise<RunJobDeps> => {
     const base = mediaType === "image" ? genConfig.image : genConfig.video;
@@ -235,8 +238,13 @@ async function main() {
         ? imageProvider
         : videoProvider;
     const realVideo = mediaType === "video" && !!(apiKey || (!base.mock && base.apiKey));
+    const receipts = new PgImageCallStore(db.pool, resolve(ROOT, "data/image-receipts"), job.userId, job.id);
+    const durable = mediaType === "image" && !!(apiKey || (!base.mock && base.apiKey));
     return {
-      provider,
+      provider: durable ? new DurableImageProvider(provider, receipts,
+        imageCallFingerprint(job.input, model, JSON.stringify([base.baseUrl, apiKey || base.apiKey, internationalModelsEnabled()]))) : provider,
+      hasImageReceipts: durable ? async () => !!await receipts.get(0) : undefined,
+      hasImageReceipt: durable ? async (slot) => !!await receipts.get(slot) : undefined,
       resolveReferenceUrl: (url) => resolveMaterialReference(db, job.userId, url),
       resolveImageReferenceUrl: (url) => resolveImageReferenceUrl(db, job.userId, url),
       prepareKlingVoices: realVideo
@@ -267,7 +275,8 @@ async function main() {
         if (!mime) throw new Error("set reference is not a supported image");
         return { body, mime };
       },
-      urlToBytes: async (url, o) => urlToBytes(await resolveMaterialReference(db, job.userId, url), maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
+      urlToBytes: async (url, o) => url.startsWith("image-receipt:") ? receipts.read(url)
+        : urlToBytes(await resolveMaterialReference(db, job.userId, url), maxBytes, { ...o, timeoutMs: downloadTimeoutMs }),
       extFor,
       modelId: mediaType === "video" ? model : base.modelId,
       vendorModel: model,

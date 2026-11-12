@@ -92,7 +92,7 @@ export function ImageEditDialog({ imageUrl, size, onSubmit, onClose, redo = fals
       {error ? <p className="image-edit-error" role="alert">{t(error)}</p>
         : <p className="image-edit-hint">{redo ? t("沿用原图要求并应用补充说明，按 1 张图片计费。") : size
           ? t("将以这张图为参考图生成新图片，保持原图比例与设置（{0}），模型为输入框当前所选。", [size.replace("x", "×")])
-          : t("将以这张图为参考图生成新图片，沿用输入框当前的模型与尺寸设置。")}</p>}
+          : t("将以这张图为参考图生成新图片；智能比例会读取原图尺寸，长图取最接近的支持比例。")}</p>}
     </dialog>
   );
 }

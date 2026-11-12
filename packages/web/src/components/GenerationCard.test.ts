@@ -28,7 +28,7 @@ it("recognizes the extracted leaf message and provides a fallback for other fail
   const image = visibleText({ mediaType: "image", error: "参考图包含真人，需先完成真人认证（create，REAL_PERSON_REJECTED，HTTP 400）" });
   expect(image).toContain("需要先完成真人认证");
   expect(image).not.toContain("不会扣除积分");
-  expect(visibleText({ mediaType: "image", error: "upstream error" })).not.toContain("请稍后再试");
+  expect(visibleText({ mediaType: "image", error: "upstream error" })).toContain("请稍后再试");
   expect(visibleText({ error: "upstream error" })).toContain("请稍后再试，或联系客服。");
   expect(visibleText()).toContain("请稍后再试，或联系客服。");
 });

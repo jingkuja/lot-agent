@@ -86,14 +86,28 @@ function comparable(text: string): string {
   return text.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
-function digitRuns(text: string): string[] {
-  return text.normalize("NFKC").match(/\d+/g) ?? [];
+/** Normalize only unambiguous currency grouping, never decimal punctuation indiscriminately. */
+function sourceText(text: string): string {
+  return comparable(text)
+    .replace(/([¥$€£])([0-9]{1,3}(?:,[0-9]{3})+)(?!\d)/g, (_, unit: string, amount: string) => unit + amount.replace(/,/g, ""))
+    .replace(/(rp\.?)([0-9]{1,3}(?:\.[0-9]{3})+)(?!\d)/g, (_, unit: string, amount: string) => unit + amount.replace(/\./g, ""));
 }
 
-/** Whether every run of digits in `text` is a run of digits the user wrote. */
-function numbersFromSource(text: string, sourceRuns: Set<string>): boolean {
-  return digitRuns(text).every((run) => sourceRuns.has(run));
+function sourced(value: string, source: string): boolean {
+  const needle = sourceText(value);
+  const haystack = sourceText(source);
+  let start = haystack.indexOf(needle);
+  while (start >= 0) {
+    const before = haystack.slice(0, start);
+    const after = haystack.slice(start + needle.length);
+    if (!(/^\d/.test(needle) && /\d[.,]?$/.test(before)) && !(/\d$/.test(needle) && /^[.,]?\d/.test(after))) return true;
+    start = haystack.indexOf(needle, start + 1);
+  }
+  return false;
 }
+
+const MONEY_TOKEN = /(?:[¥￥$€£]|rp\.?|usd|idr)\s*\d+(?:[.,]\d+)*(?:\s*(?:元|块))?|\d+(?:[.,]\d+)*\s*(?:元|块|%|％|折)(?:\s*off\b)?/gi;
+const ORIGINAL_LABEL = /(?:原价|原售|original\s*price|was|harga\s*normal)\s*[:：]?\s*((?:[¥￥$€£]|rp\.?|usd|idr)?\s*\d+(?:[.,]\d+)*(?:\s*(?:元|块))?)/gi;
 
 /** A number that reads as a price or a rate (¥199, 199 元, 8 折, 20%, Rp 25.000). */
 const PRICE_LIKE = /(?:[¥￥$€£]|rp\.?)\s*\d|\d\s*(?:元|块|%|％|折|off\b)/i;
@@ -102,25 +116,35 @@ const STRICT_FIELDS = ["price", "originalPrice", "discount", "date"] as const;
 
 /**
  * Check planned text against what the user actually wrote. Prices, rates and dates must not come from the model:
- * every digit in them has to appear in the request (a field without digits, such as 半价, has to appear word for
- * word). Anything else is emptied and reported in `cleared`, and the user fills it on the card. Headline, subtitle
+ * the complete value and unit must appear in the request, including dates without digits.
+ * Anything else is emptied and reported in `cleared`, and the user fills it on the card. Headline, subtitle
  * and selling points are free text, but a price or rate inside them is held to the same rule.
  */
 export function verifyPosterFields(fields: PosterFields, source: string): { fields: PosterFields; cleared: PosterFieldName[] } {
-  const runs = new Set(digitRuns(source));
-  const plain = comparable(source);
   const next: PosterFields = { ...fields, points: [...fields.points] };
   const cleared: PosterFieldName[] = [];
   for (const name of STRICT_FIELDS) {
     const value = next[name];
     if (!value) continue;
-    const ok = digitRuns(value).length ? numbersFromSource(value, runs) : name === "date" || plain.includes(comparable(value));
+    const originalValues = [...source.matchAll(ORIGINAL_LABEL)].map(match => match[1].split(/现价|售价|sale|now|harga promo/i)[0]);
+    let ok = sourced(value, source);
+    if (name === "originalPrice") ok = originalValues.some(part => sourced(value, part));
+    if (name === "price" && originalValues.some(part => sourced(value, part))) {
+      ok = sourced(value, source.replace(ORIGINAL_LABEL, ""));
+    }
+    // Bare numeric fields require explicit price context, not a quantity elsewhere in the request.
+    if ((name === "price" || name === "originalPrice") && /^\d[\d.,]*$/.test(sourceText(value))) {
+      const literal = sourceText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      ok &&= new RegExp(`(?:价格|原价|现价|售价|只要|price|was|now|harga)\\s*[:：]?\\s*${literal}(?![\\d.,])`, "i")
+        .test(source.normalize("NFKC"));
+    }
     if (!ok) {
       next[name] = "";
       cleared.push(name);
     }
   }
-  const invented = (text: string) => PRICE_LIKE.test(text.normalize("NFKC")) && !numbersFromSource(text, runs);
+  const invented = (text: string) => PRICE_LIKE.test(text.normalize("NFKC"))
+    && [...text.normalize("NFKC").matchAll(MONEY_TOKEN)].some(match => !sourced(match[0], source));
   for (const name of ["title", "subtitle"] as const) {
     if (next[name] && invented(next[name])) {
       next[name] = "";

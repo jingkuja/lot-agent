@@ -77,6 +77,32 @@ it("allows the draft to be submitted after a quota rejection", async () => {
   expect(enqueue).toHaveBeenCalledTimes(1);
 });
 
+it("looks up a submission without creating or claiming anything and isolates the owner", async () => {
+  const { app, submit, db, enqueue } = setup();
+  const lookup = () => app.request("/conversations/chat/generations/submissions/image-submission-1");
+  expect((await lookup()).status).toBe(409);
+  expect(db.claimConversationRun).not.toHaveBeenCalled();
+  expect(enqueue).not.toHaveBeenCalled();
+  await submit();
+  expect(await (await lookup()).json()).toMatchObject({ taskId: "image-task" });
+  expect(enqueue).toHaveBeenCalledTimes(1);
+  db.getConversation.mockResolvedValueOnce({ user_id: "someone-else", agent_id: "image" });
+  expect((await lookup()).status).toBe(404);
+});
+
+it("blocks paid fill-in when an image slot has an unknown result", async () => {
+  const { app, db, enqueue } = setup();
+  db.getGenerationMessage.mockResolvedValue({ status: "completed", metadata: {
+    kind: "generation", mediaType: "image", scene: "product_set", status: "completed", unknownResult: true,
+    assets: [{ url: "/static/assets/main.png" }], missing: 1, taskId: "original",
+  } });
+  const response = await app.request("/conversations/chat/generations/message/redo", {
+    method: "POST", body: JSON.stringify({ missing: true }),
+  });
+  expect(response.status).toBe(409);
+  expect(enqueue).not.toHaveBeenCalled();
+});
+
 
 it("regenerates a single image with its frozen prompt and model and replays the same fresh submission", async () => {
   const { app, db, enqueue } = setup();

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { mediaFontEnvironment } from "../generation/poster-render.js";
 import { createReadStream } from "node:fs";
 import { mkdtemp, open, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { captionAss, captionLayout, type Pause } from "./subtitles.js";
 export function mediaProcess(binary: string, args: string[], opts: { signal?: AbortSignal; cwd?: string; timeoutMs?: number } = {}): Promise<string> {
   opts.signal?.throwIfAborted();
   return new Promise((done, reject) => {
-    const child = spawn(binary, args, { cwd: opts.cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binary, args, { cwd: opts.cwd, shell: false, stdio: ["ignore", "pipe", "pipe"], env: mediaFontEnvironment() });
     let stdout = ""; let stderr = ""; let killed = false;
     const kill = () => { killed = true; child.kill("SIGKILL"); };
     const timer = setTimeout(kill, opts.timeoutMs ?? 300_000);

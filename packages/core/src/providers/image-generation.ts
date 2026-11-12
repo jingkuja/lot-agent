@@ -3,6 +3,7 @@ import {
   MockGenerationClient,
   extractVendorError,
   type CreateResult,
+  type GenerationCallOptions,
   type PollResult,
   type ReferenceMedia,
   type VendorAdapter,
@@ -19,8 +20,22 @@ export interface ImageGenerationRequest {
 }
 
 export interface ImageGenerationProvider {
-  create(req: ImageGenerationRequest): Promise<CreateResult>;
+  create(req: ImageGenerationRequest, options?: GenerationCallOptions): Promise<CreateResult>;
   poll(taskId: string): Promise<PollResult>;
+}
+
+/** Infrastructure is supplied by the server; receipts never contain model credentials. */
+export interface ImageCallReceipt {
+  state: "submitting" | "submitted" | "completed" | "failed" | "unknown";
+  fingerprint: string;
+  vendorId?: string;
+  result?: PollResult;
+  error?: string;
+}
+export interface ImageCallStore {
+  claim(slot: number, fingerprint: string): Promise<boolean>;
+  get(slot: number): Promise<ImageCallReceipt | null>;
+  save(slot: number, receipt: ImageCallReceipt): Promise<void>;
 }
 
 export type ImageVendorAdapter = VendorAdapter<ImageGenerationRequest>;

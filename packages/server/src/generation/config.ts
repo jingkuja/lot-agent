@@ -109,10 +109,13 @@ export async function loadGenerationConfig(rootDir: string): Promise<GenerationC
  * mock when running in mock mode or when no API key is configured. */
 export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationProvider {
   if (cfg.mock || !cfg.apiKey) return new MockImageGenerationProvider();
+  const configuredTimeout = Number(process.env.IMAGE_GEN_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : undefined;
   // `chat-completions` is retained as a config compatibility alias. Tokenhub's
   // image models now use its synchronous OpenAI Images endpoints instead.
   if (cfg.adapter === "openai-images" || cfg.adapter === "chat-completions") {
     return new OpenAIImagesImageProvider({
+      timeoutMs,
       headers: gatewayModelHeaders(),
       baseUrl: cfg.baseUrl,
       apiKey: cfg.apiKey,
@@ -120,6 +123,7 @@ export function makeImageProvider(cfg: MediaGenerationConfig): ImageGenerationPr
     });
   }
   return new HttpImageGenerationProvider({
+    timeoutMs,
     headers: gatewayModelHeaders(),
     baseUrl: cfg.baseUrl,
     apiKey: cfg.apiKey,

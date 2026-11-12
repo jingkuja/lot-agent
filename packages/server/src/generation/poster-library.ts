@@ -69,16 +69,39 @@ function fetchIndex(signal?: AbortSignal) {
 /** One snapshot serves the gallery and validates selections until a complete refresh is available. */
 export class PosterLibrary {
   private snapshot?: { revision: string; categories: Map<string, Map<string, CatalogPoster>> };
+  private pending?: Promise<void>;
+  private failures = 0;
+  private nextAttempt = 0;
+  private stopped = false;
+  private controller = new AbortController();
 
-  constructor(private readonly loadIndex = fetchIndex) {}
+  constructor(private readonly loadIndex = fetchIndex, private readonly random = Math.random) {}
 
-  async refresh(signal?: AbortSignal): Promise<void> {
-    const csv = await this.loadIndex(signal);
-    signal?.throwIfAborted();
-    const revision = createHash("sha256").update(csv).digest("hex").slice(0, 16);
-    const categories = parseCatalog(csv, revision);
-    this.snapshot = { revision, categories };
+  refresh(signal?: AbortSignal): Promise<void> {
+    if (this.pending) return this.pending;
+    signal = signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal;
+    this.pending = this.loadIndex(signal).then(csv => {
+      signal?.throwIfAborted();
+      if (this.stopped) return;
+      const revision = createHash("sha256").update(csv).digest("hex").slice(0, 16);
+      const categories = parseCatalog(csv, revision);
+      this.snapshot = { revision, categories };
+      this.failures = 0;
+      this.nextAttempt = 0;
+    }).catch(error => {
+      const delays = [30_000, 120_000, 600_000, 1_800_000];
+      const delay = delays[Math.min(this.failures++, delays.length - 1)];
+      this.nextAttempt = Date.now() + Math.round(delay * (0.9 + this.random() * 0.2));
+      throw error;
+    }).finally(() => { this.pending = undefined; });
+    return this.pending;
   }
+
+  retryDelay(): number { return Math.max(0, this.nextAttempt - Date.now()); }
+  async ensureAvailable(signal?: AbortSignal) {
+    if (!this.snapshot && !this.stopped && !this.retryDelay()) await this.refresh(signal).catch(() => {});
+  }
+  stop() { this.stopped = true; this.controller.abort(); }
 
   categories(): string[] | undefined {
     return this.snapshot && [...this.snapshot.categories.keys()];
@@ -103,9 +126,11 @@ export function startPosterLibraryRefresh(library: PosterLibrary): () => void {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const refresh = async () => {
+    let failed = false;
     try {
       await library.refresh(controller.signal);
     } catch {
+      failed = true;
       if (!controller.signal.aborted) console.warn("[poster-library] index refresh failed");
     }
     if (controller.signal.aborted) return;
@@ -113,11 +138,12 @@ export function startPosterLibraryRefresh(library: PosterLibrary): () => void {
     const next = new Date(now);
     next.setUTCHours(NIGHTLY_REFRESH_UTC_HOUR, 0, 0, 0);
     if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-    timer = setTimeout(() => void refresh(), next.getTime() - now.getTime()).unref();
+    timer = setTimeout(() => void refresh(), failed ? library.retryDelay() : next.getTime() - now.getTime()).unref();
   };
   void refresh();
   return () => {
     controller.abort();
+    library.stop();
     clearTimeout(timer);
   };
 }
