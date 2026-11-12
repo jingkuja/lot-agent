@@ -44,6 +44,8 @@ import { loadServiceConfig } from "./services/service-config.js";
 import { createAuthMiddleware } from "./auth/middleware.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
+import { createPosterLibraryRoutes } from "./routes/poster-library.js";
+import { PosterLibrary, startPosterLibraryRefresh } from "./generation/poster-library.js";
 import { LocalStorage } from "@lot-agent/core";
 import { staticPrefix } from "./util/public-base.js";
 import { createSkillRoutes } from "./routes/skills.js";
@@ -89,6 +91,8 @@ async function main() {
 
   const service = new AgentService(serviceConfig);
   await service.init();
+  const posterLibrary = new PosterLibrary();
+  const stopPosterRefresh = startPosterLibraryRefresh(posterLibrary);
   const feishu = isFeishuEnabled() ? new FeishuService(new PgFeishuRepository(service.db.pool), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
   service.feishuService = feishu;
   const feishuChannel = feishu ? new FeishuChannel(feishu,service,undefined,{
@@ -282,6 +286,7 @@ async function main() {
   app.use("/api/assets", authMw);
   app.use("/api/assets/*", authMw);
   app.use("/api/uploads/*", authMw);
+  app.use("/api/poster-library/*", authMw);
   app.use("/api/usage/*", authMw);
   app.use("/api/recharge/*", authMw);
   app.use("/api/balance", authMw);
@@ -323,7 +328,11 @@ async function main() {
   app.route("/api/feishu", createFeishuRoutes(feishu, userId => feishuChannel?.abortUser(userId), appId => feishuChannel?.connectionStatus(appId) ?? "disabled"));
   app.route("/api/conversations", createDesktopToolRoutes(service));
   app.route("/api/conversations", createConversationRoutes(service));
-  app.route("/api/conversations", createGenerationRoutes(service, { assets: new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets")) }));
+  app.route("/api/conversations", createGenerationRoutes(service, {
+    assets: new LocalStorage(ASSETS_DIR, staticPrefix("/static/assets")),
+    posterLibrary,
+  }));
+  app.route("/api/poster-library", createPosterLibraryRoutes(posterLibrary));
   app.route("/api/skills", createSkillRoutes(service));
   app.route("/api/traces", createTraceRoutes(service));
   app.route("/api/ratings", createRatingRoutes(service));
@@ -435,6 +444,7 @@ async function main() {
 
   const shutdown = async () => {
     console.log("\nShutting down...");
+    stopPosterRefresh();
     await stopVirtualPayments();
     await feishuChannel?.stop();
     await service.shutdown();

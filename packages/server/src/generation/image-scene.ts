@@ -1,13 +1,12 @@
 /**
  * E-commerce image scenes (白底图 / 主副图 / 产品套图). Before a paid image is
- * submitted, a cheap text model checks that the request fits the chosen scene
- * and rewrites it into one professional prompt per image. 自由创作 ("free")
- * skips this step and sends the user's text unchanged.
+ * submitted, a cheap text model checks and rewrites the guided scenes.
+ * 自由创作 sends the user's text as is, and 爆款复刻 sends an image-edit brief with a design reference.
  */
 
-export const IMAGE_SCENES = ["free", "white_background", "main_images", "product_set", "product_scene"] as const;
+export const IMAGE_SCENES = ["free", "white_background", "main_images", "product_set", "product_scene", "poster_remix"] as const;
 export type ImageScene = typeof IMAGE_SCENES[number];
-export type GuidedImageScene = Exclude<ImageScene, "free">;
+export type GuidedImageScene = Exclude<ImageScene, "free" | "poster_remix">;
 
 export function parseImageScene(value: unknown): ImageScene | null {
   if (value === undefined || value === null || value === "") return "free";
@@ -22,6 +21,22 @@ export function imageSceneNeedsReference(scene: ImageScene): boolean {
 /** Scenes whose images each play a different role, so every image gets its own prompt. */
 export function imageSceneUsesSet(scene: ImageScene): boolean {
   return scene === "main_images" || scene === "product_set";
+}
+
+export function posterRemixPrompt(brief: string, productImages: number): string {
+  return [
+    "Create a new e-commerce poster for the user's brand or product.",
+    "Image 1 is the design reference. Adapt its composition, lighting, visual hierarchy and typography placement to the user's brand.",
+    productImages > 0
+      ? "Images 2 onward show the user's product or brand assets. Preserve their appearance, packaging, logo and recognizable details."
+      : "Depict the user's product using the brand and product details in their brief.",
+    "Replace the design reference's product and remove all of its brand names, logos, watermarks and copy.",
+    "Preserve user-supplied names and copy in their original language and spelling. Use only the user's supplied text and claims.",
+    "If the user supplies no poster copy, leave out added overlay text. Deliver one complete design per image.",
+    "",
+    "User brief:",
+    brief,
+  ].join("\n");
 }
 
 const SCENE_BRIEFS: Record<GuidedImageScene, { name: string; fits: string; style: string; roles?: string[] }> = {

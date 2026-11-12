@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createGenerationRoutes } from "./conversations.js";
+import { PosterLibrary } from "../generation/poster-library.js";
 import { createDigitalEmployeeExtension } from "../digital-employee/agent.js";
 import { registerAgentExtension } from "../services/agent-extensions.js";
 
@@ -40,10 +41,10 @@ function fakeService() {
   } as any;
 }
 
-function app(service: any) {
+function app(service: any, posterLibrary?: PosterLibrary) {
   const a = new Hono<{ Variables: { userId: string } }>();
   a.use("*", async (c, next) => { c.set("userId", "u1"); await next(); });
-  a.route("/conversations", createGenerationRoutes(service));
+  a.route("/conversations", createGenerationRoutes(service, { posterLibrary }));
   return a;
 }
 
@@ -698,7 +699,7 @@ it.each([4, 15])("accepts marketing video duration boundary %s", async (duration
 });
 
 describe("POST /conversations/:id/generations image scenes", () => {
-  const send = (service: any, body: Record<string, unknown>) => app(service).request("/conversations/c1/generations", {
+  const send = (service: any, body: Record<string, unknown>, library?: PosterLibrary) => app(service, library).request("/conversations/c1/generations", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mediaType: "image", settings: { resolution: "1K", ratio: "1:1", n: 3 }, ...body }),
   });
@@ -765,6 +766,43 @@ describe("POST /conversations/:id/generations image scenes", () => {
   it("rejects an unknown scene", async () => {
     const res = await send(fakeService(), { prompt: "菊花", scene: "poster" });
     expect(res.status).toBe(400);
+  });
+
+  it("uses a catalog design and owned brand photos and rejects untrusted references before enqueueing", async () => {
+    const category = "家居日用";
+    const posterReference = { category, filename: "tea.png" };
+    const library = new PosterLibrary(async () => `品类,商品名,图片本地路径\n${category},茶壶,/workspace/posters/${category}/tea.png`);
+    await library.refresh();
+    const service = fakeService();
+    service.imageSceneText = vi.fn();
+    service.db.getUploadByStorageKey = vi.fn(async (key: string) => ({
+      user_id: key === "mine.png" ? "u1" : "u2", type: "upload", storage_key: key, mime: "image/png", url: `/static/uploads/${key}`,
+    }));
+    const input = { prompt: "青山茶壶，手工釉色", scene: "poster_remix" };
+    const refs = (url: string) => [{ type: "reference_image", url }];
+    for (const [extra, code] of [
+      [{}, "IMAGE_POSTER_REFERENCE_REQUIRED"],
+      [{ posterReference: { ...posterReference, filename: "unlisted.png" } }, "IMAGE_POSTER_REFERENCE_UNAVAILABLE"],
+      [{ posterReference, media: refs("/static/uploads/other.png") }, "IMAGE_POSTER_PRODUCT_UNAVAILABLE"],
+      [{ posterReference, media: refs("https://example.com/brand.png") }, "IMAGE_POSTER_PRODUCT_UNAVAILABLE"],
+    ] as const) {
+      const response = await send(service, { ...input, ...extra }, library);
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code });
+    }
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.db.addMessage).not.toHaveBeenCalled();
+
+    const media = refs("/static/uploads/mine.png");
+    const response = await send(service, { ...input, posterReference, media }, library);
+    expect(response.status).toBe(202);
+    expect(service.imageSceneText).not.toHaveBeenCalled();
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith("image.generate", expect.objectContaining({
+      scene: "poster_remix", media, displayPrompt: input.prompt, n: 3,
+      posterReference: expect.objectContaining({ ...posterReference, revision: expect.any(String) }),
+      prompt: expect.stringContaining(input.prompt),
+    }), "u1");
+    expect(service.jobQueue.enqueue.mock.calls[0][1].prompt).toMatch(/Image 1 is the design reference.*\nImages 2 onward/);
   });
 });
 

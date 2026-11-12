@@ -32,6 +32,11 @@ const SCENE_DETAILS: Record<ImageScene, { caption: string; icon: string; ideas: 
     icon: "M3 3h18v18H3ZM3 16l5-5 5 5 3-3 5 5M15 7h.01",
     ideas: [{ label: "自然生活场景", prompt: "将参考图中的产品放在清晨的木质餐桌上，旁边有咖啡与绿植，侧面自然光，保持产品外观和细节" }],
   },
+  poster_remix: {
+    caption: "参考爆款，生成品牌海报",
+    icon: "M8 4h12v12M4 8h12v12H4ZM4 17l4-4 3 3 2-2 3 3",
+    ideas: [],
+  },
 };
 
 function SceneIcon({ scene }: { scene: ImageScene }) {
@@ -97,9 +102,11 @@ export function ImageComposerSlate({ scene, onUnfold }: { scene: ImageScene; onU
 
 export function ImagePromptIdeas({ scene, onPick }: { scene: ImageScene; onPick: (prompt: string) => void }) {
   const { t } = useI18n();
+  const { ideas } = SCENE_DETAILS[scene];
+  if (!ideas.length) return null;
   return <div className="image-prompt-ideas">
     <span>{t("试试灵感")}</span>
-    {SCENE_DETAILS[scene].ideas.map((idea) => <button type="button" key={idea.label} onClick={() => onPick(t(idea.prompt))}>
+    {ideas.map((idea) => <button type="button" key={idea.label} onClick={() => onPick(t(idea.prompt))}>
       {t(idea.label)}
     </button>)}
   </div>;

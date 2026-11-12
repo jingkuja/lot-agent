@@ -1,6 +1,8 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
 import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
-import type { ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, RedoRequest } from "../lib/image-settings.js";
+import type {
+  ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, RedoRequest,
+} from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
 
@@ -557,6 +559,12 @@ export const api = {
     request<{ url: string }>("/knowledge-bases/link", { method: "POST" }),
 
   // ── Generation (image/video via conversation) ────────────────────────────
+  posterCategories: (signal?: AbortSignal) => request<{ categories: string[] }>("/poster-library/categories", { signal }),
+  posterImages: (category: string, offset: number, signal?: AbortSignal) =>
+    request<{ items: PosterLibraryImage[]; nextOffset: number | null }>(
+      `/poster-library/images?${new URLSearchParams({ category, offset: String(offset) })}`, { signal }
+    ),
+
   generate: (
     conversationId: string,
     body: {
@@ -572,6 +580,7 @@ export const api = {
       model?: string;
       /** Image scene; omitted for 自由创作. */
       scene?: string;
+      posterReference?: PosterReference;
       /** 真实字体: typeset the wording on a text-free picture. */
       realText?: boolean;
     }

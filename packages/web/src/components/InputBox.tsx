@@ -39,6 +39,7 @@ import { validateTwinFile, type TwinKind } from "../modules/digital-twin/media.j
 import { ProductPickerDialog } from "./ProductPickerDialog.js";
 import { productPromptText, withProductText } from "../lib/product-reference.js";
 import { ImageComposerHeader, ImageComposerSlate, ImagePromptIdeas } from "./ImageComposer.js";
+import { PosterReferencePicker, type PosterSelection } from "./PosterReferencePicker.js";
 
 /** 输入框形态：普通对话 / 图像生成 / 视频生成 / PPT 制作 / 合同对比。 */
 export type InputMode = "default" | "image" | "video" | "ppt" | "contract";
@@ -87,7 +88,7 @@ interface InputBoxProps {
   videoDurations?: readonly string[];
   /** 图片模式是否显示「图片张数」；只保留一张图的场景（获客宝海报）关闭。 */
   imageCount?: boolean;
-  /** 图片模式顶部的电商场景标签（自由创作 / 产品套图 / 主副图 / 白底图）；只在图片 Agent 会话中打开。 */
+  /** 图片模式顶部的创作类型；只在图片 Agent 会话中打开。 */
   imageScenes?: boolean;
   /** 图片工作台位于生成结果下方时打开：初始收成一行，发送和生成结束后自动收起，点击提示词或左侧类型展开。 */
   imageCollapsible?: boolean;
@@ -145,8 +146,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const { t } = useI18n();
   const [internalValue, setInternalValue] = useState("");
   const [imageScene, setImageSceneState] = useState<ImageScene>(() => lastImageScene);
-  const setImageScene = (scene: ImageScene) => { lastImageScene = scene; setImageSceneState(scene); };
+  const setImageScene = (scene: ImageScene) => {
+    lastImageScene = scene;
+    setImageSceneState(scene);
+    setAttachmentError("");
+    setUploadLimitNotice(false);
+  };
   const sceneTabs = mode === "image" && imageScenes;
+  const posterRemix = sceneTabs && imageScene === "poster_remix";
+  const [poster, setPoster] = useState<PosterSelection | null>(null);
   const [realText, setRealTextState] = useState(() => lastRealText);
   const setRealText = (on: boolean) => { lastRealText = on; setRealTextState(on); };
   // 真实字体 typesets a poster's wording; the e-commerce types have their own image roles and stay as they are.
@@ -199,7 +207,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const maxFiles = videoMode
     ? MAX_VIDEO_REFERENCE_IMAGES
     : mode === "image"
-      ? MAX_IMAGE_REFERENCE_IMAGES
+      ? MAX_IMAGE_REFERENCE_IMAGES - Number(posterRemix)
       : MAX_FILES;
   const pptMode = mode === "ppt";
   const contractMode = mode === "contract";
@@ -207,7 +215,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [backgroundFiles, setBackgroundFiles] = useState<File[]>([]);
   const [oldContractFile, setOldContractFile] = useState<File | null>(null);
   const [newContractFile, setNewContractFile] = useState<File | null>(null);
-  const hasDraft = !!(promptValue.trim() || files.length || referenceVideoFiles.length || referenceAudioFiles.length || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length || oldContractFile || newContractFile);
+  const hasDraft = !!(promptValue.trim() || (posterRemix && poster) || files.length || referenceVideoFiles.length || referenceAudioFiles.length
+    || firstFrameFile || lastFrameFile || templateFile || backgroundFiles.length || oldContractFile || newContractFile);
   const updateDraftRef = useRef(!embedded && hasDraft);
   updateDraftRef.current = !embedded && hasDraft;
   // A generation starting or ending hands the space back to the results, unless a draft is being written.
@@ -261,12 +270,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const currentImageSettings = useCallback((): ImageSettings | undefined => {
     const current = settingsRef.current as ImageSettings | undefined;
     if (mode !== "image" || !current) return current;
-    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene }
+    const posterReference = posterRemix && poster ? { category: poster.category, filename: poster.filename } : undefined;
+    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene, posterReference }
       : realTextAvailable && realText ? { ...current, realText: true } : current;
     if (current.ratio !== IMAGE_AUTO_RATIO) return withScene;
+    if (posterRemix && poster) return { ...withScene, ratio: poster.ratio };
     const size = files[0] ? cachedImageSize(files[0]) : undefined;
     return { ...withScene, ratio: size ? nearestImageRatio(size.width, size.height) : DEFAULT_IMAGE_RATIO };
-  }, [mode, files, sceneTabs, imageScene, realTextAvailable, realText]);
+  }, [mode, files, sceneTabs, imageScene, posterRemix, poster, realTextAvailable, realText]);
 
   const urlsRef = useRef<Map<File, string>>(new Map());
   const revokeAll = useCallback(() => {
@@ -544,13 +555,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     }
     const hasFiles = picked.length > 0;
     if ((!trimmed && !hasFiles) || disabled || !onSend) return;
+    if (posterRemix && !poster) {
+      setAttachmentError("请先选择一张爆款参考图");
+      return;
+    }
+    if (posterRemix && picked.length > maxFiles) {
+      setAttachmentError(t("爆款复刻最多可上传 {0} 张产品图", [maxFiles]));
+      return;
+    }
     // 换场景 works on the user's own product photo; say so here instead of sending a request the server refuses.
     if (activeScene?.needsReference && files.length === 0) {
       setAttachmentError("请先上传产品图，再描述想换的场景");
       return;
     }
-    onSend(trimmed, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
+    const prompt = posterRemix && !trimmed ? t("按爆款参考图生成我的品牌海报") : trimmed;
+    onSend(prompt, picked, mode === "image" ? currentImageSettings() : mediaMode ? settingsRef.current : undefined, knowledgeBases);
     setPromptValue("");
+    setPoster(null);
+    setAttachmentError("");
     setUploadLimitNotice(false);
     setFiles([]);
     setReferenceVideoFiles([]);
@@ -566,7 +588,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     setFolded(true);
     if (sceneTabs && imageCollapsible) textareaRef.current?.blur();
   }, [promptValue, collectPickedFiles, disabled, onSend, revokeAll, mediaMode, noModels, knowledgeBases, mode, currentImageSettings, setPromptValue,
-    activeScene, files.length, sceneTabs, imageCollapsible]);
+    activeScene, files.length, sceneTabs, imageCollapsible, posterRemix, poster, maxFiles, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -636,6 +658,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   // 生成图片 / 停止. In the open image workbench it sits at the prompt's bottom-right; elsewhere at the end of the toolbar.
   const sendInPrompt = sceneTabs && !collapsed;
+  const promptLabel = posterRemix ? "描述你的品牌" : "描述你的画面";
   const sendControl = !embedded && (disabled ? (
     <button onClick={onStop} className="btn-stop" title={t("停止")}>
       <svg viewBox="0 0 24 24" fill="currentColor">
@@ -672,9 +695,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       {sceneTabs && !collapsed && <>
         <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={disabled}
           onFold={imageCollapsible ? () => setFolded(true) : undefined} />
+        {posterRemix && <PosterReferencePicker selected={poster} disabled={disabled} onChange={(selection) => {
+          setPoster(selection);
+          setAttachmentError("");
+        }} />}
         <div className="image-prompt-heading">
-          <strong>{t("描述你的画面")}</strong>
-          <span>{t("主体、场景、风格，越具体越出彩")}</span>
+          <strong>{t(promptLabel)}</strong>
+          {!posterRemix && <span>{t("主体、场景、风格，越具体越出彩")}</span>}
         </div>
       </>}
       {activeScene?.hint && <p className="input-modal-hint image-scene-hint">{t(activeScene.hint)}</p>}
@@ -697,10 +724,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           <span aria-hidden>⚠️</span>
           {t("模型目录暂时不可用，请稍后重试或联系管理员")}</div>
       )}
-      {mode === "image" && (uploadLimitNotice || files.length >= MAX_IMAGE_REFERENCE_IMAGES) && (
+      {mode === "image" && (uploadLimitNotice || files.length >= maxFiles) && (
         <div className="input-modal-hint" role="alert">
           <span aria-hidden>⚠️</span>
-          {t("参考图最多")}{MAX_IMAGE_REFERENCE_IMAGES} {t("张，不能再上传")}</div>
+          {posterRemix ? t("爆款复刻最多可上传 {0} 张产品图", [maxFiles]) : <>{t("参考图最多")}{maxFiles} {t("张，不能再上传")}</>}</div>
       )}
       {videoMode && <div className="input-modal-hint">{t("参考图最多 9 张；首帧、尾帧各 1 张；参考视频、参考音频各最多 3 段，各自总时长不超过 15 秒")}{checkingMedia ? t(" · 正在检查时长…") : ""}</div>}
       {lockAdaptive && (
@@ -795,12 +822,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               <button type="button" className="attachment-remove" onClick={() => setFrameFile(setLastFrameFile, lastFrameFile, null)} title={t("移除")}>✕</button>
             </div>
           )}
-          {files.map((f, i) => (
-            <div className={`attachment-chip${sceneTabs && urlsRef.current.get(f) ? " attachment-chip--tile" : ""}`} key={i} title={sceneTabs ? f.name : undefined}>
+          {files.map((f, i) => {
+            const referenceNumber = i + 1 + Number(posterRemix && !!poster);
+            const tile = sceneTabs && urlsRef.current.get(f);
+            return <div className={`attachment-chip${tile ? " attachment-chip--tile" : ""}`} key={i} title={sceneTabs ? f.name : undefined}>
               {mediaMode && (
-                <span className="attachment-slot-badge badge-image-reference" aria-label={sceneTabs ? t("参考图{0}", [i + 1]) : undefined}>
+                <span className="attachment-slot-badge badge-image-reference" aria-label={sceneTabs ? t("参考图{0}", [referenceNumber]) : undefined}>
                   {seedance25Video ? t("参考图 {0}", [seedanceAssetMention("Image", i)])
-                    : sceneTabs ? i + 1 : mode === "image" && files.length > 1 ? t("参考图{0}", [i + 1]) : t("参考图")}
+                    : sceneTabs ? referenceNumber : mode === "image" && files.length > 1 ? t("参考图{0}", [referenceNumber]) : t("参考图")}
                 </span>
               )}
               {pptMode && <span className="attachment-slot-badge badge-content">{t("内容")}</span>}
@@ -818,8 +847,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               >
                 ✕
               </button>
-            </div>
-          ))}
+            </div>;
+          })}
         </div>
       )}
       <textarea
@@ -837,7 +866,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             : t(activeScene?.placeholder ?? (sceneTabs ? "想创作什么？描述画面，或从下方选一个灵感开始…" : placeholder))
               ?? t("输入消息，Enter 发送，Shift+Enter 换行")
         }
-        aria-label={sceneTabs ? t("描述你的画面") : undefined}
+        aria-label={sceneTabs ? t(promptLabel) : undefined}
         disabled={disabled}
         rows={1}
         autoFocus={autoFocus}
@@ -962,15 +991,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               type="button"
               className="btn-reference"
               onClick={() => {
-                if (files.length >= MAX_IMAGE_REFERENCE_IMAGES) {
+                if (files.length >= maxFiles) {
                   setUploadLimitNotice(true);
                   return;
                 }
                 fileInputRef.current?.click();
               }}
               disabled={disabled}
-              title={t("最多5张")}
-              aria-label={t("参考图")}
+              title={t(posterRemix ? "上传产品图" : "最多5张")}
+              aria-label={t(posterRemix ? "上传产品图" : "参考图")}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="14" height="14" rx="2.5" />
@@ -978,7 +1007,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 <path d="m17 13-4-4-7 7" />
                 <path d="M18.5 16.5v5M16 19h5" />
               </svg>
-              <span className="btn-reference-label">{t("参考图")}</span></button>
+              <span className="btn-reference-label">{t(posterRemix ? "上传产品图" : "参考图")}</span></button>
           )}
           {/* 真实字体 and 图片合成 are the features worth noticing: gradient icon tile and a short selling point. */}
           {realTextAvailable && (
@@ -1020,14 +1049,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           {productPickerOpen && (
             <ProductPickerDialog
-              room={MAX_IMAGE_REFERENCE_IMAGES - files.length}
+              room={maxFiles - files.length}
               onClose={() => setProductPickerOpen(false)}
               onPick={(product, images, failedImages) => {
                 setProductPickerOpen(false);
                 if (images.length) addFiles(images);
                 setPromptValue(withProductText(promptValue, productPromptText(product)));
                 setAttachmentError("");
-                const room = MAX_IMAGE_REFERENCE_IMAGES - files.length;
+                const room = maxFiles - files.length;
                 setProductNotice(
                   failedImages > 0 ? "有产品图读取失败，已带入能读取的图片和产品说明"
                     : !(product.images ?? []).length ? "这个产品还没有图片，只带入了产品说明；可以再上传产品图"

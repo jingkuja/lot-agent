@@ -259,16 +259,18 @@ export async function resolveMaterialReference(
   return resolved.startsWith("/static/") ? `${publicBase(options)}${resolved}` : resolved;
 }
 
-/** URL-only image models fetch references themselves. Forward only owned files on the configured Agent origin. */
+/** Authorize only the owner's Agent images. URL-only models require an absolute URL. */
 export async function resolveImageReferenceUrl(
   db: ImageReferenceLookup,
   userId: string,
   url: string,
-  options: PrivateMaterialOptions = {},
+  options: PrivateMaterialOptions & { allowRelative?: boolean } = {},
 ): Promise<string> {
   const base = publicBase(options);
-  if (!base) throw new GenerationError("CONFIG_MISSING", "图片参考图需要配置模型可访问的 PUBLIC_BASE_URL。");
-  const local = url.startsWith(`${base}/`) ? url.slice(base.length) : url;
+  if (!base && !options.allowRelative) {
+    throw new GenerationError("CONFIG_MISSING", "图片参考图需要配置模型可访问的 PUBLIC_BASE_URL。");
+  }
+  const local = base && url.startsWith(`${base}/`) ? url.slice(base.length) : url;
   const match = /^(\/static\/(?:uploads|assets)\/)([^/?#]+)(?:\?[^#]*)?$/.exec(local);
   if (!match) throw new Error("参考图必须使用 Agent 生成的图片链接。");
   let key: string;

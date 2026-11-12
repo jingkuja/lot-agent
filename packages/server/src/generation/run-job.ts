@@ -8,6 +8,7 @@ import { referenceDataUrl } from "./compose.js";
 import { whitenBackground, type WhiteBackgroundCheck } from "./white-background.js";
 import { renderPoster } from "./poster-render.js";
 import { parsePosterLayout, type PosterLayout } from "@lot-agent/core/poster";
+import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE } from "./poster-library.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
 import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia } from "@lot-agent/core";
 
@@ -134,6 +135,12 @@ function agentImageReferenceUrl(deps: RunJobDeps, url: string): Promise<string> 
   return deps.resolveImageReferenceUrl(url);
 }
 
+async function imageReferenceDataUrl(deps: RunJobDeps, source: string): Promise<string> {
+  const { body, mime } = await deps.urlToBytes(source, { signal: deps.signal });
+  if (!mime.startsWith("image/")) throw new Error(`image edit reference is not an image (${mime})`);
+  return `data:${mime};base64,${body.toString("base64")}`;
+}
+
 /** Most image models need Base64 data URLs. URL-only models fetch Agent-hosted references. */
 async function prepareImageReferences(
   deps: RunJobDeps,
@@ -145,12 +152,23 @@ async function prepareImageReferences(
   }
   return Promise.all(media.map(async (item) => {
     const source = await publicReference(deps, item.url) as string;
-    const { body, mime } = await deps.urlToBytes(source, { signal: deps.signal });
-    if (!mime.startsWith("image/")) {
-      throw new Error(`image edit reference is not an image (${mime})`);
-    }
-    return { ...item, url: `data:${mime};base64,${body.toString("base64")}` };
+    return { ...item, url: await imageReferenceDataUrl(deps, source) };
   }));
+}
+
+async function preparePosterRemixReference(deps: RunJobDeps, value: unknown): Promise<ReferenceMedia> {
+  const reference = parsePosterReference(value);
+  const revision = (value as { revision?: unknown } | undefined)?.revision;
+  if (!reference || typeof revision !== "string" || !/^[a-f0-9]{16}$/.test(revision)) {
+    throw new GenerationError("GENERATION_FAILED", POSTER_UNAVAILABLE);
+  }
+  const url = posterImageUrl(reference, revision);
+  if (usesImageReferenceUrls(deps.vendorModel)) return { type: "reference_image", url };
+  try {
+    return { type: "reference_image", url: await imageReferenceDataUrl(deps, url) };
+  } catch {
+    throw new GenerationError("GENERATION_FAILED", POSTER_UNAVAILABLE);
+  }
 }
 
 /** Build the message-status writer bound to this job's owner + base metadata.
@@ -347,6 +365,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
   const prompt = (input.prompt as string) ?? "";
   const setPrompts = imageSetPrompts(mediaType, input);
   const media = input.media as ReferenceMedia[] | undefined;
+  const posterRemix = mediaType === "image" && input.scene === "poster_remix";
   const inputReference = input.input_reference as ReferenceInput | undefined;
   const referenceVideo = input.reference_video as ReferenceInput | undefined;
   const klingVideo = mediaType === "video" && /kling/i.test(deps.vendorModel);
@@ -382,6 +401,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       prompt, ...(setPrompts ? { prompts: setPrompts } : {}),
       // The same picture prompt with other wording is another poster.
       ...(mediaType === "image" && parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
+      ...(posterRemix ? { posterReference: input.posterReference } : {}),
       size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
       input_reference: inputReference,
@@ -420,6 +440,10 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       let publicMedia = mediaType === "image"
         ? await prepareImageReferences(deps, media)
         : media ? await Promise.all(media.filter(item => !needsKlingVoices || item.type !== "reference_audio").map(async (item) => ({ ...item, url: await publicReference(deps, item.url) as string }))) : undefined;
+      if (posterRemix) {
+        const poster = await preparePosterRemixReference(deps, input.posterReference);
+        publicMedia = [poster, ...(publicMedia ?? [])];
+      }
       let publicInputReference = await publicReference(deps, inputReference);
       let publicVideoReference = await publicReference(deps, referenceVideo);
       let publicFirstFrame = firstFrame ? await publicReference(deps, firstFrame) as string : undefined;

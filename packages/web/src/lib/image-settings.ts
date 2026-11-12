@@ -37,8 +37,7 @@ export const IMAGE_RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9
 export const DEFAULT_IMAGE_RATIO = "1:1";
 export const IMAGE_MAX_COUNT = 4;
 
-/** Image types above the composer, in display order (自由创作 first). 自由创作 sends the text as written; the others
- * are checked against the scene and rewritten on the server before any image is paid for. `count` is the
+/** Image types above the composer, in display order (自由创作 first). `count` is the
  * image count a type starts with (the user's own choice per type wins afterwards); `roles` names each image of a set
  * in the order the server writes its prompts (`server/generation/image-scene.ts`); `note` explains what a set costs and
  * the cheaper one-image route through 自由创作. */
@@ -46,6 +45,11 @@ export const IMAGE_SCENES = [
   {
     value: "free", label: "自由创作", placeholder: undefined, hint: undefined, note: undefined, count: undefined, roles: undefined,
     needsReference: false,
+  },
+  {
+    value: "poster_remix", label: "爆款复刻", count: undefined, roles: undefined, note: undefined, needsReference: false,
+    placeholder: "写下你的品牌名、产品和卖点，也可以上传产品图",
+    hint: undefined,
   },
   {
     value: "product_set", label: "产品套图", count: 4, roles: ["封面", "卖点", "使用场景", "细节"], needsReference: false,
@@ -74,6 +78,16 @@ export const IMAGE_SCENES = [
 ] as const;
 export type ImageScene = typeof IMAGE_SCENES[number]["value"];
 export const DEFAULT_IMAGE_SCENE: ImageScene = "free";
+
+export interface PosterReference {
+  category: string;
+  filename: string;
+}
+
+export interface PosterLibraryImage extends PosterReference {
+  name: string;
+  url: string;
+}
 
 /** What image `index` of a set is for (封面 / 卖点 …); undefined for other scenes and for older messages. */
 export function imageSetRole(scene: string | undefined, index: number): string | undefined {
@@ -157,6 +171,8 @@ export function generationComposites(raw: unknown): GenerationComposite[] | unde
 export interface ImageSettings {
   /** Only on a composer send; generated-image edits never carry a scene. */
   scene?: ImageScene;
+  /** Design reference selected from the poster library in 爆款复刻. */
+  posterReference?: PosterReference;
   /** 真实字体: the picture is made without text and the wording is typeset on it. Only on a 自由创作 composer send. */
   realText?: boolean;
   /** 1K / 2K / 4K; sent with `ratio` instead of a pixel size. */

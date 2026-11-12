@@ -11,7 +11,11 @@ import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
-import { ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene } from "../generation/image-scene.js";
+import {
+  ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixPrompt,
+} from "../generation/image-scene.js";
+import { parsePosterReference, POSTER_UNAVAILABLE, type PosterLibrary } from "../generation/poster-library.js";
+import { resolveImageReferenceUrl } from "../generation/private-materials.js";
 import {
   composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
 } from "../generation/compose.js";
@@ -578,7 +582,7 @@ export function createConversationRoutes(service: AgentService) {
 
 type GenVariables = { userId: string };
 
-export function createGenerationRoutes(service: AgentService, deps: { assets?: ObjectStorage } = {}) {
+export function createGenerationRoutes(service: AgentService, deps: { assets?: ObjectStorage; posterLibrary?: PosterLibrary } = {}) {
   const app = new Hono<{ Variables: GenVariables }>();
 
   app.post("/:id/generations", async (c) => {
@@ -604,6 +608,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       model?: string;
       /** Image scene: 自由创作 by default; the e-commerce scenes are checked and rewritten first. */
       scene?: unknown;
+      posterReference?: unknown;
       /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 only. */
       realText?: unknown;
     };
@@ -612,13 +617,17 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     } catch {
       return c.json({ error: "Invalid JSON body" }, 400);
     }
-    const prompt = (body.prompt ?? "").trim();
+    if (!body) return c.json({ error: "Invalid JSON body" }, 400);
+    const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const mediaType = body.mediaType;
     if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
       return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
     }
     const scene = mediaType === "image" ? parseImageScene(body.scene) : "free";
     if (!scene) return c.json({ error: "unknown image scene" }, 400);
+    if (body.posterReference !== undefined && scene !== "poster_remix") {
+      return c.json({ error: "posterReference is only accepted in poster_remix" }, 400);
+    }
     const realText = mediaType === "image" && scene === "free" && body.realText === true;
     // The mini program and marketing studio create one conversation per paid video attempt. Use a
     // database lease (shared across server processes) plus its durable message
@@ -682,7 +691,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         };
       }
       const media = Array.isArray(body.media) ? body.media : undefined;
-      if (mediaType === "image" && media && media.length > MAX_IMAGE_EDIT_REFERENCES) {
+      if (mediaType === "image" && (media?.length ?? 0) + Number(scene === "poster_remix") > MAX_IMAGE_EDIT_REFERENCES) {
         return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
       }
       if (mediaType === "video" && media) {
@@ -696,6 +705,25 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         if (grokIssue) return c.json({ error: grokIssue }, 400);
       }
       const type = mediaType === "image" ? "image.generate" : "video.generate";
+
+      let posterReference;
+      if (scene === "poster_remix") {
+        const reference = parsePosterReference(body.posterReference);
+        if (!reference) return c.json({ error: "请先选择一张爆款参考图", code: "IMAGE_POSTER_REFERENCE_REQUIRED" }, 422);
+        posterReference = deps.posterLibrary?.select(reference);
+        if (posterReference === undefined) {
+          return c.json({ error: "爆款参考图暂时无法读取", code: "IMAGE_POSTER_LIBRARY_UNAVAILABLE" }, 503);
+        }
+        if (!posterReference) return c.json({ error: POSTER_UNAVAILABLE, code: "IMAGE_POSTER_REFERENCE_UNAVAILABLE" }, 422);
+        try {
+          await Promise.all((media ?? []).map((item) => {
+            if (item?.type !== "reference_image" || typeof item.url !== "string") throw new Error("invalid product image");
+            return resolveImageReferenceUrl(service.db, userId, item.url, { allowRelative: true });
+          }));
+        } catch {
+          return c.json({ error: "产品图不可用，请重新上传", code: "IMAGE_POSTER_PRODUCT_UNAVAILABLE" }, 422);
+        }
+      }
 
       // Quota pre-check (mirrors the /tasks route; shared billing source of truth).
       const modelId = mediaType === "image"
@@ -713,7 +741,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       if (imageSceneNeedsReference(scene) && !media?.some((item) => item?.type === "reference_image")) {
         return c.json({ error: "请先上传产品图，再描述想换的场景", code: "IMAGE_SCENE_NEEDS_PRODUCT" }, 422);
       }
-      if (scene !== "free") {
+      if (scene === "poster_remix") {
+        modelPrompts = [posterRemixPrompt(prompt, media?.length ?? 0)];
+      } else if (scene !== "free") {
         let plan;
         try {
           const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
@@ -790,6 +820,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           // Set scenes: one image per prompt, each its own model request. The card keeps showing the user's text.
           ...(modelPrompts.length > 1 ? { prompts: modelPrompts } : {}),
           ...(scene !== "free" ? { scene, displayPrompt: prompt } : {}),
+          ...(posterReference ? { posterReference } : {}),
           ...(poster ? { poster, displayPrompt: prompt } : {}),
           conversationId,
           assistantMessageId,

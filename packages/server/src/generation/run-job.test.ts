@@ -118,6 +118,46 @@ describe("runGenerationJob", () => {
     expect(deps.urlToBytes).not.toHaveBeenCalled();
     expect(provider.create).not.toHaveBeenCalled();
   });
+
+  it.each(["gpt-image-2", "linqu-image"])("puts the selected poster before the brand images for %s", async (vendorModel) => {
+    const posterUrl = "https://todoucloud.com/posters/food/design.webp?v=0123456789abcdef";
+    const productUrl = "/static/uploads/brand.png";
+    const authorizedProductUrl = "https://agent.example/static/uploads/brand.png";
+    const provider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "completed" as const, progress: 100 })),
+      poll: vi.fn(async () => ({ status: "completed" as const, progress: 100, url: "https://vendor.example/result.png" })),
+    };
+    const { deps, calls } = fakeDeps(provider, {
+      vendorModel,
+      resolveImageReferenceUrl: vi.fn(async () => authorizedProductUrl),
+      urlToBytes: vi.fn(async (url) => ({ body: Buffer.from(url === posterUrl ? "poster" : "product"), mime: "image/png" })),
+    });
+    const input = {
+      ...job.input, scene: "poster_remix", displayPrompt: "青山茶壶",
+      posterReference: { category: "food", filename: "design.webp", revision: "0123456789abcdef" },
+      media: [{ type: "reference_image", url: productUrl }],
+    };
+    await runGenerationJob(deps, { ...job, input }, "image");
+    const [poster, product] = vendorModel === "linqu-image"
+      ? [posterUrl, authorizedProductUrl]
+      : ["data:image/png;base64,cG9zdGVy", "data:image/png;base64,cHJvZHVjdA=="];
+    expect(provider.create).toHaveBeenCalledOnce();
+    expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({
+      media: [poster, product].map((url) => ({ type: "reference_image", url })),
+    }));
+    expect(calls.message.at(-1).metadata).toMatchObject({ scene: "poster_remix", prompt: "青山茶壶", status: "completed" });
+  });
+
+  it("does not call the image model when a selected poster cannot be downloaded", async () => {
+    const provider = { create: vi.fn(), poll: vi.fn() };
+    const { deps } = fakeDeps(provider, { urlToBytes: vi.fn(async () => { throw new Error("upstream 404"); }) });
+    const input = {
+      ...job.input, scene: "poster_remix", posterReference: { category: "food", filename: "design.png", revision: "0123456789abcdef" },
+    };
+    await expect(runGenerationJob(deps, { ...job, input }, "image")).rejects.toThrow("这张爆款参考图已失效，请重新选择");
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
   it("creates, polls to completion, stores asset, relays progress, marks message completed", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

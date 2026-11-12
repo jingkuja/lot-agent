@@ -5,7 +5,7 @@ import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, ty
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
-  generationComposites, generationRedo, whiteBackgroundChecks, type ComposeLayout, type ExportPreset, type RedoRequest,
+  generationComposites, generationRedo, whiteBackgroundChecks, type ComposeLayout, type ExportPreset, type ImageSettings, type RedoRequest,
 } from "../lib/image-settings.js";
 import {
   chatReducer,
@@ -18,10 +18,6 @@ import {
 // The message/generation view models live with the reducer; components keep
 // importing them from here.
 export type { DisplayMessage, GenerationView } from "./chat-reducer.js";
-
-function realTextOf(settings: unknown): boolean {
-  return !!settings && typeof settings === "object" && (settings as { realText?: unknown }).realText === true;
-}
 
 function sceneOf(settings: unknown): string | undefined {
   const scene = settings && typeof settings === "object" ? (settings as { scene?: unknown }).scene : undefined;
@@ -524,6 +520,8 @@ export function useChat(
     (prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [], modelId?: string, references: string[] = []) => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || state.isStreaming) return;
+      const imageSettings: Partial<ImageSettings> = mediaType === "image" && settings && typeof settings === "object" ? settings as ImageSettings : {};
+      const { scene, posterReference, realText, ...imageParameters } = imageSettings;
       dispatch({ type: "stream_started" });
 
       if (genPollRef.current) genPollRef.current.cancelled = true;
@@ -546,7 +544,7 @@ export function useChat(
           content: "",
           generation: {
             mediaType, status: "generating", progress: 0, settings: mediaType === "image" ? generationSettings(settings) : undefined,
-            scene: mediaType === "image" ? sceneOf(settings) : undefined,
+            scene,
           },
         },
       });
@@ -571,7 +569,7 @@ export function useChat(
           const res = await api.generate(cid, {
             prompt,
             mediaType,
-            settings,
+            settings: mediaType === "image" ? imageParameters : settings,
             media: media.length ? media : undefined,
             input_reference: inputReference.length ? inputReference : undefined,
             reference_video: referenceVideo.length ? referenceVideo : undefined,
@@ -580,8 +578,9 @@ export function useChat(
             last_frame: lastFrame,
             model: modelId,
             // Settings stay whitelisted on the server; the scene travels on its own.
-            scene: mediaType === "image" ? sceneOf(settings) : undefined,
-            ...(mediaType === "image" && realTextOf(settings) ? { realText: true } : {}),
+            scene,
+            ...(scene === "poster_remix" ? { posterReference } : {}),
+            ...(realText === true ? { realText: true } : {}),
           });
           if (token.cancelled) return;
           // Reconcile the optimistic placeholders with the server-assigned ids
@@ -610,7 +609,9 @@ export function useChat(
           // optimistic bubble to "failed" so the attempt + error stay visible.
           const msg = e instanceof Error ? e.message : String(e);
           // A scene request that was off-topic or could not be prepared sent no image: say why on the card.
-          const sceneNotice = e instanceof ApiClientError && (e.code === "IMAGE_SCENE_MISMATCH" || e.code === "IMAGE_SCENE_UNAVAILABLE");
+          const sceneNotice = e instanceof ApiClientError && (
+            e.code === "IMAGE_SCENE_MISMATCH" || e.code === "IMAGE_SCENE_UNAVAILABLE" || e.code?.startsWith("IMAGE_POSTER_")
+          );
           dispatch({
             type: "generation_finished",
             messageId: tempGenId,
