@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import JSZip from "jszip";
-import { buildExportZip, fitDetailImage, fitMainImage, IMAGE_EXPORT_PRESETS, parseExportPreset, safeExportName } from "./image-export.js";
+import { buildExportZip, fitDetailImages, fitMainImage, IMAGE_EXPORT_PRESETS, parseExportPreset, safeExportName } from "./image-export.js";
 
 async function noisy(width: number, height: number): Promise<Buffer> {
   // Random pixels compress badly, so the size limit is really exercised.
@@ -22,9 +22,30 @@ describe("image export", () => {
     expect(Array.from(data.subarray(0, 3)).every((value) => value > 245)).toBe(true);
   });
 
-  it("scales a long image to the detail-page width", async () => {
-    const out = await fitDetailImage(await noisy(1024, 4096), taobao);
-    expect(await sharp(out).metadata()).toMatchObject({ width: 750, height: 3000 });
+  it("keeps the detail width and splits at a nearby source-image boundary", async () => {
+    const image = await sharp({ create: { width: 1024, height: 4096, channels: 3, background: "teal" } }).png().toBuffer();
+    const slices = await fitDetailImages(image, taobao, [1800]);
+    const sizes = await Promise.all(slices.map((slice) => sharp(slice).metadata()));
+    expect(sizes.map(({ width, height }) => [width, height])).toEqual([[750, 1318], [750, 1500], [750, 182]]);
+  });
+
+  it("splits further until every slice fits the byte cap", async () => {
+    const image = await noisy(320, 800);
+    const maxBytes = 24_000;
+    const slices = await fitDetailImages(image, { ...taobao, detailWidth: 320, maxBytes });
+    expect(slices.length).toBeGreaterThan(1);
+    expect(slices.every((body) => body.byteLength <= maxBytes)).toBe(true);
+    const sizes = await Promise.all(slices.map((slice) => sharp(slice).metadata()));
+    expect(sizes.reduce((height, slice) => height + (slice.height ?? 0), 0)).toBe(800);
+  });
+
+  it("numbers long-detail files in top-to-bottom order and leaves the original whole", async () => {
+    const image = await sharp({ create: { width: 750, height: 3100, channels: 3, background: "teal" } }).jpeg().toBuffer();
+    const source = { name: "长图", body: image, ext: "jpg", detail: true };
+    const platform = await JSZip.loadAsync(await buildExportZip([source], "taobao"));
+    expect(Object.keys(platform.files)).toEqual(["长图_01.jpg", "长图_02.jpg", "长图_03.jpg"]);
+    const original = await JSZip.loadAsync(await buildExportZip([source], "original"));
+    expect(Object.keys(original.files)).toEqual(["长图.jpg"]);
   });
 
   it("zips the files under their names, original bytes for 原图 and JPEG for a platform", async () => {

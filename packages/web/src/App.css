@@ -4855,6 +4855,24 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 /* 图片合成：从本对话和个人素材库挑图合成一张 */
 .image-compose { width: min(760px, calc(100vw - 32px)); }
 .image-compose-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.image-compose-selection-head {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+}
+.image-compose-order {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px;
+  margin: 8px 0 0; padding: 0; list-style: decimal inside;
+}
+.image-compose-order li { position: relative; padding: 6px; border-radius: var(--radius-md); background: var(--bg-tool); color: var(--text-secondary); }
+.image-compose-order li[draggable="true"] { cursor: grab; }
+.image-compose-order img { display: block; width: 100%; height: 64px; object-fit: contain; border-radius: var(--radius-sm); }
+.image-compose-order-actions { display: flex; justify-content: center; gap: 2px; }
+.image-compose-order-actions button {
+  flex: 1; min-height: 30px; padding: 2px; border: 0; border-radius: var(--radius-sm); color: var(--text); background: transparent; cursor: pointer;
+}
+.image-compose-order-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.image-compose-order-actions button:disabled { color: var(--text-muted); opacity: .45; cursor: default; }
+.gen-single-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
 .image-compose-body {
   display: flex; flex-direction: column; gap: 16px; min-height: 160px; max-height: min(52vh, 520px);
   overflow-y: auto; padding-right: 4px;
@@ -5083,6 +5101,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
   width: 34px; height: 34px; border: none; border-radius: 50%;
   background: var(--accent-grad); color: var(--icon-on-grad); cursor: pointer;
 }
+.image-edit-send--redo { width: auto; min-width: max-content; padding-inline: 12px; border-radius: var(--radius-md); }
 .image-edit-send:hover { filter: brightness(1.05); }
 .image-edit-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .image-edit-send svg { width: 18px; height: 18px; }

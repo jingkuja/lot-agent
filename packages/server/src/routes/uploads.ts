@@ -3,6 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import type { AgentService } from "../services/agent-service.js";
+import { COMPOSE_MAX_UPLOAD_BYTES, COMPOSE_UPLOAD_MIMES } from "../generation/compose.js";
 import { attachmentKind } from "../services/attachment-extractor.js";
 import { privateFilesEnabled, signPrivateMaterial } from "../generation/private-materials.js";
 import { meteredUpload, uploadFileName, UploadTooLargeError } from "../util/metered-upload.js";
@@ -68,8 +69,11 @@ export function createUploadRoutes(service: AgentService) {
       return c.json({ error: `unsupported type: ${mime}` }, 400);
     }
     const kind = attachmentKind(mime);
-    const [max, tooLarge] = isMedia ? [MAX_MEDIA, "media too large (max 150MB)"] : kind === "image" ? [MAX_IMAGE, "image too large (max 150MB)"]
-      : [MAX_DOC, "document too large (max 150MB)"];
+    const composeMaterial = purpose === "image-compose";
+    if (composeMaterial && !COMPOSE_UPLOAD_MIMES.includes(mime)) return c.json({ error: "仅支持 JPG、PNG、WebP 或 GIF 图片" }, 400);
+    const [max, tooLarge] = composeMaterial ? [COMPOSE_MAX_UPLOAD_BYTES, "图片太大，请缩小后再合成"]
+      : isMedia ? [MAX_MEDIA, "media too large (max 150MB)"] : kind === "image" ? [MAX_IMAGE, "image too large (max 150MB)"]
+        : [MAX_DOC, "document too large (max 150MB)"];
     if (declared !== undefined && declared > max) return c.json({ error: tooLarge }, 400);
 
     const ext = extname(name) || "";
@@ -77,7 +81,7 @@ export function createUploadRoutes(service: AgentService) {
     const key = `${id}${ext}`;
     const marketingMaterial = purpose === "marketing-video";
     // Images and media stay reachable by URL: model vendors and the miniprogram fetch them that way.
-    const isPrivate = marketingMaterial || (kind === "doc" && !isMedia && privateFilesEnabled());
+    const isPrivate = marketingMaterial || ((composeMaterial || (kind === "doc" && !isMedia)) && privateFilesEnabled());
     // Fail before writing material when the temporary-link key is unavailable.
     const privateAsset = { id, user_id: userId, type: "upload", storage_key: key, url: service.uploadStorage.getUrl(key), is_private: isPrivate };
     let accessUrl: string;

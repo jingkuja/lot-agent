@@ -1773,6 +1773,16 @@ export class DB {
     );
   }
 
+  async findOriginalImageTask(conversationId: string, messageId: string, userId: string): Promise<StoredTask | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM tasks WHERE user_id = $1 AND type = 'image.generate'
+       AND input->>'conversationId' = $2 AND input->>'assistantMessageId' = $3
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, conversationId, messageId],
+    );
+    return rows[0] ?? null;
+  }
+
   async getTask(id: string): Promise<StoredTask | null> {
     const { rows } = await this.pool.query(
       "SELECT * FROM tasks WHERE id = $1",

@@ -137,7 +137,8 @@ export function whiteBackgroundChecks(raw: unknown): WhiteBackgroundCheck[] | un
 }
 
 /** 重做 one image of a set, or 补齐 the images it is missing. */
-export type RedoRequest = { index: number } | { missing: true };
+export type SetRedoRequest = { index: number; instruction?: string } | { missing: true };
+export type RedoRequest = SetRedoRequest | { regenerate: true; requestId: string };
 
 /** A redo in progress on a set (`running`), or the reason the last one made nothing (`failed`). */
 export interface GenerationRedo { status: "running" | "failed"; indexes: number[]; taskId?: string; error?: string }

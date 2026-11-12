@@ -1,13 +1,13 @@
 import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useEffect, useLayoutEffect, type CSSProperties } from "react";
-import { imageModelDescription, isLingquImage } from "../lib/model-filter.js";
+import { imageModelDescription, isGptImage15, isLingquImage } from "../lib/model-filter.js";
 import {
   DEFAULT_IMAGE_QUALITY,
   DEFAULT_IMAGE_RATIO,
   DEFAULT_IMAGE_RESOLUTION,
   IMAGE_AUTO_RATIO,
   IMAGE_MAX_COUNT,
-  IMAGE_QUALITIES,
+  IMAGE_PRESETS, IMAGE_QUALITIES,
   IMAGE_RATIOS,
   IMAGE_RESOLUTIONS,
   type ImageSettings,
@@ -206,6 +206,8 @@ export function ImageSettingsPicker({
   const [quality, setQuality] = useState(() => lastImage.quality);
   const [ratio, setRatio] = useState(() => lastImage.ratio);
   const [resolution, setResolution] = useState(() => lastImage.resolution);
+  const [preset, setPreset] = useState<(typeof IMAGE_PRESETS)[number]>(IMAGE_PRESETS[0]);
+  const fixedSize = isGptImage15(selectedModel);
   const count = allowCount ? n : 1;
   // Open upward unless the space above is short and below is roomier; never past the visible band.
   const [placement, setPlacement] = useState<{ below: boolean; maxHeight: number; left: number } | null>(null);
@@ -234,8 +236,8 @@ export function ImageSettingsPicker({
   }, [disabled]);
 
   useEffect(() => {
-    onChange?.({ resolution, ratio, n: count, quality });
-  }, [resolution, ratio, count, quality, onChange]);
+    onChange?.(fixedSize ? { size: preset.size, n: count, quality } : { resolution, ratio, n: count, quality });
+  }, [fixedSize, preset, resolution, ratio, count, quality, onChange]);
 
   const pickN = (value: number) => {
     const next = Math.min(IMAGE_MAX_COUNT, Math.max(1, Math.round(value) || 1));
@@ -254,7 +256,7 @@ export function ImageSettingsPicker({
     lastImage.resolution = value;
     setResolution(value);
   };
-  const [rw, rh] = ratio === IMAGE_AUTO_RATIO ? [1, 1] : ratio.split(":").map(Number);
+  const [rw, rh] = fixedSize ? [preset.w, preset.h] : ratio === IMAGE_AUTO_RATIO ? [1, 1] : ratio.split(":").map(Number);
   // 图片比例 shows one row until 更多; a choice from the hidden rows takes the row's last place so it stays visible.
   const [ratiosOpen, setRatiosOpen] = useState(false);
   const allRatios: string[] = [IMAGE_AUTO_RATIO, ...IMAGE_RATIOS];
@@ -276,7 +278,7 @@ export function ImageSettingsPicker({
         <RatioGlyph w={rw} h={rh} size={14} />
         <span className="media-trigger-label">{t("图片参数")}</span>
         {showSummary && <span className="image-settings-summary">
-          {resolution} · {ratio === IMAGE_AUTO_RATIO ? t("智能") : ratio} · {t("{0} 张", [count])}
+          {fixedSize ? preset.size.replace("x", " × ") : `${resolution} · ${ratio === IMAGE_AUTO_RATIO ? t("智能") : ratio}`} · {t("{0} 张", [count])}
         </span>}
         <ChevronIcon />
       </button>
@@ -287,45 +289,57 @@ export function ImageSettingsPicker({
           role="dialog"
           aria-label={t("图片参数")}
         >
-          <div className="media-section-title">{t("清晰度")}</div>
-          <div className="seg-track">
-            {IMAGE_RESOLUTIONS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`seg ${value === resolution ? "active" : ""}`}
-                onClick={() => pickResolution(value)}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-          <div className="media-section-head">
-            <div className="media-section-title">{t("图片比例")}</div>
-            <button type="button" className="media-section-more" aria-expanded={ratiosOpen} onClick={() => setRatiosOpen((o) => !o)}>
-              {ratiosOpen ? t("收起") : t("更多")}
-              <ChevronIcon />
-            </button>
-          </div>
-          <div className={`seg-track image-ratio-grid${ratiosOpen ? "" : " image-ratio-grid--folded"}`}>
-            {shownRatios.map((value) => {
-              const [w, h] = value === IMAGE_AUTO_RATIO ? [1, 1] : value.split(":").map(Number);
-              return (
+          {fixedSize ? <>
+            <div className="media-section-title">{t("图片尺寸")}</div>
+            <div className="seg-track">
+              {IMAGE_PRESETS.map((item) => (
+                <button key={item.size} type="button" className={`seg${item.size === preset.size ? " active" : ""}`}
+                  aria-pressed={item.size === preset.size} onClick={() => setPreset(item)}>
+                  {item.size.replace("x", " × ")}
+                </button>
+              ))}
+            </div>
+          </> : <>
+            <div className="media-section-title">{t("清晰度")}</div>
+            <div className="seg-track">
+              {IMAGE_RESOLUTIONS.map((value) => (
                 <button
                   key={value}
                   type="button"
-                  className={`seg seg--stack ${value === ratio ? "active" : ""}`}
-                  onClick={() => pickRatio(value)}
+                  className={`seg ${value === resolution ? "active" : ""}`}
+                  onClick={() => pickResolution(value)}
                 >
-                  <span className="image-ratio-icon" aria-hidden>
-                    {value === IMAGE_AUTO_RATIO ? <AutoRatioIcon /> : <RatioGlyph w={w} h={h} size={18} />}
-                  </span>
-                  <span>{value === IMAGE_AUTO_RATIO ? t("智能") : value}</span>
+                  {value}
                 </button>
-              );
-            })}
-          </div>
-          {ratio === IMAGE_AUTO_RATIO && <div className="media-hint">{t("有参考图时跟随第一张参考图的比例，否则为 1:1")}</div>}
+              ))}
+            </div>
+            <div className="media-section-head">
+              <div className="media-section-title">{t("图片比例")}</div>
+              <button type="button" className="media-section-more" aria-expanded={ratiosOpen} onClick={() => setRatiosOpen((o) => !o)}>
+                {ratiosOpen ? t("收起") : t("更多")}
+                <ChevronIcon />
+              </button>
+            </div>
+            <div className={`seg-track image-ratio-grid${ratiosOpen ? "" : " image-ratio-grid--folded"}`}>
+              {shownRatios.map((value) => {
+                const [w, h] = value === IMAGE_AUTO_RATIO ? [1, 1] : value.split(":").map(Number);
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`seg seg--stack ${value === ratio ? "active" : ""}`}
+                    onClick={() => pickRatio(value)}
+                  >
+                    <span className="image-ratio-icon" aria-hidden>
+                      {value === IMAGE_AUTO_RATIO ? <AutoRatioIcon /> : <RatioGlyph w={w} h={h} size={18} />}
+                    </span>
+                    <span>{value === IMAGE_AUTO_RATIO ? t("智能") : value}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {ratio === IMAGE_AUTO_RATIO && <div className="media-hint">{t("有参考图时跟随第一张参考图的比例，否则为 1:1")}</div>}
+          </>}
           {onModelChange && (
             <>
               <div className="media-section-title">{t("模型")}</div>

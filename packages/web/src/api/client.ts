@@ -1,7 +1,7 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
 import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
 import type {
-  ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, RedoRequest,
+  ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, SetRedoRequest,
 } from "../lib/image-settings.js";
 import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
@@ -437,7 +437,7 @@ export const api = {
       body: JSON.stringify({ afterMessageId }),
     }),
 
-  uploadFile: async (file: File, signal?: AbortSignal, purpose?: "marketing-video"): Promise<UploadedAttachment> => {
+  uploadFile: async (file: File, signal?: AbortSignal, purpose?: "marketing-video" | "image-compose"): Promise<UploadedAttachment> => {
     // The file itself is the body, so the server streams it to disk instead of buffering a form.
     const res = await fetch(`${BASE}/uploads${purpose ? `?purpose=${purpose}` : ""}`, {
       method: "POST",
@@ -590,11 +590,12 @@ export const api = {
       /** 真实字体: typeset the wording on a text-free picture. */
       realText?: boolean;
       requestId?: string;
+      regenerateFrom?: string;
     },
     signal?: AbortSignal,
   ) =>
     request<{
-      userMessage: { id: string; metadata?: { imageInput?: ImageInputContext } };
+      userMessage: { id: string; content?: string; metadata?: { imageInput?: ImageInputContext } };
       assistantMessage: {
         id: string;
         role: "assistant";
@@ -644,7 +645,7 @@ export const api = {
     return res.blob();
   },
 
-  redoGeneration: (conversationId: string, messageId: string, body: RedoRequest) =>
+  redoGeneration: (conversationId: string, messageId: string, body: SetRedoRequest) =>
     request<{ taskId: string; redo: GenerationRedo }>(
       `/conversations/${conversationId}/generations/${messageId}/redo`,
       { method: "POST", body: JSON.stringify(body) }

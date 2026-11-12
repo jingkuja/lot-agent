@@ -16,9 +16,10 @@ import {
   ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixPrompt,
 } from "../generation/image-scene.js";
 import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE, type PosterLibrary } from "../generation/poster-library.js";
-import { resolveImageReferenceUrl } from "../generation/private-materials.js";
+import { parseFileUrl, resolveImageReferenceUrl } from "../generation/private-materials.js";
 import {
-  composeImages, composeLayoutFits, outputStorageKey, parseComposeLayout, storedComposites, type GenerationComposite,
+  composeImages, composeLayoutFits, COMPOSE_MAX_UPLOAD_BYTES, COMPOSE_MAX_SOURCE_BYTES,
+  outputStorageKey, parseComposeLayout, storedComposites, storedSliceBoundaries, type GenerationComposite,
 } from "../generation/compose.js";
 import { IMAGE_REDO_TASK } from "../generation/run-job.js";
 import { posterRenderKey, renderPoster } from "../generation/poster-render.js";
@@ -583,6 +584,22 @@ export function createConversationRoutes(service: AgentService) {
 
 type GenVariables = { userId: string };
 
+async function originalImageTask(
+  db: AgentService["db"], metadata: Record<string, unknown>, conversationId: string, messageId: string, userId: string,
+) {
+  const { originalTaskId, submissionTaskId, taskId } = metadata;
+  const id = originalTaskId ?? submissionTaskId ?? taskId;
+  const task = typeof id === "string" ? await db.getTask(id) : null;
+  if (task?.type === "image.generate" && task.user_id === userId && task.input && typeof task.input === "object") {
+    const input = task.input as Record<string, unknown>;
+    if (input.conversationId === conversationId && input.assistantMessageId === messageId) return { id: task.id, input };
+  }
+  // Older messages kept only the latest (download-only) task id.
+  const original = await db.findOriginalImageTask(conversationId, messageId, userId);
+  return original?.input && typeof original.input === "object"
+    ? { id: original.id, input: original.input as Record<string, unknown> } : null;
+}
+
 export function createGenerationRoutes(service: AgentService, deps: { assets?: ObjectStorage; posterLibrary?: PosterLibrary } = {}) {
   const app = new Hono<{ Variables: GenVariables }>();
 
@@ -613,6 +630,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 only. */
       realText?: unknown;
       requestId?: unknown;
+      regenerateFrom?: unknown;
     };
     try {
       body = await c.req.json();
@@ -620,21 +638,18 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "Invalid JSON body" }, 400);
     }
     if (!body) return c.json({ error: "Invalid JSON body" }, 400);
-    const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const mediaType = body.mediaType;
-    if (!prompt || (mediaType !== "image" && mediaType !== "video")) {
-      return c.json({ error: "prompt and mediaType (image|video) are required" }, 400);
+    if (mediaType !== "image" && mediaType !== "video") {
+      return c.json({ error: "mediaType (image|video) is required" }, 400);
     }
-    const scene = mediaType === "image" ? parseImageScene(body.scene) : "free";
-    if (!scene) return c.json({ error: "unknown image scene" }, 400);
-    if (body.posterReference !== undefined && scene !== "poster_remix") {
-      return c.json({ error: "posterReference is only accepted in poster_remix" }, 400);
-    }
-    const realText = mediaType === "image" && scene === "free" && body.realText === true;
+    const regenerateFrom = body.regenerateFrom;
+    if (regenerateFrom !== undefined && (
+      mediaType !== "image" || typeof regenerateFrom !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(regenerateFrom)
+    )) return c.json({ error: "Invalid regenerateFrom" }, 400);
     // A Web image draft uses the same request id when the caller did not get its receipt.
     const requestId = mediaType === "image" && typeof body.requestId === "string"
       && /^[a-zA-Z0-9-]{16,64}$/.test(body.requestId) ? body.requestId : undefined;
-    if (mediaType === "image" && body.requestId !== undefined && !requestId) {
+    if (mediaType === "image" && (body.requestId !== undefined || regenerateFrom !== undefined) && !requestId) {
       return c.json({ error: "Invalid requestId" }, 400);
     }
     // Mini program and marketing videos use one conversation per paid attempt.
@@ -653,7 +668,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           if (typeof taskId !== "string" || typeof userMessageId !== "string") {
             return c.json({ error: "图片提交结果待确认，请稍后核对", code: "IMAGE_SUBMISSION_PENDING" }, 409);
           }
-          return c.json({ userMessage: { id: userMessageId, metadata: { imageInput } }, assistantMessage: existing, taskId }, 202);
+          return c.json({
+            userMessage: { id: userMessageId, content: existing.metadata.prompt, metadata: { imageInput } },
+            assistantMessage: existing, taskId,
+          }, 202);
         }
       }
       if (videoRunId) {
@@ -667,18 +685,44 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           return c.json({ userMessage: messages.find((m) => m.role === "user"), assistantMessage: existing, taskId }, 202);
         }
       }
+      let frozen: Record<string, unknown> | undefined;
+      let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+      if (typeof regenerateFrom === "string") {
+        const source = await service.db.getGenerationMessage(regenerateFrom, conversationId, userId);
+        const meta = source?.metadata;
+        const sourceScene = parseImageScene(meta?.scene);
+        if (!source || meta?.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed"
+          || !sourceScene || imageSceneUsesSet(sourceScene)
+          || !Array.isArray(meta.assets) || meta.assets.length !== 1 || meta.composedFrom) {
+          return c.json({ error: "只有已完成的单张生成图可以重新生成", code: "IMAGE_REGENERATE_UNAVAILABLE" }, 409);
+        }
+        const original = await originalImageTask(service.db, meta, conversationId, regenerateFrom, userId);
+        if (!original?.input.prompt || typeof original.input.prompt !== "string") {
+          return c.json({ error: "原始任务已不存在，无法重新生成", code: "IMAGE_REGENERATE_UNAVAILABLE" }, 409);
+        }
+        frozen = original.input;
+        prompt = typeof meta.prompt === "string" && meta.prompt.trim() ? meta.prompt : original.input.prompt;
+      }
+      if (!prompt) return c.json({ error: "prompt is required" }, 400);
+      const scene = mediaType === "image" ? parseImageScene(frozen ? frozen.scene : body.scene) : "free";
+      if (!scene) return c.json({ error: "unknown image scene" }, 400);
+      if (!frozen && body.posterReference !== undefined && scene !== "poster_remix") {
+        return c.json({ error: "posterReference is only accepted in poster_remix" }, 400);
+      }
+      const realText = mediaType === "image" && scene === "free" && (frozen ? !!parsePosterLayout(frozen.poster) : body.realText === true);
+      const model = frozen ? frozen.modelId : body.model;
       // Client settings pass a per-media whitelist so identity fields
       // (conversationId/assistantMessageId/userId) can never ride along.
       const selectedModel = conv.agent_id === "marketing_video" && mediaType === "video"
         ? activeMarketingVideoProfile().modelId
-        : typeof body.model === "string" && body.model ? body.model : undefined;
+        : typeof model === "string" && model ? model : undefined;
       if (conv.agent_id === "marketing_video" && mediaType === "video") {
         const duration = body.settings?.durationSec === undefined ? 5 : body.settings.durationSec;
         if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 4 || duration > 15) {
           return c.json({ error: "营销影像视频时长需为 4–15 秒" }, 400);
         }
       }
-      let settings = pickGenerationSettings(mediaType, body.settings);
+      let settings = pickGenerationSettings(mediaType, frozen ? { ...frozen, n: 1 } : body.settings);
       // Mini program quality tiers shift the requested resolution before
       // validation: 快速 drops every ratio one step, 自动/标准 only the wide
       // ones. Applied while `selectedModel` is still the slot id.
@@ -708,7 +752,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           generate_audio: resolveVideoGenerateAudio(settings.generate_audio, videoReferences.reference_audio),
         };
       }
-      const media = Array.isArray(body.media) ? body.media : undefined;
+      const rawMedia = frozen ? frozen.media : body.media;
+      const media = Array.isArray(rawMedia) ? rawMedia as { type: string; url: string }[] : undefined;
       if (mediaType === "image" && (media?.length ?? 0) + Number(scene === "poster_remix") > MAX_IMAGE_EDIT_REFERENCES) {
         return c.json({ error: `image editing supports at most ${MAX_IMAGE_EDIT_REFERENCES} reference images` }, 400);
       }
@@ -726,9 +771,12 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
 
       let posterReference;
       if (scene === "poster_remix") {
-        const reference = parsePosterReference(body.posterReference);
+        const raw = frozen ? frozen.posterReference : body.posterReference;
+        const reference = parsePosterReference(raw);
         if (!reference) return c.json({ error: "请先选择一张爆款参考图", code: "IMAGE_POSTER_REFERENCE_REQUIRED" }, 422);
-        posterReference = deps.posterLibrary?.select(reference);
+        const revision = (raw as { revision?: unknown }).revision;
+        posterReference = frozen && typeof revision === "string" && /^[a-f0-9]{16}$/.test(revision)
+          ? { ...reference, revision } : deps.posterLibrary?.select(reference);
         if (posterReference === undefined) {
           return c.json({ error: "爆款参考图暂时无法读取", code: "IMAGE_POSTER_LIBRARY_UNAVAILABLE" }, 503);
         }
@@ -768,13 +816,13 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
 
       // E-commerce scenes: check the request fits and rewrite it before anything is paid for or stored.
       // A failed or off-topic check sends no image request; the user simply sends again.
-      let modelPrompts: string[] = [prompt];
+      let modelPrompts: string[] = [frozen ? frozen.prompt as string : prompt];
       if (imageSceneNeedsReference(scene) && !media?.some((item) => item?.type === "reference_image")) {
         return c.json({ error: "请先上传产品图，再描述想换的场景", code: "IMAGE_SCENE_NEEDS_PRODUCT" }, 422);
       }
-      if (scene === "poster_remix") {
+      if (!frozen && scene === "poster_remix") {
         modelPrompts = [posterRemixPrompt(prompt, media?.length ?? 0)];
-      } else if (scene !== "free") {
+      } else if (!frozen && scene !== "free" && scene !== "poster_remix") {
         let plan;
         try {
           const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
@@ -796,8 +844,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       }
       // 真实字体: a text model extracts the wording and describes the picture; prices, rates and dates it did not copy
       // from the request are emptied in code. Like a scene check, a failed plan sends no image request.
-      let poster: PosterLayout | undefined;
-      if (realText) {
+      let poster: PosterLayout | undefined = frozen ? parsePosterLayout(frozen.poster) ?? undefined : undefined;
+      if (realText && !frozen) {
         try {
           const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
           const plan = await planPoster(
@@ -855,6 +903,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           ...(scene !== "free" ? { scene, displayPrompt: prompt } : {}),
           ...(posterReference ? { posterReference } : {}),
           ...(poster ? { poster, displayPrompt: prompt } : {}),
+          ...(frozen ? { fresh: true, displayPrompt: prompt } : {}),
           conversationId,
           assistantMessageId,
           requireUserModelKey: agentExtension(conv.agent_id)?.ownerKeyOnly === true,
@@ -925,6 +974,12 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const settings = (meta.settings as Record<string, unknown> | undefined) ?? {};
     const prompt = (meta.prompt as string | undefined) ?? "";
 
+    const original = mediaType === "image" ? await originalImageTask(service.db, meta, conversationId, messageId, userId) : null;
+    const originalContext = {
+      ...(original ? { originalTaskId: original.id } : {}),
+      ...(typeof meta.missing === "number" && meta.missing > 0 ? { missing: meta.missing } : {}),
+    };
+
     // Reopen before enqueuing (guarded on the 'download_failed' status) so a
     // double-click / concurrent retry only ever spawns one job.
     const reopened = await service.db.resetGenerationForRedownload(messageId, { conversationId, userId });
@@ -939,10 +994,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     // Identity fields spread LAST so nothing stored in settings can override them.
     const taskId = await service.jobQueue.enqueue(
       "generation.redownload",
-      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, ...scene, conversationId, assistantMessageId: messageId },
+      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, ...scene, ...originalContext, conversationId, assistantMessageId: messageId },
       userId
     );
-    const metadata = { kind: "generation", mediaType, prompt, settings, ...scene, status: "generating", taskId };
+    const metadata = { kind: "generation", mediaType, prompt, settings, ...scene, ...originalContext, status: "generating", taskId };
     await service.db.updateMessageGeneration(
       messageId,
       { status: "generating", metadata },
@@ -1001,7 +1056,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       id: assetId, taskId: typeof meta.taskId === "string" ? meta.taskId : null, userId, type: "image", storageKey: key, url,
       mime: composed.mime, sizeBytes: composed.body.byteLength, width: composed.width, height: composed.height,
     });
-    const composite: GenerationComposite = { url, mime: composed.mime, layout, gap };
+    const composite: GenerationComposite = {
+      url, mime: composed.mime, layout, gap, ...(composed.sliceBoundaries ? { sliceBoundaries: composed.sliceBoundaries } : {}),
+    };
     if (!await service.db.appendGenerationComposite(messageId, composite, { conversationId, userId })) {
       return c.json({ error: "只有已完成的图片可以合成" }, 409);
     }
@@ -1028,15 +1085,33 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (!conv || (conv as { user_id?: string }).user_id !== userId) return c.json({ error: "Conversation not found" }, 404);
     if (conv.channel === "feishu") return c.json({ error: "请在飞书中发送任务" }, 409);
 
-    // Every source must be this user's own generated image; the URLs sent are never fetched.
+    // Resolve only owned storage records. Request URLs are selectors, never fetched.
     const sources: Buffer[] = [];
+    const seen = new Set<string>();
+    let totalBytes = 0;
     for (const url of urls) {
-      const key = outputStorageKey(url);
-      const stored = key ? await service.db.getGeneratedByStorageKey(key) : null;
-      if (!key || !stored || stored.user_id !== userId || !stored.mime?.startsWith("image/") || !await deps.assets.exists(key)) {
+      const file = parseFileUrl(url);
+      const upload = file?.folder === "uploads" ? file : undefined;
+      const key = upload?.key ?? outputStorageKey(url);
+      const storage = upload ? service.uploadStorage : deps.assets;
+      const stored = !key ? null : upload
+        ? await service.db.getUploadByStorageKey(key)
+        : await service.db.getGeneratedByStorageKey(key);
+      if (!key || !stored || stored.user_id !== userId || !stored.mime?.startsWith("image/") || !await storage.exists(key)) {
         return c.json({ error: "有图片已不存在，无法合成" }, 409);
       }
-      sources.push(await deps.assets.get(key));
+      if (seen.has(stored.id)) return c.json({ error: "请选择不同的图片", code: "IMAGE_COMPOSE_DUPLICATE" }, 400);
+      seen.add(stored.id);
+      const size = Number(stored.size_bytes);
+      if ((upload && size > COMPOSE_MAX_UPLOAD_BYTES) || totalBytes + size > COMPOSE_MAX_SOURCE_BYTES) {
+        return c.json({ error: "图片太大，请缩小后再合成", code: "IMAGE_COMPOSE_SIZE" }, 413);
+      }
+      const bytes = await storage.get(key);
+      totalBytes += bytes.byteLength;
+      if ((upload && bytes.byteLength > COMPOSE_MAX_UPLOAD_BYTES) || totalBytes > COMPOSE_MAX_SOURCE_BYTES) {
+        return c.json({ error: "图片太大，请缩小后再合成", code: "IMAGE_COMPOSE_SIZE" }, 413);
+      }
+      sources.push(bytes);
     }
     let composed;
     try {
@@ -1060,7 +1135,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const metadata = {
       // No settings: the joined size is not a model size, so 编辑 on it uses the composer's settings.
       kind: "generation", mediaType: "image", prompt, status: "completed", settings: {},
-      assets: [{ url, mime: composed.mime }], composedFrom: { layout, gap, count: urls.length },
+      assets: [{ url, mime: composed.mime }],
+      composedFrom: {
+        layout, gap, count: urls.length, ...(composed.sliceBoundaries ? { sliceBoundaries: composed.sliceBoundaries } : {}),
+      },
     };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", { metadata });
     return c.json({
@@ -1160,12 +1238,15 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     }
     const names = Array.isArray(body?.names) ? body.names : [];
     const compositeNames = Array.isArray(body?.compositeNames) ? body.compositeNames : [];
+    const composedFrom = meta.composedFrom as { layout?: unknown; sliceBoundaries?: unknown } | undefined;
     const wanted = [
       ...assets.map((asset, index) => ({
-        url: asset.url, name: safeExportName(names[index], `图片_${String(index + 1).padStart(2, "0")}`), detail: false,
+        url: asset.url, name: safeExportName(names[index], `图片_${String(index + 1).padStart(2, "0")}`),
+        detail: composedFrom?.layout === "vertical", sliceBoundaries: storedSliceBoundaries(composedFrom?.sliceBoundaries),
       })),
       ...storedComposites(meta.composites).map((item, index) => ({
-        url: item.url, name: safeExportName(compositeNames[index], `合成_${index + 1}`), detail: item.layout === "vertical",
+        url: item.url, name: safeExportName(compositeNames[index], `合成_${index + 1}`),
+        detail: item.layout === "vertical", sliceBoundaries: item.sliceBoundaries,
       })),
     ];
     // Every file must be this user's own stored output; the URLs in the message are never fetched.
@@ -1176,7 +1257,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       if (!key || !stored || stored.user_id !== userId || !await deps.assets.exists(key)) {
         return c.json({ error: "原图已不存在，无法打包" }, 409);
       }
-      sources.push({ name: item.name, body: await deps.assets.get(key), ext: key.split(".").pop() || "png", detail: item.detail });
+      sources.push({
+        name: item.name, body: await deps.assets.get(key), ext: key.split(".").pop() || "png",
+        detail: item.detail, sliceBoundaries: item.sliceBoundaries,
+      });
     }
     let zip: Buffer;
     try {
@@ -1201,7 +1285,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const userId = c.get("userId");
     const conversationId = c.req.param("id");
     const messageId = c.req.param("messageId");
-    const body = await c.req.json().catch(() => null) as { index?: unknown; missing?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { index?: unknown; missing?: unknown; instruction?: unknown } | null;
     const owner = { conversationId, userId };
 
     const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
@@ -1212,8 +1296,11 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "只有已完成的产品套图和主副图可以重做" }, 409);
     }
     if ((meta.redo as { status?: unknown } | undefined)?.status === "running") return c.json({ error: "这组图正在重做，请稍候" }, 409);
-    const task = typeof meta.taskId === "string" ? await service.db.getTask(meta.taskId) : null;
-    const input = task && task.user_id === userId && task.input && typeof task.input === "object" ? task.input as Record<string, unknown> : null;
+    if (body?.instruction !== undefined && (typeof body.instruction !== "string" || body.instruction.length > 600 || body.missing === true)) {
+      return c.json({ error: "修改要求最多 600 字，仅适用于单张重做" }, 400);
+    }
+    const instruction = typeof body?.instruction === "string" ? body.instruction.trim() : "";
+    const input = (await originalImageTask(service.db, meta, conversationId, messageId, userId))?.input;
     const prompts = Array.isArray(input?.prompts) && input.prompts.every((p) => typeof p === "string" && p)
       ? input.prompts as string[]
       : typeof input?.prompt === "string" && input.prompt ? [input.prompt] : [];
@@ -1252,7 +1339,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         n: 1,
         ...(media.length ? { media } : {}),
         ...(setReference ? { setReference } : {}),
-        prompts: indexes.map((index) => prompts[index]),
+        prompts: indexes.map((index) => instruction
+          ? `${prompts[index]}\n\nRevision request for this image (apply it where it changes the earlier brief):\n${instruction}`
+          : prompts[index]),
         indexes,
         redoMessageId: messageId,
         conversationId,

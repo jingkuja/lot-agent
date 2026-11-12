@@ -15,6 +15,11 @@ function setup() {
       }
       return null;
     }),
+    getGenerationMessage: vi.fn<() => Promise<{ status: string; metadata: Record<string, unknown> } | null>>(async () => null),
+    getTask: vi.fn(async () => null),
+    findOriginalImageTask: vi.fn<() => Promise<{ id: string; input: Record<string, unknown> } | null>>(async () => null),
+    updateGenerationMetadata: vi.fn(async () => true),
+    resetGenerationForRedownload: vi.fn(async () => true),
     getGeneratedByStorageKey: vi.fn(async () => ({ user_id: "owner", mime: "image/png", is_private: true })),
     addMessage: vi.fn(async (id: string, _conversationId: string, _role: string, _content: string, options?: {
       metadata: Record<string, unknown>;
@@ -43,7 +48,7 @@ function setup() {
       media: [{ type: "reference_image", url: "/static/assets/source.png?token=temporary" }],
     }),
   });
-  return { submit, db, enqueue, quota };
+  return { app, submit, db, enqueue, quota };
 }
 
 it("persists the owned source without a temporary token and replays the accepted task", async () => {
@@ -70,4 +75,62 @@ it("allows the draft to be submitted after a quota rejection", async () => {
   expect(db.addMessage).not.toHaveBeenCalled();
   expect((await submit()).status).toBe(202);
   expect(enqueue).toHaveBeenCalledTimes(1);
+});
+
+
+it("regenerates a single image with its frozen prompt and model and replays the same fresh submission", async () => {
+  const { app, db, enqueue } = setup();
+  db.getGenerationMessage.mockResolvedValue({ status: "completed", metadata: {
+    kind: "generation", mediaType: "image", scene: "white_background", status: "completed", prompt: "杯子白底图",
+    assets: [{ url: "/static/assets/original.png" }], taskId: "download-only",
+  } });
+  db.findOriginalImageTask.mockResolvedValue({ id: "original", input: {
+    prompt: "Frozen white-background prompt", scene: "white_background", modelId: "linqu-image", size: "1024x1024", quality: "high",
+  } });
+  const send = () => app.request("/conversations/chat/generations", {
+    method: "POST", body: JSON.stringify({ mediaType: "image", regenerateFrom: "10000000-0000-4000-8000-000000000001", requestId: "regenerate-attempt-1" }),
+  });
+  expect((await send()).status).toBe(202);
+  expect((await send()).status).toBe(202);
+  expect(enqueue).toHaveBeenCalledTimes(1);
+  expect(enqueue).toHaveBeenCalledWith("image.generate", expect.objectContaining({
+    prompt: "Frozen white-background prompt", modelId: "linqu-image", size: "1024x1024", quality: "high", n: 1, fresh: true,
+  }), "owner");
+});
+
+it("redoes the selected slot using original set context after a download-only task", async () => {
+  const { app, db, enqueue } = setup();
+  db.getGenerationMessage.mockResolvedValue({ status: "completed", metadata: {
+    kind: "generation", mediaType: "image", scene: "product_set", status: "completed",
+    assets: [{ url: "/static/assets/main.png" }, { url: "/static/assets/second.png" }], taskId: "download-only",
+  } });
+  db.findOriginalImageTask.mockResolvedValue({ id: "original", input: {
+    prompts: ["Main shot", "Detail shot"], modelId: "linqu-image", size: "1024x1024",
+  } });
+  const res = await app.request("/conversations/chat/generations/original-message/redo", {
+    method: "POST", body: JSON.stringify({ index: 1, instruction: "拍瓶口特写" }),
+  });
+  expect(res.status).toBe(202);
+  expect(enqueue).toHaveBeenCalledWith("image.set_redo", expect.objectContaining({
+    indexes: [1], modelId: "linqu-image", setReference: "/static/assets/main.png",
+    prompts: [expect.stringMatching(/^Detail shot[\s\S]+拍瓶口特写$/)],
+  }), "owner");
+});
+
+
+it("carries the original task and missing count into a download retry", async () => {
+  const { app, db, enqueue } = setup();
+  db.getGenerationMessage.mockResolvedValue({ status: "download_failed", metadata: {
+    kind: "generation", mediaType: "image", scene: "product_set", status: "download_failed", missing: 2,
+    settings: { n: 4 }, taskId: "previous-retry", sourceUrl: "https://images.example/result.png",
+  } });
+  db.findOriginalImageTask.mockResolvedValue({ id: "original", input: { prompts: ["cover", "feature", "scene", "detail"] } });
+  const res = await app.request("/conversations/chat/generations/original-message/redownload", { method: "POST" });
+  expect(res.status).toBe(202);
+  expect(enqueue).toHaveBeenCalledWith("generation.redownload", expect.objectContaining({
+    originalTaskId: "original", missing: 2, n: 4,
+  }), "owner");
+  expect(db.updateMessageGeneration).toHaveBeenCalledWith("original-message", expect.objectContaining({
+    metadata: expect.objectContaining({ originalTaskId: "original", missing: 2 }),
+  }), { conversationId: "chat", userId: "owner" });
 });

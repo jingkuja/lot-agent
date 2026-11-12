@@ -572,6 +572,18 @@ describe("runGenerationJob", () => {
     expect(provider.create).toHaveBeenCalledTimes(1); // still one — second run is a cache hit
   });
 
+  it("a confirmed fresh image request neither reads nor updates the result cache", async () => {
+    const provider: JobGenerationProvider = {
+      create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
+      poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/png;base64,YQ==" })),
+    };
+    const { deps } = fakeDeps(provider);
+    await runGenerationJob(deps, { ...job, input: { ...job.input, fresh: true } }, "image");
+    expect(deps.cache.get).not.toHaveBeenCalled();
+    expect(deps.cache.set).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledTimes(1);
+  });
+
   it("does not leak a cache hit across different users with identical input", async () => {
     const store = new Map<string, unknown>();
     const sharedCache = {

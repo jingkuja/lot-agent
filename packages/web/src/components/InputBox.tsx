@@ -257,7 +257,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const settingsRef = useRef<ImageSettings | VideoSettings | undefined>(
     mode === "image" ? { resolution: DEFAULT_IMAGE_RESOLUTION, ratio: DEFAULT_IMAGE_RATIO, n: 1, quality: DEFAULT_IMAGE_QUALITY } : undefined
   );
-  const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => { settingsRef.current = s; }, []);
+  const [outputCount, setOutputCount] = useState(1);
+  const handleSettingsChange = useCallback((s: ImageSettings | VideoSettings) => {
+    settingsRef.current = s;
+    if ("n" in s) setOutputCount(s.n ?? 1);
+  }, []);
   const pickerSelected = pickerModels.some((m) => m.id === selectedModel)
     ? selectedModel
     : pickerModels[0]?.id ?? (!onModelChange ? selectedModel : null) ?? null;
@@ -716,7 +720,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         <line x1="12" y1="19" x2="12" y2="5" />
         <polyline points="5 12 12 5 19 12" />
       </svg>
-      {sceneTabs && <span>{t(pendingImage ? "核对提交" : "生成图片")}</span>}
+      {sceneTabs && <span>{pendingImage ? t("核对提交") : t("生成 {0} 张图片", [outputCount])}</span>}
     </button>
   ));
 

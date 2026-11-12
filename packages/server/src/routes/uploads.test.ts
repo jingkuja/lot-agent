@@ -54,6 +54,19 @@ describe("POST /uploads", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it("keeps compose uploads private when the file key is configured", async () => {
+    vi.stubEnv("SECRET_MASTER_KEY", "11".repeat(32));
+    try {
+      const service = makeService();
+      const response = await appFor(service).request("/?purpose=image-compose", {
+        method: "POST", headers: { "content-type": "image/png", "x-file-name": "size.png" }, body: "fixture",
+      });
+      expect(response.status).toBe(200);
+      expect(service.created[0]).toMatchObject({ isPrivate: true, userId: "u1", type: "upload" });
+      expect((await response.json() as { url: string }).url).toMatch(/^\/static\/uploads\/[^?]+$/);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("refuses private marketing uploads before writing when signing is unavailable", async () => {
     vi.stubEnv("SECRET_MASTER_KEY", "");
     try {

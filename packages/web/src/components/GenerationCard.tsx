@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/index.js";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { randomId } from "../lib/uuid.js";
 import { api } from "../api/client.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
@@ -9,7 +10,7 @@ import { POSTER_FIELD_LABELS, PosterTextDialog } from "./PosterTextDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
 import {
   COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, EXPORT_PRESETS, imageSetRole, WHITE_BACKGROUND_ISSUES,
-  type ComposeLayout, type ExportPreset, type GenerationComposite, type RedoRequest, type WhiteBackgroundCheck,
+  type ComposeLayout, type ExportPreset, type GenerationComposite, type RedoRequest, type SetRedoRequest, type WhiteBackgroundCheck,
 } from "../lib/image-settings.js";
 import { useConfirm } from "../modules/marketing-video/ConfirmDialog.js";
 
@@ -182,7 +183,7 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
   );
 }
 
-type RedoHandler = (request: RedoRequest) => Promise<string | undefined>;
+type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
 function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext }: {
@@ -199,11 +200,13 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
   const [viewing, setViewing] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [retexting, setRetexting] = useState<number | null>(null);
+  const [redoing, setRedoing] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>();
   const [confirmDialog, confirm] = useConfirm();
   const [composing, setComposing] = useState(false);
-  const missing = generation.missing ?? 0;
+  const missing = generation.missing ?? (imageSetRole(generation.scene, 0)
+    ? Math.max(0, (generation.settings?.n ?? assets.length) - assets.length) : 0);
   const redo = generation.redo;
   const running = redo?.status === "running";
   const labelAt = (index: number) => {
@@ -221,19 +224,16 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
     images.map((image) => image.name.replace(/\.[^.]+$/, "")),
     (generation.composites ?? []).map((item) => compositeLabel(t, item)),
   ));
-  const start = async (request: RedoRequest, count: number) => {
+  const fill = async () => {
     if (!onRedo || starting || running) return;
-    const single = "index" in request;
     const ok = await confirm({
-      title: single ? "重做这张图片" : "补齐缺少的图片",
-      message: single ? "按原来的描述重新生成这一张，扣除 1 张图片的积分。" : "按原来的描述生成缺少的 {0} 张，扣除 {0} 张图片的积分。",
-      values: [count],
-      confirm: single ? "重做" : "补齐",
+      title: "补齐缺少的图片", message: "按原来的描述生成缺少的 {0} 张，扣除 {0} 张图片的积分。",
+      values: [missing], confirm: "补齐",
     });
     if (!ok) return;
     setStarting(true);
     setError(undefined);
-    const failure = await onRedo(request);
+    const failure = await onRedo({ missing: true });
     setStarting(false);
     if (failure) setError(failure);
   };
@@ -244,7 +244,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
         <div className="gen-set-grid">
           {images.map((image, index) => (
             <SetTile key={index} image={image} busy={running && redo.indexes.includes(index)} onOpen={() => setViewing(index)}
-              onEdit={edit && (() => edit(index))} onRedo={canRedo ? () => start({ index }, 1) : undefined}
+              onEdit={edit && (() => edit(index))} onRedo={canRedo ? () => setRedoing(index) : undefined}
               onRetext={onRetext && generation.posters?.[index] ? () => setRetexting(index) : undefined} />
           ))}
           {Array.from({ length: missing }, (_, i) => assets.length + i).map((index) => (
@@ -261,7 +261,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
         <div className="gen-set-fill">
           <p className="gen-card-notice" role="status">{t(generation.notice ?? "套图中有 {0} 张未生成成功", [missing])}</p>
           {canRedo && (
-            <button type="button" className="gen-compose-toggle" onClick={() => start({ missing: true }, missing)}>
+            <button type="button" className="gen-compose-toggle" onClick={() => void fill()}>
               {t("补齐 {0} 张", [missing])}
             </button>
           )}
@@ -281,7 +281,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       {viewing !== null && (
         <ImageViewerDialog images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} onEdit={edit}
           onRetext={onRetext && generation.posters?.[viewing] ? (index) => { setViewing(null); setRetexting(index); } : undefined}
-          onRedo={canRedo ? (index) => { setViewing(null); void start({ index }, 1); } : undefined} />
+          onRedo={canRedo ? (index) => { setViewing(null); setRedoing(index); } : undefined} />
       )}
       {editing !== null && onEdit && (
         <ImageEditDialog imageUrl={assets[editing].url} size={generation.settings?.size}
@@ -290,6 +290,10 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
         <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
           onSubmit={(fields, template) => onRetext(retexting, fields, template)} />
+      )}
+      {redoing !== null && onRedo && assets[redoing] && (
+        <ImageEditDialog redo imageUrl={assets[redoing].url} onClose={() => setRedoing(null)}
+          onSubmit={(instruction) => onRedo({ index: redoing, instruction })} />
       )}
       {confirmDialog}
     </div>
@@ -506,6 +510,29 @@ export function GenerationCard({
   const { t } = useI18n();
   const { mediaType, status, assets, error, taskId } = generation;
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [regenerateDialog, confirmRegenerate] = useConfirm();
+  const [regenerateBusy, setRegenerateBusy] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string>();
+  const regenerateRequest = useRef<string | undefined>(undefined);
+  const regenerate = async () => {
+    if (!messageId || !onRedo || regenerateBusy) return;
+    if (!regenerateRequest.current) {
+      const confirmed = await confirmRegenerate({
+        title: "重新生成图片", message: "沿用原图要求生成一张新图，按 1 张图片计费。", confirm: "重新生成",
+      });
+      if (!confirmed) return;
+      regenerateRequest.current = randomId();
+    }
+    setRegenerateBusy(true);
+    setRegenerateError(undefined);
+    try {
+      const failure = await onRedo(messageId, { regenerate: true, requestId: regenerateRequest.current });
+      if (!failure || failure === "重新生成失败，请查看对话中的提示") regenerateRequest.current = undefined;
+      setRegenerateError(failure);
+    } finally {
+      setRegenerateBusy(false);
+    }
+  };
 
   const retext: RetextHandler | undefined = messageId && onEditPoster
     ? (index, fields, template) => onEditPoster(messageId, index, fields, template) : undefined;
@@ -534,9 +561,19 @@ export function GenerationCard({
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
         {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} />}
         {singleImage && <PosterNotes posters={generation.posters} />}
-        {singleImage && messageId && onExport && (
-          <ExportMenu onExport={(preset) => onExport(messageId, preset, [`${SINGLE_EXPORT_NAMES[generation.scene ?? ""] ?? "生成结果"}_01`], [])} />
+        {singleImage && messageId && (
+          <div className="gen-single-actions">
+            {onRedo && taskId && <button type="button" className="gen-compose-toggle" disabled={regenerateBusy}
+              onClick={() => void regenerate()}>
+              {t(regenerateBusy ? "正在提交…" : regenerateRequest.current ? "核对提交" : "重新生成")}
+            </button>}
+            {onExport && <ExportMenu onExport={(preset) => onExport(
+              messageId, preset, [`${SINGLE_EXPORT_NAMES[generation.scene ?? ""] ?? "生成结果"}_01`], [],
+            )} />}
+          </div>
         )}
+        {regenerateError && <p className="gen-compose-error" role="alert">{t(regenerateError)}</p>}
+        {regenerateDialog}
       </>
     );
   }

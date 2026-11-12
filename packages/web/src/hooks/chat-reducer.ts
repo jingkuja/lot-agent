@@ -143,6 +143,7 @@ export type ChatAction =
       type: "generation_ids_reconciled";
       tempUserId: string;
       userMessageId: string;
+      userContent?: string;
       imageInput?: DisplayMessage["imageInput"];
       tempGenId: string;
       assistantMessageId: string;
@@ -259,7 +260,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: state.messages.map((m) => {
           if (m.id === action.tempUserId)
             return {
-              ...m, id: action.userMessageId, dbId: action.userMessageId, imageInput: action.imageInput ?? m.imageInput,
+              ...m, id: action.userMessageId, dbId: action.userMessageId,
+              content: action.userContent ?? m.content, imageInput: action.imageInput ?? m.imageInput,
             };
           if (m.id === action.tempGenId)
             return {

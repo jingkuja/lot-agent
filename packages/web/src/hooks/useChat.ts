@@ -522,7 +522,7 @@ export function useChat(
     // image being edited), sent as reference images without a re-upload.
     async (
       prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [],
-      modelId?: string, references: string[] = [], requestId?: string,
+      modelId?: string, references: string[] = [], requestId?: string, regenerateFrom?: string,
     ): Promise<"accepted" | "rejected" | "unknown"> => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || state.isStreaming) return "rejected";
@@ -592,7 +592,7 @@ export function useChat(
           last_frame: lastFrame,
           model: modelId,
           // Settings stay whitelisted on the server; the scene travels on its own.
-          scene, requestId,
+          scene, requestId, regenerateFrom,
           ...(scene === "poster_remix" ? { posterReference } : {}),
           ...(realText === true ? { realText: true } : {}),
         }, token.submission?.signal);
@@ -603,6 +603,7 @@ export function useChat(
           type: "generation_ids_reconciled",
           tempUserId,
           userMessageId: res.userMessage.id,
+          userContent: typeof res.userMessage.content === "string" ? res.userMessage.content : undefined,
           imageInput: res.userMessage.metadata?.imageInput,
           tempGenId,
           assistantMessageId: res.assistantMessage.id,
@@ -612,6 +613,7 @@ export function useChat(
             progress: 0,
             supportsProgress: res.assistantMessage.metadata?.supportsProgress,
             taskId: res.taskId,
+            scene: sceneOf(res.assistantMessage.metadata),
             // The server's finalized settings; the reducer keeps the sent ones if absent.
             settings: mediaType === "image" ? generationSettings(res.assistantMessage.metadata?.settings) : undefined,
           },
@@ -722,6 +724,13 @@ export function useChat(
   const redoGenerationImages = useCallback(async (messageId: string, request: RedoRequest): Promise<string | undefined> => {
     const cid = cidRef.current;
     if (!cid) return "重做失败，请稍后重试";
+    if ("regenerate" in request) {
+      if (state.isStreaming) return "当前有任务正在进行，请完成后再重新生成";
+      const label = translateRef.current("重新生成图片");
+      const result = await generateMedia(label, "image", undefined, [], undefined, [], request.requestId, messageId);
+      if (result === "accepted") return undefined;
+      return result === "unknown" ? "图片提交结果待确认，请稍后核对" : "重新生成失败，请查看对话中的提示";
+    }
     try {
       const { taskId, redo } = await api.redoGeneration(cid, messageId, request);
       if (cidRef.current === cid) dispatch({ type: "generation_redo_changed", messageId, redo });
@@ -730,7 +739,7 @@ export function useChat(
     } catch (e) {
       return e instanceof ApiClientError && e.message ? e.message : "重做失败，请稍后重试";
     }
-  }, [pollRedo]);
+  }, [generateMedia, pollRedo, state.isStreaming]);
 
   // 打包下载: the server zips (and resizes) the set; the browser saves it. Resolves to an error text to show.
   const exportGeneration = useCallback(async (

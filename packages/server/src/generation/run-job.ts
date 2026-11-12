@@ -196,6 +196,8 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
     // 真实字体: the planned wording stays on the message through every status, so a download retry can still typeset it.
     ...(parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
     taskId: job.id,
+    ...(typeof input.originalTaskId === "string" ? { originalTaskId: input.originalTaskId } : {}),
+    ...(typeof input.missing === "number" && input.missing > 0 ? { missing: input.missing } : {}),
     settings: {
       size: input.size,
       n: input.n,
@@ -401,11 +403,12 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
 
   try {
     await assertNotCancelled();
-    const cacheKey = genCacheKey(`${mediaType}.generate`, {
+    const cacheKey = mediaType === "image" && input.fresh === true ? null : genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
       prompt, ...(setPrompts ? { prompts: setPrompts } : {}),
       // The same picture prompt with other wording is another poster.
       ...(mediaType === "image" && parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
+      ...(mediaType === "image" && input.scene ? { scene: input.scene } : {}),
       ...(posterRemix ? { posterReference: input.posterReference } : {}),
       size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
@@ -418,7 +421,7 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
       last_frame: lastFrame,
       media: media?.map((m) => m.url), model: deps.vendorModel,
     });
-    const cached = await deps.cache.get(cacheKey) as GenOut | null;
+    const cached = cacheKey ? await deps.cache.get(cacheKey) as GenOut | null : null;
     const cachedAssets = cached ? await Promise.all(cached.assetIds.map((id) => deps.db.getAsset(id))) : [];
     if (cached && cachedAssets.length > 0 && cachedAssets.every((asset) => asset?.user_id === job.userId)) {
       await setMsg("completed", {
@@ -798,5 +801,6 @@ export async function redownloadGenerationJob(deps: RunJobDeps, job: JobLike, me
     await setMsg("cancelled", {});
     throw new JobCancelledError();
   }
-  return await downloadAndFinalize(deps, job, mediaType, sourceUrls, null, setMsg);
+  const output = await downloadAndFinalize(deps, job, mediaType, sourceUrls, null, setMsg);
+  return typeof input.missing === "number" && input.missing > 0 ? { ...output, missing: input.missing } : output;
 }
