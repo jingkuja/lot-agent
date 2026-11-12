@@ -63,7 +63,7 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
   id: string; ownerId: string; onActive(value: boolean): void; onComplete(value: ReferenceAnalysis): Promise<void>;
   completedAction?: ReactNode; disabled?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const callbacks = useRef({ onActive, onComplete }); callbacks.current = { onActive, onComplete };
   const [current, setCurrent] = useState<ReferenceAnalysis | null>(null);
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
@@ -140,10 +140,10 @@ export function ReferenceAnalysisPanel({ id, ownerId, onActive, onComplete, comp
       started={Date.parse(current.submittedAt ?? current.createdAt)} expectedSec={EXPECTED_SEC}
       note="视频拆解和文案生成在后台进行，一般约 5 分钟，最长 15 分钟。可以离开或刷新此页面，完成后会自动显示结果，无需重复提交。" />}
     {current && active(current) && <button disabled={busy} onClick={() => void act(() => request(`${base}/${id}/cancel`, json({})))}>{t("取消")}</button>}
-    {speech?.status === "skipped" && <p className="mv-hint" role="status">{t(speech.reason === "ASR_MODEL_UNAVAILABLE"
-      ? "当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。"
-      : speech.reason === "SOURCE_EXPIRED" ? "原视频已过期，按你的选择仅使用保留的画面和文字继续。"
-      : "已下载的视频文件没有可用音轨，无法确认原视频是否有声音；已跳过语音转写。")}</p>}
+    {speech?.status === "skipped" && <p className="mv-hint" role="status">{speech.reason === "ASR_MODEL_UNAVAILABLE"
+      ? t("当前账号未提供 {0} 模型，已跳过视频语音转写，继续分析画面和文字。", [modelName("qwen-audio-3.1-asr-flash")])
+      : t(speech.reason === "SOURCE_EXPIRED" ? "原视频已过期，按你的选择仅使用保留的画面和文字继续。"
+        : "已下载的视频文件没有可用音轨，无法确认原视频是否有声音；已跳过语音转写。")}</p>}
     {speech?.status === "completed" && !hasSpeech && <p className="mv-hint" role="status">{t("转写未识别到语音内容，不代表原视频没有声音。")}</p>}
     {current?.errorCode && <p className="mv-error" role="alert">{t(analysisError(new Error(current.errorCode)))}</p>}
     {current?.status === "cancelled" && <p>{t("已取消")}</p>}

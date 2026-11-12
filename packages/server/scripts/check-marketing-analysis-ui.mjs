@@ -250,7 +250,7 @@ try {
   await page.getByRole("button", { name: "上一步", exact: true }).click();
   assert.equal(await page.getByRole("radio").count(), 2);
   assert(!/预算|已记录费用|选用预览|生成当前修订摘要/.test(await page.locator("body").innerText()));
-  await page.getByText("当前账号未提供 qwen-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
+  await page.getByText("当前账号未提供 linqu-audio-3.1-asr-flash 模型，已跳过视频语音转写，继续分析画面和文字。", { exact: true }).waitFor();
   assert.equal(await page.locator(".ma-panel > details.mv-script-review").evaluate(el => el.open), false);
   await page.getByText("已完成，部分抽帧未能识别，具体情况可在下方「查看参考资料」中查看。", { exact: true }).waitFor();
   assert.equal(await page.getByText("未识别画面文字的采样帧 (1)：f0001 · 0.0s", { exact: true }).isVisible(), false, "frame gaps stay inside source material");
@@ -321,7 +321,7 @@ try {
   assert.equal(await page.locator(".mv-studio").count(), 1);
   await page.getByText("Video speech transcript", { exact: true }).waitFor();
   value.snapshot.speech = { status: "skipped", reason: "ASR_MODEL_UNAVAILABLE" }; await page.reload();
-  await page.getByText("qwen-audio-3.1-asr-flash is unavailable for this account. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
+  await page.getByText("linqu-audio-3.1-asr-flash is unavailable for this account. Speech transcription was skipped; image and text analysis will continue.", { exact: true }).waitFor();
   value.snapshot.speech = { status: "skipped", reason: "NO_AUDIO_TRACK" }; await page.reload();
   await page.getByText("The downloaded file has no usable audio track. This does not confirm whether the original video has sound; transcription was skipped.", { exact: true }).waitFor();
   value.snapshot.speech = { status: "completed", id: "a0001", model: "qwen-audio-3.1-asr-flash", text: "" }; await page.reload();

@@ -60,7 +60,7 @@ function ModelSelect({
   emptyLabel: string;
   onChange: (id: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const empty = models.length === 0;
   return <label>
     <span>{t(label)}</span>
@@ -71,7 +71,7 @@ function ModelSelect({
       onChange={(event) => onChange(event.target.value)}
     >
       {empty ? <option value="">{t(emptyLabel)}</option> : models.map((model) => (
-        <option key={model.id} value={model.id}>{t(model.label || model.id)}</option>
+        <option key={model.id} value={model.id}>{t(modelName(model.label || model.id))}</option>
       ))}
     </select>
   </label>;

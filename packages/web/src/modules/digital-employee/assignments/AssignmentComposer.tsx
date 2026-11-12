@@ -11,7 +11,7 @@ const MODES: Array<Assignment["mode"]> = ["autonomous", "responsive"];
 
 /** One sentence is enough. Everything else stays folded away and has a default. */
 export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: ModelCatalog; onCreated: () => void }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState<Assignment["mode"]>("autonomous");
   const [files, setFiles] = useState<UploadedAttachment[]>([]);
@@ -100,7 +100,7 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
           <span>{t("模型")}</span>
           <select value={modelId} onChange={(event) => setModelId(event.target.value)}>
             <option value="">{t("默认")}</option>
-            {modelCatalog.llm.map((model) => <option key={model.id} value={model.id}>{model.id}</option>)}
+            {modelCatalog.llm.map((model) => <option key={model.id} value={model.id}>{modelName(model.id)}</option>)}
           </select>
         </label>
         <label>

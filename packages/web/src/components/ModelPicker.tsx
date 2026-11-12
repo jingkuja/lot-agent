@@ -35,7 +35,7 @@ export function ModelPicker({
   disabled?: boolean;
   emptyLabel?: string;
 }) {
-  const { t } = useI18n();
+  const { t, enabled, modelName } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [popupStyle, setPopupStyle] = useState<CSSProperties>();
@@ -80,8 +80,8 @@ export function ModelPicker({
 
   const isEmpty = models.length === 0;
   const currentModel = (!isEmpty && value && models.find((m) => m.id === value)) || models[0];
-  const current = isEmpty ? "暂无模型" : (currentModel?.label ?? currentModel?.id ?? "选择模型");
-  const filtered = filterModels(models, query);
+  const current = currentModel ? modelName(currentModel.label ?? currentModel.id) : "暂无模型";
+  const filtered = filterModels(models, query, enabled);
   const showSearch = models.length > 2;
 
   return (
@@ -128,7 +128,7 @@ export function ModelPicker({
                       setOpen(false);
                     }}
                   >
-                    <span className="model-row-name">{m.label ?? m.id}</span>
+                    <span className="model-row-name">{modelName(m.label ?? m.id)}</span>
                     {m.description && <span className="model-row-desc">{m.description}</span>}
                   </button>
                 ))}

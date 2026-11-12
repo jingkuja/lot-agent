@@ -61,7 +61,7 @@ function PrivacyPolicy() {
 }
 
 function ServiceTerms() {
-  const { t, enabled: international } = useI18n();
+  const { t, enabled: international, modelName } = useI18n();
   return (
     <>
       <p>{t("欢迎使用灵渠claw。登录、访问或使用本服务，即表示你已阅读并同意本协议。")}</p>
@@ -71,7 +71,8 @@ function ServiceTerms() {
       <h3>{t("二、账号范围")}</h3>
       <p>{t("灵渠claw内的服务、配置、文件、知识库、用量及权益仅限当前登录账号使用。其他账号不能继承、共享或自动获得当前灵渠AI账号已有的服务与权益。你应妥善保管账号凭证，并对账号下的操作负责。")}</p>
       <h3>{t("三、知识库的额度使用")}</h3>
-      <p>{t("灵渠AI知识库按向量模型的标准定价收费。涉及图片和 PDF 扫描件的处理时，将使用多模态模型 DeepSeek V4.1 Flash，相关费用按实际使用的 Token 数量结算。")}</p>
+      <p>{t("灵渠AI知识库按向量模型的标准定价收费。涉及图片和 PDF 扫描件的处理时，将使用多模态模型 {0}，相关费用按实际使用的 Token 数量结算。",
+        [international ? modelName("deepseek-v4.1-flash") : "DeepSeek V4.1 Flash"])}</p>
       <h3>{t("四、合理使用")}</h3>
       <p>{t("你不得利用服务生成、上传或传播违法侵权内容，不得绕过安全限制、干扰系统运行、盗用他人账号或实施其他可能损害平台及第三方权益的行为。你应对输入内容及AI输出的最终使用承担责任。")}</p>
       <h3>{t("五、AI输出说明")}</h3>

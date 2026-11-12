@@ -4,7 +4,7 @@ import { twinVoiceApi, type TwinVoice } from "./api.js";
 
 /** `onReady` reports whether the cloned voice can synthesize now. */
 export function VoiceEnrollment({ itemId, revisionId, initialError, onReady }: { itemId: string; revisionId: string; initialError?: string; onReady?: (ready: boolean) => void }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const [voice, setVoice] = useState<TwinVoice | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -34,7 +34,7 @@ export function VoiceEnrollment({ itemId, revisionId, initialError, onReady }: {
   return <div className="twin-voice-enrollment">
     <p role="status">{t(status)}</p>
     {voice?.status === "unknown" && <small>{t("若千问未生成音色，约 2 分钟后刷新即可重新复刻")}</small>}
-    {voice?.voiceId && <><small>{t("音色 ID")}: {voice.voiceId}</small><small>{t("语音模型")}: {voice.targetModel}</small></>}
+    {voice?.voiceId && <><small>{t("音色 ID")}: {voice.voiceId}</small><small>{t("语音模型")}: {modelName(voice.targetModel)}</small></>}
     <div className="twin-actions">
       {(!voice || voice.status === "unknown" || voice.status === "DEPLOYING") && <button type="button" disabled={busy || loadFailed} onClick={() => void enroll()}>{busy ? t("正在处理素材…") : t(voice ? "刷新音色状态" : "复刻声音")}</button>}
       {loadFailed && <button type="button" disabled={busy} onClick={() => setRefresh(n => n + 1)}>{t("重试")}</button>}

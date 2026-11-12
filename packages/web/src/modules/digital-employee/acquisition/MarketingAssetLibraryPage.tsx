@@ -172,7 +172,7 @@ function AssetContentDetail({ asset, onClose, onManage, onReuse }: {
   onManage: () => void;
   onReuse: () => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale, modelName } = useI18n();
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const text = asset.assetType === "text" ? asset.content : "";
   const copy = async () => {
@@ -207,7 +207,7 @@ function AssetContentDetail({ asset, onClose, onManage, onReuse }: {
           <p className="de-deployment-empty">{t("内容尚未生成完成，或文件不可用。")}</p>
         )}
         <div className="de-asset-content-meta">
-          <span>{t("模型")}{asset.modelId || "—"}</span>
+          <span>{t("模型")}{asset.modelId ? modelName(asset.modelId) : "—"}</span>
           <span>{t("状态")}{t(generationStateLabel(asset.generationStatus))}</span>
           <span>{t("创建于")}{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(asset.createdAt))}</span>
         </div>

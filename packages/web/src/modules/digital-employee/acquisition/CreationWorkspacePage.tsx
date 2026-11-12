@@ -34,7 +34,7 @@ const ACQUISITION_VIDEO_DURATIONS = ["10秒", "15秒"] as const;
 export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOpenCampaigns, onOpenMarketingMaterials }: {
   seed?: CreationSeed; onOpenAssets: () => void; onOpenSegments: () => void; onOpenCampaigns?: () => void; onOpenMarketingMaterials?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const [segments, setSegments] = useState<CustomerSegment[]>([]);
   const [products, setProducts] = useState<MarketingProduct[]>([]);
   const [campaigns, setCampaigns] = useState<MarketingCampaignSummary[]>([]);
@@ -205,7 +205,22 @@ export function CreationWorkspacePage({ seed, onOpenAssets, onOpenSegments, onOp
         <section className="de-creation-block"><header><span>1</span><div><h3>{t("选择或创建营销活动")}</h3><p>{t("已有活动用于追加素材；空白则在首次生成时创建。")}</p></div></header>
           <div className="de-brief-grid"><label><span>{t("营销活动")}</span><select value={campaignId} onChange={(event) => void pickCampaign(event.target.value)}><option value="">{t("新建本次活动")}</option>{campaigns.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.assetCount} {t("项素材）")}</option>)}</select></label><label><span>{t("活动名称")}</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("系统可按产品自动生成")} /></label></div>
         </section>
-        <section className="de-creation-block"><header><span>2</span><div><h3>{t("选择内容形式")}</h3><p>{t("同一活动可分别生成文案、海报和视频。")}</p></div></header><div className="de-content-type-picker"><button className={assetType === "copy" ? "active" : ""} onClick={() => setAssetType("copy")}><b>{t("文")}</b><strong>{t("营销文案")}</strong><small>{t("知识库 / 上传文件")}</small></button><button className={assetType === "poster" ? "active" : ""} onClick={() => setAssetType("poster")}><b>{t("图")}</b><strong>{t("活动海报")}</strong><small>{imageModelLabel ? t(imageModelLabel) : t("需选择图像模型")}</small></button><button className={assetType === "video" ? "active" : ""} onClick={() => setAssetType("video")}><b>{t("影")}</b><strong>{t("营销视频")}</strong><small>{videoModelId || t("需选择视频模型")}</small></button></div></section>
+        <section className="de-creation-block">
+          <header><span>2</span><div><h3>{t("选择内容形式")}</h3><p>{t("同一活动可分别生成文案、海报和视频。")}</p></div></header>
+          <div className="de-content-type-picker">
+            <button className={assetType === "copy" ? "active" : ""} onClick={() => setAssetType("copy")}>
+              <b>{t("文")}</b><strong>{t("营销文案")}</strong><small>{t("知识库 / 上传文件")}</small>
+            </button>
+            <button className={assetType === "poster" ? "active" : ""} onClick={() => setAssetType("poster")}>
+              <b>{t("图")}</b><strong>{t("活动海报")}</strong>
+              <small>{imageModelLabel ? t(modelName(imageModelLabel)) : t("需选择图像模型")}</small>
+            </button>
+            <button className={assetType === "video" ? "active" : ""} onClick={() => setAssetType("video")}>
+              <b>{t("影")}</b><strong>{t("营销视频")}</strong>
+              <small>{videoModelId ? modelName(videoModelId) : t("需选择视频模型")}</small>
+            </button>
+          </div>
+        </section>
         <section className="de-creation-block"><header><span>3</span><div><h3>{t("确认客群与产品")}</h3><p>{t("已有活动沿用当时固定的客群快照。")}</p></div></header><div className="de-brief-grid"><label><span>{t("已保存客群")}</span><select value={segmentId} disabled={Boolean(campaignId)} onChange={(event) => { setSegmentId(event.target.value); if (event.target.value) setPublicAudience(""); }}><option value="">{t("明确的公开受众")}</option>{segments.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.latestSnapshot?.metrics.totalProfiles ?? 0}{t("人）")}</option>)}</select></label>{!segmentId && !campaignId && <label><span>{t("公开受众描述")}</span><input value={publicAudience} onChange={(event) => setPublicAudience(event.target.value)} placeholder={t("例如：关注边缘算力部署的制造业管理者")} /></label>}<label><span>{t("产品资料")}</span><select value={productId} disabled={Boolean(campaignId)} onChange={(event) => setProductId(event.target.value)}><option value="">{t("请选择")}</option>{products.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label><span>{t("活动目标")}</span><input value={objective} onChange={(event) => setObjective(event.target.value)} /></label><label><span>{t("行动号召")}</span><input value={callToAction} onChange={(event) => setCallToAction(event.target.value)} /></label></div>{segments.length === 0 && <button type="button" className="de-inline-link" onClick={onOpenSegments}>{t("还没有客群？先去建立动态客群 →")}</button>}{products.length === 0 && onOpenMarketingMaterials && <button type="button" className="de-inline-link" onClick={onOpenMarketingMaterials}>{t("请先维护营销产品资料 →")}</button>}</section>
         <section className="de-creation-block"><header><span>4</span><div><h3>{t("渠道与创作要求")}</h3><p>{t("内容不会自动发布；投放后需在资产库明确记录。")}</p></div></header>
           <div className="de-channel-picker">{CHANNELS.map((channel) => <button key={t(channel)} className={channels.includes(channel) ? "active" : ""} onClick={() => toggleChannel(channel)}>{channels.includes(channel) ? "✓ " : ""}{t(channel)}</button>)}</div>
@@ -309,14 +324,14 @@ function CampaignPack({ campaign, focusId, onSelect, onOpenAssets }: {
 }
 
 function CreationResult({ asset, onOpenAssets, compact }: { asset: MarketingAsset; onOpenAssets: () => void; compact?: boolean }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   if (["pending", "running"].includes(asset.generationStatus)) return <div className="de-canvas-generating"><span>◌</span><strong>{t("正在生成")}{asset.assetType === "video" ? t("视频") : asset.assetType === "text" ? t("文案") : t("海报")}</strong><p>{t("任务已保存到当前活动。")}</p></div>;
   if (["failed", "cancelled"].includes(asset.generationStatus)) return <div className="de-canvas-generating failed"><span>!</span><strong>{t("生成未完成")}</strong><p>{t("请检查模型配置后重新生成。")}</p></div>;
   return <div className={`de-canvas-result${compact ? " compact" : " emphasized"}`}>
     {!compact && <div className="de-canvas-result-banner"><strong>{asset.assetType === "text" ? t("文案已生成") : asset.assetType === "video" ? t("视频已生成") : t("海报已生成")}</strong><span>{asset.title}</span></div>}
     <AssetReviewNotice flags={asset.reviewFlags} />
     {asset.assetType === "text" ? <pre>{asset.content}</pre> : asset.assetType === "video" && asset.fileUrl ? <video src={asset.fileUrl} controls /> : asset.fileUrl ? <img src={asset.fileUrl} alt={asset.title} /> : null}
-    <div><span>{t("模型")}{asset.modelId} · v{asset.version}</span><span>{t("客群内容 · 不含单客身份")}</span></div>
+    <div><span>{t("模型")}{asset.modelId && modelName(asset.modelId)} · v{asset.version}</span><span>{t("客群内容 · 不含单客身份")}</span></div>
     {!compact && <footer>{asset.fileUrl && <a className="de-secondary-button" href={asset.fileUrl} download>{t("下载文件")}</a>}<button className="de-primary-button" onClick={onOpenAssets}>{t("前往资产库管理投放")}</button></footer>}
   </div>;
 }

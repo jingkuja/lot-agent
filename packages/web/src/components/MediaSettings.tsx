@@ -198,7 +198,7 @@ export function ImageSettingsPicker({
   showSummary?: boolean;
   onChange?: (s: ImageSettings) => void;
 }) {
-  const { t } = useI18n();
+  const { t, modelName } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapRef = useDismiss(open, () => setOpen(false));
   const [counts, setCounts] = useState(() => ({ ...lastImage.counts }));
@@ -333,6 +333,7 @@ export function ImageSettingsPicker({
                 <div className="image-model-grid">
                   {modelOptions.map((model) => {
                     const description = imageModelDescription(model.id) ?? model.description;
+                    const name = t(modelName(model.label ?? model.id));
                     const featured = isLingquImage(model.id) ? " image-model-card--featured" : "";
                     return (
                       <button
@@ -341,10 +342,10 @@ export function ImageSettingsPicker({
                         className={`image-model-card${featured}${model.id === selectedModel ? " active" : ""}`}
                         onClick={() => onModelChange(model.id)}
                         aria-pressed={model.id === selectedModel}
-                        aria-label={t(model.label ?? model.id)}
+                        aria-label={name}
                         title={description ? t(description) : undefined}
                       >
-                        <span>{t(model.label ?? model.id)}</span>
+                        <span>{name}</span>
                         {description && <small>{t(description)}</small>}
                       </button>
                     );

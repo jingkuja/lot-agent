@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api/client.js";
+import { modelDisplayName } from "../lib/model-filter.js";
 import { LOCALE_STORAGE_KEY, isInternational, resolveLocale, translate, type Locale } from "./locale.js";
 
 const LanguageContext = createContext({
@@ -47,7 +48,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 export function useI18n() {
   const context = useContext(LanguageContext);
   const t = useCallback(<T,>(source: T, values?: readonly unknown[]) => translate(source, context.locale, values), [context.locale]);
-  return { ...context, t };
+  const modelName = useCallback((name: string) => modelDisplayName(name, context.enabled), [context.enabled]);
+  return { ...context, t, modelName };
 }
 
 /** A native select remains keyboard-accessible in web and Electron. */

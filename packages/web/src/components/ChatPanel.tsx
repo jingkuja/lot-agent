@@ -126,12 +126,12 @@ function InputBranding() {
 }
 
 function Seedance25Hint() {
-  const { t } = useI18n();
+  const { t, enabled, modelName } = useI18n();
   return (
     <div className="input-seedance-hint" role="note">
       <span className="input-seedance-hint-icon" aria-hidden>⚠</span>
       <div className="input-seedance-hint-body">
-        <strong>Seedance 2.5</strong>
+        <strong>{enabled ? modelName("doubao-seedance-2-5") : "Seedance 2.5"}</strong>
         <ul>
           <li>
             {t("使用参考图 / 参考视频 / 参考音频时，提示词必须按上传顺序显式写出")}{" "}

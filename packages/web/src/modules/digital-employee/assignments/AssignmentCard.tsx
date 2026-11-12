@@ -23,7 +23,7 @@ function oneLine(item: Assignment, t: (text: string, args?: unknown[]) => string
 }
 
 export function AssignmentCard({ item, showDate, busy, onOpen, onAction }: AssignmentCardProps) {
-  const { t, locale } = useI18n();
+  const { t, locale, modelName } = useI18n();
   const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", ...(showDate ? { month: "numeric", day: "numeric" } : {}) }).format(new Date(item.createdAt));
   const paused = item.pausedReason !== null;
   return <article className="de-assignment-card">
@@ -38,7 +38,7 @@ export function AssignmentCard({ item, showDate, busy, onOpen, onAction }: Assig
         <span>{t(MODE_LABELS[item.mode])}</span>
         {item.subtasks.total > 0 && <span>{t("子任务 {0}/{1}", [item.subtasks.done, item.subtasks.total])}</span>}
         <span>{t("约 {0} 积分", [formatPoints(item.creditsUsed)])}</span>
-        <span>{item.modelId}</span>
+        <span>{modelName(item.modelId)}</span>
       </small>
     </button>
     {(paused || item.status === "failed" || isOpen(item)) && <footer>

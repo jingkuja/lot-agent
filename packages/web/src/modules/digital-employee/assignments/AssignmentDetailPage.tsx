@@ -39,7 +39,7 @@ function Artifact({ artifact, onOpenLink }: { artifact: AssignmentDetail["artifa
 
 /** The result first, then the decisions the employee took for the owner, then how it got there. */
 export function AssignmentDetailPage({ id, employeeName, onBack, onOpenLink }: DetailProps) {
-  const { t, locale } = useI18n();
+  const { t, locale, modelName } = useI18n();
   const labels = useEmployeeLabels(employeeName);
   const [item, setItem] = useState<AssignmentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export function AssignmentDetailPage({ id, employeeName, onBack, onOpenLink }: D
           <em className={`de-assignment-status is-${statusTone(item)}`}>{t(statusLabel(item))}</em>
           <small>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</small>
           <small>{t(MODE_LABELS[item.mode])}</small>
-          <small>{item.modelId}</small>
+          <small>{modelName(item.modelId)}</small>
           <small>{t("约 {0} 积分", [formatPoints(item.creditsUsed)])}</small>
           {item.creditLimit !== null && <small>{t("上限 {0} 积分", [formatPoints(item.creditLimit)])}</small>}
           {item.subtaskLimit !== null && <small>{t("最多 {0} 个子任务", [item.subtaskLimit])}</small>}

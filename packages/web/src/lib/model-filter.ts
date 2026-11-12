@@ -126,11 +126,16 @@ export function missingSeedanceMentions(
   return missing;
 }
 
-/** Case-insensitive substring quick-filter over model id (and label if given). */
-export function filterModels(models: CatalogModel[], query: string): CatalogModel[] {
+export function modelDisplayName(name: string, international: boolean): string {
+  return international ? name.replace(/^[a-z][\w.]*-/i, "linqu-") : name;
+}
+
+/** Case-insensitive substring quick-filter over the id, label and displayed name. */
+export function filterModels(models: CatalogModel[], query: string, international = false): CatalogModel[] {
   const q = query.trim().toLowerCase();
   if (!q) return models;
   return models.filter(
     (m) => m.id.toLowerCase().includes(q) || (m.label?.toLowerCase().includes(q) ?? false)
+      || modelDisplayName(m.label ?? m.id, international).toLowerCase().includes(q)
   );
 }
