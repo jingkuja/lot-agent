@@ -1,6 +1,6 @@
 import type { PptLayout, PptSlide } from "../renderer.js";
 import type { BuildCtx, PptxSlide } from "./ctx.js";
-import { buildCover } from "./cover.js";
+import { buildClosing, buildCover } from "./cover.js";
 import { buildSection } from "./section.js";
 import { buildContent } from "./content.js";
 import { buildAgenda } from "./agenda.js";
@@ -9,8 +9,8 @@ import { buildStats } from "./stats.js";
 import { buildCompare } from "./compare.js";
 import { buildTimeline } from "./timeline.js";
 import { buildQuote } from "./quote.js";
-import { buildClosing } from "./closing.js";
 import { buildChart } from "./chart.js";
+import { buildTable } from "./table.js";
 
 type Builder = (slide: PptxSlide, s: PptSlide, ctx: BuildCtx) => void;
 
@@ -26,4 +26,5 @@ export const BUILDERS: Record<PptLayout, Builder> = {
   quote: buildQuote,
   closing: buildClosing,
   chart: buildChart,
+  table: buildTable,
 };

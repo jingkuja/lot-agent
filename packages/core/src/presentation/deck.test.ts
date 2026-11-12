@@ -32,6 +32,16 @@ describe("presentation contract", () => {
     expect(inspectDeck(repeated).some(w => w.code === "repeated-title")).toBe(true);
     expect(inspectDeck(repeated).some(w => w.code === "layout-rhythm")).toBe(true);
   });
+  it("validates native table rows and limits the chart takeaway panel", () => {
+    const table = { columns: ["项目", "数值"], rows: [["a", ""], ["b", "12"]] };
+    const slide = { layout: "table", title: "明细", table };
+    expect(validateSlides([slide])).toBeNull();
+    expect(validateSlides([{ ...slide, table: { ...table, rows: [["a"]] } }])).toContain("rows[1]");
+    expect(validateSlides([{ ...slide, table: { ...table, rows: [["a", 0]] } }])).toContain("rows[1][2]");
+    const chart = { type: "bar", categories: ["Q1", "Q2"], series: [{ name: "收入", values: [0, 12] }], unit: "万元", source: "季度报表" };
+    expect(validateSlides([{ layout: "chart", title: "收入", chart, bullets: ["第二季度增长"] }])).toBeNull();
+    expect(validateSlides([{ layout: "chart", title: "收入", chart, bullets: ["一", "二", "三", "四"] }])).toContain("bullets");
+  });
   it("does not silently ignore incompatible layout fields or relabel partial previews", () => {
     expect(validateSlides([{ layout: "content", title: "T", bullets: ["A"], items: [{ label: "must not vanish" }] }])).toContain("items");
     expect(validateSlides([{ layout: "quote", quote: { text: "valid text" } }])).toContain("title");

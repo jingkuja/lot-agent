@@ -22,6 +22,13 @@ describe("structured PPT confirmation in the chat flow", () => {
     expect(h.messageRepo.loadHistory).not.toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({ type: "done", totalTokens: 0 });
   });
+  it("skips the conversation title model for an export action", async () => {
+    const h = harness();
+    const getConversation = vi.fn();
+    Object.assign(h.service, { db: { getConversation } });
+    await expect(h.service.generateTitle("chat", encodePptApproval(deck))).resolves.toBeNull();
+    expect(getConversation).not.toHaveBeenCalled();
+  });
   it("rejects malformed confirmations instead of treating them as generative prompts", async () => {
     const h = harness();
     await expect(async () => { for await (const _ of h.service.streamAgentResponse("chat", PPT_APPROVAL_PREFIX + "{}", "ppt", "owner")) { /* drain */ } }).rejects.toThrow();

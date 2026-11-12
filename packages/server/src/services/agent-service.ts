@@ -812,6 +812,7 @@ export class AgentService {
     attachments?: AttachmentRef[],
     opts?: { userId?: string; modelId?: string; agentId?: string }
   ): Promise<string | null> {
+    if (userMessage.startsWith(PPT_APPROVAL_PREFIX)) return null;
     try {
       const conversation = await this.db.getConversation(conversationId);
       // Only (re)title conversations still on a default placeholder title.
@@ -913,6 +914,11 @@ export class AgentService {
         this.agentRegistry.get(agentId ?? "general") ??
         this.agentRegistry.get("general")!;
 
+      if (this.runRepository && !opts?.runId) {
+        ownsLease = await this.db.claimConversationRun(conversationId, runId, this.agentConfig.maxRunTimeMs ?? 1_800_000);
+        if (!ownsLease) throw new Error("Conversation already has an active run");
+      }
+
       // Structured UI confirmation carries the exact reviewed slide data. Keep
       // the existing authenticated chat endpoint, lease, cancellation and history,
       // but bypass model rewriting and billing for deterministic local export.
@@ -929,10 +935,6 @@ export class AgentService {
         return;
       }
 
-      if (this.runRepository && !opts?.runId) {
-        ownsLease = await this.db.claimConversationRun(conversationId, runId, this.agentConfig.maxRunTimeMs ?? 1_800_000);
-        if (!ownsLease) throw new Error("Conversation already has an active run");
-      }
       const messageRepo = this.runRepository ? this.messageRepo.forRun(runId, opts?.channel === "feishu" ? opts.feishuTurn?.resultMessageId : undefined) : this.messageRepo;
       // ── Persist user message, load history (orphan tool messages filtered) ──
       const userMsgId = (opts?.channel === "feishu" ? opts.feishuTurn?.userMessageId : undefined) ?? await withAbort(messageRepo.saveUserMessage(

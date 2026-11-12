@@ -1,21 +1,18 @@
 import JSZip from "jszip";
+import type { PptThemeColors, PptThemeStyle } from "@lot-agent/core/presentation";
 
 export type OverlayMode = "dark" | "light" | "none";
 export interface SlideBackground { image: Buffer; ext: "png" | "jpeg"; overlay: OverlayMode }
 
 /** PPT 模版里提取出的可复用样式（颜色为 6 位 hex、无 # 前缀）。 */
 export interface PptTheme {
-  colors: {
-    dk1: string; lt1: string; dk2: string; lt2: string;
-    accent1: string; accent2: string; accent3: string;
-    accent4: string; accent5: string; accent6: string;
-  };
+  colors: PptThemeColors;
   fonts: { major: string; minor: string };
   /** 幻灯片尺寸（英寸） */
   slideWidthIn: number;
   slideHeightIn: number;
-  /** 装饰语言：几何圆 / 斜切色块 / 细网格 / 无装饰。 */
-  decor: "circles" | "slant" | "grid" | "minimal";
+  /** 封面、卡片和标题的构图；缺省（提取自模板）时用默认构图。 */
+  style?: PptThemeStyle;
   /** 整页背景图（按版式角色配置），可选。 */
   backgrounds?: {
     cover?: SlideBackground;
@@ -33,7 +30,6 @@ export const DEFAULT_THEME: PptTheme = {
   fonts: { major: "Microsoft YaHei", minor: "Microsoft YaHei" },
   slideWidthIn: 13.333,
   slideHeightIn: 7.5,
-  decor: "circles",
 };
 
 const EMU_PER_INCH = 914400;
@@ -127,9 +123,11 @@ export async function extractTheme(bytes: Buffer): Promise<PptTheme> {
     let sizeDiffers = false;
     const presXml = await zip.file("ppt/presentation.xml")?.async("string");
     const size = presXml?.match(/<p:sldSz[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/);
-    if (size) {
-      slideWidthIn = Number(size[1]) / EMU_PER_INCH;
-      slideHeightIn = Number(size[2]) / EMU_PER_INCH;
+    const width = Number(size?.[1]) / EMU_PER_INCH;
+    const height = Number(size?.[2]) / EMU_PER_INCH;
+    if (width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height)) {
+      slideWidthIn = width;
+      slideHeightIn = height;
       if (
         slideWidthIn !== DEFAULT_THEME.slideWidthIn ||
         slideHeightIn !== DEFAULT_THEME.slideHeightIn
@@ -139,7 +137,7 @@ export async function extractTheme(bytes: Buffer): Promise<PptTheme> {
     }
 
     if (!extractedAny && !fontsDiffer && !sizeDiffers) return DEFAULT_THEME;
-    return { colors, fonts, slideWidthIn, slideHeightIn, decor: "circles" };
+    return { colors, fonts, slideWidthIn, slideHeightIn };
   } catch {
     return DEFAULT_THEME;
   }

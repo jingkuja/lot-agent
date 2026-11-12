@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildTimeline } from "./layouts/timeline.js";
 import { buildKeypoints } from "./layouts/keypoints.js";
 import { buildStats } from "./layouts/stats.js";
-import { cardColor, contrastInk, type BuildCtx } from "./layouts/ctx.js";
+import { contrastInk, contrastRatio, type BuildCtx } from "./layouts/ctx.js";
 import { THEME_PRESETS } from "./themes.js";
 
 describe("slide geometry and contrast", () => {
@@ -25,7 +25,8 @@ describe("slide geometry and contrast", () => {
     buildKeypoints({ addText: vi.fn(), addShape }, { layout: "keypoints", title: "T", items: Array.from({ length: 6 }, () => ({ label: "要点", desc: "清楚的解释" })) }, ctx);
     const cards = addShape.mock.calls.filter(([shape]) => shape === "roundRect").map(([, box]) => box);
     expect(new Set(cards.map(box => box.y)).size).toBe(2);
-    expect(cardColor(theme.colors)).not.toBe("FFFFFF");
+    expect(cards[0].fill.color).toBe(theme.colors.lt1);
+    expect(contrastRatio(theme.colors.dk1, cards[0].fill.color)).toBeGreaterThan(7);
     expect(contrastInk("FFFFFF")).not.toBe("FFFFFF");
     expect(contrastInk("141A24")).toBe("FFFFFF");
   });

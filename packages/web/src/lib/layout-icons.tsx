@@ -6,6 +6,7 @@ export const LAYOUT_META: Record<string, { icon: string; label: string }> = {
   keypoints: { icon: "▦", label: "卡片" },
   stats: { icon: "▤", label: "数据" },
   chart: { icon: "▥", label: "图表" },
+  table: { icon: "▦", label: "数据表" },
   compare: { icon: "▥", label: "对比" },
   timeline: { icon: "◷", label: "时间线" },
   quote: { icon: "❝", label: "引言" },

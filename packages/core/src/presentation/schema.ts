@@ -9,7 +9,11 @@ export const PPT_SLIDE_SCHEMA = {
     layout: { type: "string", enum: [...PPT_LAYOUTS] },
     title: { type: "string", description: "One clear takeaway, max ~44 CJK characters or equivalent Latin width." },
     subtitle: { type: "string", description: "Only for cover/section/closing. Use layout content or notes elsewhere." },
-    bullets: { ...strings, description: "content: 1–8 concise points, max ~64 CJK characters per point and 280 total. Put detail in notes." },
+    bullets: {
+      ...strings,
+      description: "content: 1–8 concise points, max ~64 CJK characters per point and 280 total. "
+        + "\"Label: explanation\" points render as a labeled list. chart: optional 1–3 takeaways (≤40 each) shown beside the chart.",
+    },
     items: { type: "array", items: { type: "object", properties: { label: text, value: text, desc: text, icon: { type: "string", enum: [...PPT_ICONS] } }, required: ["label"] }, description: "agenda: 2–8 labels only; keypoints: 2–6 label/desc/icon; stats: 2–4 short value/label/desc; timeline: 3–6 label/desc. Do not provide fields that the layout cannot display." },
     left: column, right: column,
     quote: { type: "object", properties: { text, author: text }, required: ["text"] },
@@ -23,6 +27,13 @@ export const PPT_SLIDE_SCHEMA = {
         unit: text, source: text,
       },
       required: ["type", "categories", "series", "unit", "source"],
+    },
+    table: {
+      type: "object",
+      description: "Native table for structured comparison across several attributes. 2–6 columns (header ≤16), 1–8 rows. "
+        + "Cell budget: ≤36 for 2–3 columns, ≤26 for 4, ≤18 for 5–6. Use only source-backed values.",
+      properties: { columns: { ...strings, minItems: 2, maxItems: 6 }, rows: { type: "array", minItems: 1, maxItems: 8, items: strings } },
+      required: ["columns", "rows"],
     },
     source: { type: "string", description: "Visible evidence/source label. Full references can go in speaker notes." },
     notes: { type: "string", description: "Speaker notes, methodology and detail removed from the slide. Max 4000 characters." },

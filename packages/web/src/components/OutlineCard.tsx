@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { encodePptApproval, inspectDeck, validateDeck, type PptDeck, type PptSlide } from "@lot-agent/core/presentation";
 import { useI18n } from "../i18n/index.js";
 import { layoutMeta } from "../lib/layout-icons.js";
 import { useFileLinks } from "../hooks/useFileLinks.js";
+import { PptThemePicker } from "./PptThemePicker.js";
 
 interface OutlineCardProps {
   input: unknown;
   interactive: boolean;
   answer?: string;
-  onReply?: (text: string) => void;
+  onReply?: (text: string) => void | Promise<void>;
   exportAgain?: boolean;
   previewUrls?: string[];
 }
-const THEMES = [["business", "商务蓝"], ["tech-dark", "科技深色"], ["warm", "暖橙创意"], ["mono", "极简黑白"], ["academic", "学术绿"]] as const;
 const MODES = { generate: "基于素材创作", condense: "提炼重点", preserve: "保留原文" };
 
 function summary(s: PptSlide): string {
   if (s.chart) return `${s.chart.series.map(series => series.name).join(" / ")} · ${s.chart.unit}`;
+  if (s.table) return s.table.columns.join(" · ");
   if (s.bullets?.length) return s.bullets.join(" · ");
   if (s.items?.length) return s.items.map(it => it.value ? `${it.label} ${it.value}` : it.label).join(" · ");
   if (s.left && s.right) return `${s.left.title} ↔ ${s.right.title}`;
@@ -31,13 +32,15 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
   const [rowKeys, setRowKeys] = useState(() => deck?.slides.map((_, i) => i) ?? []);
   const [changed, setChanged] = useState(false);
   const [sending, setSending] = useState(false);
+  const [exportError, setExportError] = useState(false);
   const lock = useRef(false);
   const previews = useFileLinks(previewUrls ?? []);
-  useEffect(() => { if (!interactive) { lock.current = false; setSending(false); } }, [interactive]);
   if (!deck) return <div className="outline-card" role="status">{t("大纲数据不完整，请让助手重新整理。")}</div>;
   const error = validateDeck(deck);
   const warnings = inspectDeck(deck);
   const editable = interactive && !!onReply && !sending;
+  const uploadedDesign = !!(deck.templateAssetId || deck.backgrounds?.length);
+  const count = deck.slides.length;
   const update = (next: PptDeck) => { setDeck(next); setChanged(true); };
   const patchSlide = (index: number, patch: Partial<PptSlide>) => update({ ...deck, slides: deck.slides.map((s, i) => i === index ? { ...s, ...patch } : s) });
   const reorder = (index: number, delta: number) => {
@@ -53,16 +56,24 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
     setRowKeys(rowKeys.filter((_, i) => i !== index));
     update({ ...deck, slides, brief: deck.brief ? { ...deck.brief, targetSlides: slides.length } : undefined });
   };
-  const confirm = () => {
-    if (lock.current || error || !editable) return;
+  const confirm = async () => {
+    if (lock.current || error || !editable || !onReply) return;
     lock.current = true;
     setSending(true);
-    onReply!(encodePptApproval(deck));
+    setExportError(false);
+    try {
+      await onReply(encodePptApproval(deck));
+    } catch {
+      setExportError(true);
+    } finally {
+      lock.current = false;
+      setSending(false);
+    }
   };
   return <div className={`outline-card ppt-editor${interactive ? "" : " answered"}`}>
     <div className="outline-head">
       <span className="outline-title">{deck.title}</span>
-      <span className="outline-count">{t("共")}{deck.slides.length} {t("页")}</span>
+      <span className="outline-count">{t(count === 1 ? "1 页" : "{0} 页", [count])}</span>
     </div>
     {deck.brief && <dl className="ppt-brief">
       {deck.brief.audience && <div><dt>{t("受众")}</dt><dd>{deck.brief.audience}</dd></div>}
@@ -71,14 +82,13 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
       {deck.brief.contentMode && <div><dt>{t("素材处理")}</dt><dd>{t(MODES[deck.brief.contentMode])}</dd></div>}
     </dl>}
     {!!deck.brief?.assumptions?.length && <p className="ppt-assumptions">{t("当前假设：")}{deck.brief.assumptions.join("；")}</p>}
-    <div className="ppt-design-settings">
-      <label>{t("视觉主题")}<select value={deck.themePreset ?? "business"} disabled={!editable || !!deck.templateAssetId || !!deck.backgrounds?.length}
-        onChange={event => update({ ...deck, themePreset: event.target.value as PptDeck["themePreset"] })}>
-        {THEMES.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
-      </select></label>
-      {(deck.templateAssetId || !!deck.backgrounds?.length) && <span>{t("已保留上传的模板或背景")}</span>}
-      {editable && (deck.templateAssetId || !!deck.backgrounds?.length) && <button type="button" onClick={() => update({ ...deck, templateAssetId: undefined, backgrounds: undefined })}>{t("改用内置主题")}</button>}
-    </div>
+    {uploadedDesign ? <div className="ppt-design-settings">
+      <span>{t("已保留上传的模板或背景")}</span>
+      {editable && <button type="button" onClick={() => update({ ...deck, templateAssetId: undefined, backgrounds: undefined })}>{t("改用内置主题")}</button>}
+    </div> : <PptThemePicker
+      value={deck.themePreset ?? "business"}
+      onSelect={editable ? themePreset => update({ ...deck, themePreset }) : undefined}
+    />}
     {editable && <label className="ppt-field">{t("演示标题")}<input value={deck.title} onChange={event => update({ ...deck, title: event.target.value })} /></label>}
     {previewUrls?.length ? <p className="outline-hint">{t(changed ? "内容已修改，缩略图将在重新导出后更新。" : "缩略图来自导出的 PPT，点击页面可修改内容。")}</p> : null}
     <ol className="outline-list ppt-slide-list">
@@ -108,6 +118,7 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
     </ol>
     {warnings.length > 0 && <ul className="ppt-warnings">{warnings.map((w, i) => <li key={i}>{w.message}</li>)}</ul>}
     {error && <p className="ppt-validation" role="alert">{error}</p>}
+    {exportError && <p className="ppt-validation" role="alert">{t("导出失败，请重试。")}</p>}
     {interactive ? <div className="outline-actions">
       <button type="button" className="outline-confirm" disabled={!editable || !!error} onClick={confirm}>{t(sending ? "正在导出…" : exportAgain ? "按修改内容重新导出" : "✓ 确认生成")}</button>
       <span className="outline-hint">{t("将按当前内容直接生成；需要调整叙事或版式，可在下方告诉助手。")}</span>
@@ -117,13 +128,16 @@ export function OutlineCard({ input, interactive, answer, onReply, exportAgain, 
 
 function SlideFields({ slide: s, onChange }: { slide: PptSlide; onChange: (patch: Partial<PptSlide>) => void }) {
   const { t } = useI18n();
+  const table = s.table;
   const field = (label: string, value: string, change: (value: string) => void, multiline = false) => <label className="ppt-field">{t(label)}{multiline
     ? <textarea value={value} rows={3} onChange={e => change(e.target.value)} />
     : <input value={value} onChange={e => change(e.target.value)} />}</label>;
   return <>
     {field("本页标题 / 结论", s.title, title => onChange({ title }))}
     {(["cover", "section", "closing"].includes(s.layout) || s.subtitle !== undefined) && field("副标题", s.subtitle ?? "", subtitle => onChange({ subtitle }))}
-    {s.bullets && field("要点（每行一条）", s.bullets.join("\n"), bullets => onChange({ bullets: bullets.split("\n") }), true)}
+    {(s.bullets || s.chart) && field(s.chart ? "图表结论（每行一条）" : "要点（每行一条）", s.bullets?.join("\n") ?? "", text => {
+      onChange({ bullets: s.chart && !text.trim() ? undefined : text.split("\n") });
+    }, true)}
     {s.items?.map((item, i) => <div className="ppt-item-fields" key={i}>
       {field("标签", item.label, label => onChange({ items: s.items!.map((it, j) => j === i ? { ...it, label } : it) }))}
       {(s.layout === "stats" || item.value !== undefined) && field("数值", item.value ?? "", value => onChange({ items: s.items!.map((it, j) => j === i ? { ...it, value } : it) }))}
@@ -137,6 +151,18 @@ function SlideFields({ slide: s, onChange }: { slide: PptSlide; onChange: (patch
       {field("引言", s.quote.text, text => onChange({ quote: { ...s.quote!, text } }), true)}
       {field("出处 / 作者", s.quote.author ?? "", author => onChange({ quote: { ...s.quote!, author } }))}
     </>}
+    {table && <div className="ppt-data-scroll"><table aria-label={t("数据表")}>
+      <thead><tr>{table.columns.map((column, j) => <th key={j} scope="col">
+        <input aria-label={t("第 {0} 列表头", [j + 1])} value={column} onChange={event => onChange({
+          table: { ...table, columns: table.columns.map((value, k) => k === j ? event.target.value : value) },
+        })} />
+      </th>)}</tr></thead>
+      <tbody>{table.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>
+        <textarea aria-label={t("第 {0} 行，第 {1} 列", [i + 1, j + 1])} rows={2} value={cell} onChange={event => onChange({
+          table: { ...table, rows: table.rows.map((r, k) => k === i ? r.map((value, c) => c === j ? event.target.value : value) : r) },
+        })} />
+      </td>)}</tr>)}</tbody>
+    </table></div>}
     {s.chart && <div className="ppt-chart-editor">
       <label className="ppt-field">{t("图表类型")}<select value={s.chart.type} onChange={event => onChange({ chart: { ...s.chart!, type: event.target.value as "bar" | "line" | "pie" } })}>
         <option value="bar">{t("柱状图")}</option><option value="line">{t("折线图")}</option><option value="pie">{t("饼图")}</option>

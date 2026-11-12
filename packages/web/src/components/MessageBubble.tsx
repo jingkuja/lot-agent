@@ -31,7 +31,7 @@ interface MessageBubbleProps {
   /** Click an assistant reply to open it in the preview panel. */
   onSelectForPreview?: (content: string) => void;
   /** 点选 ask_user 卡片选项时把该文本作为消息发送。 */
-  onQuickReply?: (text: string) => void;
+  onQuickReply?: (text: string) => void | Promise<void>;
   /** 该 ask_user 提问已得到的回答（其后第一条 user 消息内容）。 */
   askAnswer?: string;
   /** 该 ask_user 提问是否仍在等待回答。 */
@@ -90,7 +90,10 @@ export function MessageBubble({
     let userContent = message.content;
     try {
       const approved = parsePptApproval(userContent);
-      if (approved) userContent = t("已确认「{0}」的 {1} 页内容，按当前设置生成。", [approved.title, approved.slides.length]);
+      if (approved) {
+        const count = approved.slides.length;
+        userContent = t("按当前设置导出「{0}」（{1}）。", [approved.title, t(count === 1 ? "1 页" : "{0} 页", [count])]);
+      }
     } catch { /* Retain malformed user text for diagnosis. */ }
     return (
       <div className="message-wrapper message-user">

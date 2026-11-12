@@ -7,8 +7,10 @@ describe("theme presets", () => {
     for (const t of Object.values(THEME_PRESETS)) {
       expect(t.colors.accent1).toMatch(/^[0-9A-F]{6}$/);
       expect(t.colors.accent6).toMatch(/^[0-9A-F]{6}$/);
-      expect(["circles", "slant", "grid", "minimal"]).toContain(t.decor);
+      expect(t.style).toBeDefined();
     }
+    const presets = Object.values(THEME_PRESETS);
+    for (const key of ["cover", "heading", "card"] as const) expect(new Set(presets.map(t => t.style?.[key])).size).toBe(5);
   });
   it("getPreset resolves by id, null on miss", () => {
     expect(getPreset("tech-dark")).toBe(THEME_PRESETS["tech-dark"]);

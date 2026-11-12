@@ -4,7 +4,8 @@ import { PPT_DECK_SCHEMA, validateDeck, inspectDeck, type PptDeck } from "@lot-a
 export const proposeOutlineTool: Tool = {
   name: "propose_outline",
   effect: "interaction",
-  description: "Show an editable slide-by-slide plan and the agreed brief, theme and uploaded template/background settings for approval. Include finished slide content, since the confirmation button exports exactly this deck without an LLM rewrite. This ends the turn; do not generate until approval.",
+  description: "When the user asks to review an outline before export, show the editable slide-by-slide plan, finished content and all design settings. "
+    + "This ends the turn. The confirmation button exports exactly these fields without an LLM rewrite.",
   parameters: PPT_DECK_SCHEMA,
   endsTurn: true,
   async execute(input): Promise<ToolResult> {

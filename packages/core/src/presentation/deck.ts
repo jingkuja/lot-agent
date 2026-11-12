@@ -1,8 +1,11 @@
 /** Browser-safe presentation contract shared by planning, editing and export. */
-export const PPT_LAYOUTS = ["cover", "agenda", "section", "content", "keypoints", "stats", "compare", "timeline", "chart", "quote", "closing"] as const;
+export const PPT_LAYOUTS = [
+  "cover", "agenda", "section", "content", "keypoints", "stats", "compare", "timeline", "chart", "table", "quote", "closing",
+] as const;
 export const PPT_THEMES = ["business", "tech-dark", "warm", "mono", "academic"] as const;
 export const PPT_ICONS = ["target", "trend", "check", "people", "clock", "shield"] as const;
 export type PptLayout = typeof PPT_LAYOUTS[number];
+export type PptThemeId = typeof PPT_THEMES[number];
 export interface PptItem { label: string; value?: string; desc?: string; icon?: typeof PPT_ICONS[number] }
 export interface PptColumn { title: string; bullets: string[] }
 export interface PptQuote { text: string; author?: string }
@@ -13,6 +16,8 @@ export interface PptChart {
   unit: string;
   source: string;
 }
+/** Native table: a header row plus 1-8 body rows of the same width. */
+export interface PptTable { columns: string[]; rows: string[][] }
 export interface PptSlide {
   layout: PptLayout;
   title: string;
@@ -23,6 +28,7 @@ export interface PptSlide {
   right?: PptColumn;
   quote?: PptQuote;
   chart?: PptChart;
+  table?: PptTable;
   source?: string;
   notes?: string;
 }
@@ -39,7 +45,7 @@ export interface PptDeck {
   title: string;
   slides: PptSlide[];
   brief?: PptBrief;
-  themePreset?: typeof PPT_THEMES[number];
+  themePreset?: PptThemeId;
   templateAssetId?: string;
   backgrounds?: { assetId: string; role?: "cover" | "body" | "section"; overlay?: "dark" | "light" | "none" }[];
 }
@@ -97,8 +103,11 @@ export function validateSlides(slides: unknown): string | null {
     const at = `第 ${i + 1} 页`;
     if (!object(s) || !PPT_LAYOUTS.includes(s.layout)) return `${at}.layout 非法。`;
     if (typeof s.title !== "string") return `${at}.title 需要文本。`;
-    const fields: Record<string, string[]> = { cover: ["bullets"], content: ["bullets"], agenda: ["items"], keypoints: ["items"], stats: ["items"], timeline: ["items"], compare: ["left", "right"], quote: ["quote"], chart: ["chart"] };
-    for (const key of ["bullets", "items", "left", "right", "quote", "chart"]) {
+    const fields: Record<string, string[]> = {
+      cover: ["bullets"], content: ["bullets"], agenda: ["items"], keypoints: ["items"], stats: ["items"], timeline: ["items"],
+      compare: ["left", "right"], quote: ["quote"], chart: ["chart", "bullets"], table: ["table"],
+    };
+    for (const key of ["bullets", "items", "left", "right", "quote", "chart", "table"]) {
       if (s[key] !== undefined && !fields[s.layout]?.includes(key)) return `${at}.${key} 不属于 ${s.layout} 版式，请选择匹配的版式或移入 notes。`;
     }
     if (s.subtitle && !["cover", "section", "closing"].includes(s.layout)) return `${at}.subtitle 仅用于 cover/section/closing，其余说明请放入正文或 notes。`;
@@ -109,9 +118,11 @@ export function validateSlides(slides: unknown): string | null {
     }
     if (s.notes !== undefined && (typeof s.notes !== "string" || s.notes.length > 4000)) return `${at}.notes 需为最多 4000 字的文本。`;
     if (s.bullets !== undefined || s.layout === "content") {
-      const error = listError(s.bullets, `${at}.bullets`, 1, 8, 64);
+      // Chart insights share the page with the chart, so they get a narrower panel.
+      const [max, each, total] = s.layout === "chart" ? [3, 40, 110] : [8, 64, 280];
+      const error = listError(s.bullets, `${at}.bullets`, 1, max, each);
       if (error) return error;
-      if (s.bullets.reduce((n: number, b: string) => n + textUnits(b), 0) > 280) return `${at}.bullets 总字数超出 280 字预算，请拆页或转入 notes。`;
+      if (s.bullets.reduce((n: number, b: string) => n + textUnits(b), 0) > total) return `${at}.bullets 总字数超出 ${total} 字预算，请拆页或转入 notes。`;
     }
     if (s.items !== undefined || ["keypoints", "stats", "timeline"].includes(s.layout)) {
       const max = s.layout === "stats" ? 4 : s.layout === "agenda" ? 8 : 6;
@@ -158,6 +169,29 @@ export function validateSlides(slides: unknown): string | null {
         if (!Array.isArray(series.values) || series.values.length !== c.categories.length || !series.values.every((v: unknown) => typeof v === "number" && Number.isFinite(v))) return `${at}.chart.series.values 需为有限数字，数量与 categories 一致；缺失值不能写成 0。`;
       }
       if (c.type === "pie" && (c.series.length !== 1 || c.series[0].values.some((v: number) => v < 0) || !c.series[0].values.some((v: number) => v > 0))) return `${at}.chart pie 只允许一组非负且不全为 0 的数据。`;
+    }
+    if (s.table !== undefined || s.layout === "table") {
+      const error = tableError(s.table, `${at}.table`);
+      if (error) return error;
+    }
+  }
+  return null;
+}
+
+/** Wider tables get narrower cells; long explanations belong in content pages or notes. */
+function tableError(t: unknown, at: string): string | null {
+  if (!object(t)) return `${at} 需要 columns 与 rows。`;
+  const columnError = listError(t.columns, `${at}.columns`, 2, 6, 16);
+  if (columnError) return columnError;
+  if (!Array.isArray(t.rows) || t.rows.length < 1 || t.rows.length > 8) return `${at}.rows 需要 1-8 行。`;
+  const budget = t.columns.length <= 3 ? 36 : t.columns.length === 4 ? 26 : 18;
+  for (let r = 0; r < t.rows.length; r++) {
+    const row = t.rows[r];
+    if (!Array.isArray(row) || row.length !== t.columns.length) return `${at}.rows[${r + 1}] 的单元格数量需与 columns 一致。`;
+    for (let c = 0; c < row.length; c++) {
+      if (typeof row[c] !== "string") return `${at}.rows[${r + 1}][${c + 1}] 需要文本（可为空）。`;
+      const error = textError(row[c], `${at}.rows[${r + 1}][${c + 1}]`, budget);
+      if (error) return error;
     }
   }
   return null;
