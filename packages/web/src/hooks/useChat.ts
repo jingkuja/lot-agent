@@ -801,6 +801,8 @@ export function useChat(
     if (!cid) return "改字失败，请稍后重试";
     try {
       const result = await api.editPoster(cid, messageId, { index, fields, template, style });
+      // Keep the old poster covered until the replacement is ready to paint.
+      await preloadImage(result.asset.url);
       if (cidRef.current === cid) dispatch({ type: "generation_poster_edited", messageId, index, asset: result.asset, poster: result.poster });
       return undefined;
     } catch (e) {

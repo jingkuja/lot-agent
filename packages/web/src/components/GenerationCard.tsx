@@ -122,6 +122,13 @@ function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
   );
 }
 
+function PosterBusyMask() {
+  const { t } = useI18n();
+  return <div className="gen-set-busy gen-poster-busy" role="status" aria-live="polite">
+    <span className="gen-set-spinner" aria-hidden />{t("正在重新排版")}
+  </div>;
+}
+
 function fileExtension(url: string, fallback: string): string {
   return (url.split("?")[0].split(".").pop() || fallback).toLowerCase();
 }
@@ -185,9 +192,10 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onWhite }: {
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onWhite, posterBusy }: {
   onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
   onRetext?: RetextHandler;
+  posterBusy?: boolean;
   generation: GenerationView;
   assets: Asset[];
   onEdit?: (imageUrl: string, prompt: string, settings?: GenerationSettings) => string | void | Promise<string | void>;
@@ -241,7 +249,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
   return (
     <div className="gen-set">
       {generation.unknownResult && <p className="gen-card-notice" role="status">{t("图片结果待核实，请联系客服")}</p>}
-      <div className="gen-set-stage" aria-busy={composing}>
+      <div className="gen-set-stage" aria-busy={composing || posterBusy}>
         <div className="gen-set-grid">
           {images.map((image, index) => (
             <SetTile key={index} image={image} busy={running && redo.indexes.includes(index)} onOpen={() => setViewing(index)}
@@ -254,7 +262,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
           ))}
         </div>
         {/* While composing, the set is covered so nothing is clicked mid-way; it lifts when the picture is back. */}
-        {composing && (
+        {posterBusy ? <PosterBusyMask /> : composing && (
           <div className="gen-set-busy gen-set-busy--stage" role="status"><span className="gen-set-spinner" aria-hidden />{t("合成中…")}</div>
         )}
       </div>
@@ -530,6 +538,8 @@ export function GenerationCard({
   const [regenerateDialog, confirmRegenerate] = useConfirm();
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string>();
+  const [posterBusy, setPosterBusy] = useState(false);
+  const [posterError, setPosterError] = useState<string>();
   const regenerateRequest = useRef<string | undefined>(undefined);
   const regenerate = async () => {
     if (!messageId || !onRedo || regenerateBusy) return;
@@ -552,30 +562,51 @@ export function GenerationCard({
   };
 
   const retext: RetextHandler | undefined = messageId && onEditPoster
-    ? (index, fields, template, style) => onEditPoster(messageId, index, fields, template, style) : undefined;
+    ? async (index, fields, template, style) => {
+      setPosterBusy(true);
+      setPosterError(undefined);
+      try {
+        const failure = await onEditPoster(messageId, index, fields, template, style);
+        if (failure) setPosterError(failure);
+        return failure;
+      } catch {
+        const failure = "改字失败，请稍后重试";
+        setPosterError(failure);
+        return failure;
+      } finally {
+        setPosterBusy(false);
+      }
+    } : undefined;
   const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
     // keep their own card.
-    const imageSet = !!imageSetRole(generation.scene, 0);
-    if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
-      return (
-        <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onWhite={onWhite}
-          onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
-          onRedo={messageId && onRedo && imageSet && !generation.unknownResult ? (request) => onRedo(messageId, request) : undefined}
-          onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
-      );
-    }
+      const imageSet = !!imageSetRole(generation.scene, 0);
+      if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
+        return (
+          <>
+            <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onWhite={onWhite} posterBusy={posterBusy}
+              onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
+              onRedo={messageId && onRedo && imageSet && !generation.unknownResult ? (request) => onRedo(messageId, request) : undefined}
+              onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
+            {posterError && <p className="gen-compose-error" role="alert">{t(posterError)}</p>}
+          </>
+        );
+      }
     const singleImage = mediaType === "image" && assets.length === 1 && assets[0].mime.startsWith("image/");
     return (
       <>
-        <div className="gen-card-assets">
-          {assets.map((a, i) => (
-            <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
-              onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
-              poster={generation.posters?.[i]} onRetext={retext} long={generation.longImage} />
-          ))}
+        <div className="gen-poster-stage" aria-busy={posterBusy}>
+          <div className="gen-card-assets">
+            {assets.map((a, i) => (
+              <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
+                onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
+                poster={generation.posters?.[i]} onRetext={retext} long={generation.longImage} />
+            ))}
+          </div>
+          {posterBusy && <PosterBusyMask />}
         </div>
+        {posterError && <p className="gen-compose-error" role="alert">{t(posterError)}</p>}
         {generation.notice && <p className="gen-card-notice" role="status">{t(generation.notice)}</p>}
         {singleImage && <WhiteCheckNotes checks={generation.whiteChecks} onWhite={onWhite} />}
         {singleImage && <PosterNotes posters={generation.posters} />}

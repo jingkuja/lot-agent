@@ -9,7 +9,7 @@ export const POSTER_VERSION = 2;
 
 export const POSTER_FONTS = ["sans", "serif"] as const;
 export const POSTER_TITLE_WEIGHTS = ["regular", "bold"] as const;
-export const POSTER_SCRIMS = ["auto", "soft", "strong"] as const;
+export const POSTER_SCRIMS = ["auto", "transparent", "soft", "strong"] as const;
 export interface PosterStyle {
   font: typeof POSTER_FONTS[number];
   titleWeight: typeof POSTER_TITLE_WEIGHTS[number];
@@ -33,7 +33,7 @@ export function parsePosterStyle(value: unknown): PosterStyle {
  */
 export const POSTER_TEMPLATES = ["bottom_panel", "top_panel", "side_panel", "overlay"] as const;
 export type PosterTemplate = typeof POSTER_TEMPLATES[number];
-export const DEFAULT_POSTER_TEMPLATE: PosterTemplate = "bottom_panel";
+export const DEFAULT_POSTER_TEMPLATE: PosterTemplate = "overlay";
 
 export interface PosterFields {
   title: string;
@@ -275,10 +275,10 @@ export function posterPlanSystemPrompt(referenceImages: number): string {
     "and place name from the request exactly as written, in its original language and script. Do not translate or romanize them.",
     "",
     '"template": where the wording goes. One of:',
-    '- "bottom_panel": picture on top, text panel at the bottom. The safe default for portrait and square posters.',
+    '- "bottom_panel": picture on top, text panel at the bottom.',
     '- "top_panel": text panel at the top, picture below.',
     '- "side_panel": text panel on the left, picture on the right. For landscape posters.',
-    '- "overlay": wording written directly over the picture. Only for a title and one or two short lines on a calm picture.',
+    '- "overlay": wording written directly over the picture, the default for a clean poster. Use it when the picture has calm copy space; the user can change it later.',
     "",
     "The wording, in the language of the user's request:",
     '- "title": the headline, at most 16 CJK characters or 6 words. Use the user\'s own wording when they give one; otherwise write a short one.',
@@ -292,7 +292,7 @@ export function posterPlanSystemPrompt(referenceImages: number): string {
     "phone numbers or brand names. A field the user did not provide stays empty.",
     "",
     "Reply with JSON only, no code fence and no text before or after it:",
-    '{"background": "...", "template": "bottom_panel", "title": "...", "titleLines": ["..."], "subtitle": "", "points": [],',
+    '{"background": "...", "template": "overlay", "title": "...", "titleLines": ["..."], "subtitle": "", "points": [],',
     ' "price": "", "originalPrice": "", "discount": "", "date": "", "address": ""}',
   ].join("\n");
 }

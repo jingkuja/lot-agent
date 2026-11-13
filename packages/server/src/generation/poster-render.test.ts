@@ -68,6 +68,17 @@ describe("renderPoster", () => {
     expect(await inkShare(rendered.body, { left: 0, top: 760, width: 800, height: 440 }, [233, 220, 195])).toBeGreaterThan(0.01);
   });
 
+  it("can leave a panel fully transparent while keeping the text", async () => {
+    const picture = await background(800, 1200, "#557766");
+    const textOnly = layout("bottom_panel", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
+    const transparent = await renderPoster(picture, { ...textOnly, style: { font: "sans", titleWeight: "bold", scrim: "transparent" } });
+    const strong = await renderPoster(picture, { ...textOnly, style: { font: "sans", titleWeight: "bold", scrim: "strong" } });
+    const corner = { left: 0, top: 1050, width: 120, height: 100 };
+    expect(await inkShare(transparent.body, corner, [85, 119, 102])).toBe(0);
+    expect(await inkShare(strong.body, corner, [85, 119, 102])).toBeGreaterThan(0);
+    expect(await inkShare(transparent.body, { left: 0, top: 760, width: 800, height: 440 }, [85, 119, 102])).toBeGreaterThan(0.01);
+  });
+
   it("writes light text on a dark picture and dark text on a light one", async () => {
     const title = layout("overlay", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
     const top = { left: 0, top: 0, width: 800, height: 300 };

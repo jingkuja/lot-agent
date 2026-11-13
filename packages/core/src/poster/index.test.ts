@@ -95,7 +95,7 @@ describe("parsePosterPlan", () => {
 
   it("falls back to the default template and strips line breaks and overlong text", () => {
     const plan = parsePosterPlan(JSON.stringify({ background: "x", template: "spiral", title: `开业\n${"大".repeat(80)}` }), request);
-    expect(plan.layout.template).toBe("bottom_panel");
+    expect(plan.layout.template).toBe("overlay");
     expect(plan.layout.fields.title).not.toContain("\n");
     expect(Array.from(plan.layout.fields.title).length).toBe(40);
   });
@@ -106,7 +106,7 @@ describe("layout helpers", () => {
     const old = parsePosterLayout({ version: 1, template: "overlay", fields: { title: "旧海报" } })!;
     expect(old.version).toBe(2);
     expect(parsePosterStyle(old.style)).toEqual(DEFAULT_POSTER_STYLE);
-    const style = { font: "serif", titleWeight: "regular", scrim: "soft" } as const;
+    const style = { font: "serif", titleWeight: "regular", scrim: "transparent" } as const;
     const edited = editPosterLayout(old, { style });
     expect(parsePosterLayout(JSON.parse(JSON.stringify(edited)))?.style).toEqual(style);
     expect(editPosterLayout(edited, { fields: { title: "手动输入价格¥888" } }).style).toEqual(style);

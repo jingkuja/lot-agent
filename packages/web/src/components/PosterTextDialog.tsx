@@ -22,7 +22,7 @@ const SHORT_FIELDS: { name: Exclude<PosterFieldName, "title" | "subtitle" | "poi
 interface Props {
   imageUrl: string;
   poster: PosterLayout;
-  /** Renders the image again with this wording. Resolves to an error to keep the dialog open, or nothing once saved. */
+  /** Renders the image again with this wording. The dialog closes while the chat card shows progress. */
   onSubmit: (fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
   onClose: () => void;
 }
@@ -59,13 +59,17 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     const lines = points.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, POSTER_LIMITS.points);
     let failure: string | undefined;
     try {
-      failure = await onSubmit({ ...fields, points: lines }, effective, style);
+      // Return to the chat immediately. The generation card keeps the old
+      // image under a progress mask until the newly rendered image arrives.
+      const request = onSubmit({ ...fields, points: lines }, effective, style);
+      onClose();
+      failure = await request;
     } catch {
       failure = "改字失败，请稍后重试";
     }
+    if (!dialog.current?.isConnected) return;
     setBusy(false);
     if (failure) setError(failure);
-    else onClose();
   };
   const cleared = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name]));
 
@@ -103,7 +107,7 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
             {([
               ["font", "字体", [["sans", "黑体"], ["serif", "宋体"]]],
               ["titleWeight", "标题字重", [["regular", "常规"], ["bold", "粗体"]]],
-              ["scrim", "文字底色", [["auto", "自动"], ["soft", "轻柔遮罩"], ["strong", "加强遮罩"]]],
+               ["scrim", "文字底色", [["auto", "自动"], ["transparent", "纯透明"], ["soft", "轻柔遮罩"], ["strong", "加强遮罩"]]],
             ] as const).map(([name, label, options]) => <label className="poster-text-field" key={name}>
               <span>{t(label)}</span>
               <select value={style[name]} disabled={busy} onChange={event => setStyle(current => parsePosterStyle({

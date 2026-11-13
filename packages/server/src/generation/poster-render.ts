@@ -402,8 +402,12 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : { left: pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
   const layers = await placeBlocks(fitted.blocks, region, align, offset);
-  const opacity = parsePosterStyle(layout.style).scrim === "soft" ? 0.72 : 1;
-  return { layers: [{ input: panelSvg(W, H, side, size, feather, palette.panel, opacity), left: 0, top: 0 }, ...layers], overflow: fitted.overflow };
+  const scrim = parsePosterStyle(layout.style).scrim;
+  // Keep the picture visible through the upper/lower text treatment. `soft` is
+  // intentionally lighter still, while `strong` preserves the opaque option.
+  const opacity = scrim === "strong" ? 1 : scrim === "soft" ? 0.58 : 0.72;
+  const panel = scrim === "transparent" ? [] : [{ input: panelSvg(W, H, side, size, feather, palette.panel, opacity), left: 0, top: 0 }];
+  return { layers: [...panel, ...layers], overflow: fitted.overflow };
 }
 
 /** Area variation above which text written on the picture gets a scrim (0–255 standard deviation). */
@@ -435,7 +439,7 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
       : { left: pad, top: H - pad - height, width: columnWidth, height };
     // Not enough open space or contrast: put a scrim under the text rather than paying for another picture.
     const strength = parsePosterStyle(layout.style).scrim;
-    if (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5) {
+    if (strength !== "transparent" && (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5)) {
       const scrim = lightText ? BLACK : WHITE;
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
       layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity), left: 0, top: 0 });

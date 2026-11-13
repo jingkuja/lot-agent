@@ -4847,6 +4847,8 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 }
 @keyframes gen-set-spin { to { transform: rotate(360deg); } }
 .gen-set-stage { position: relative; }
+.gen-poster-stage { position: relative; width: fit-content; max-width: 100%; }
+.gen-poster-busy { z-index: 3; border-radius: 16px; font-size: 14px; }
 .gen-export .gen-compose-toggle svg { width: 15px; height: 15px; }
 /* 白底图自动检查：校正结果和仍可能不过审的原因 */
 .gen-white-notes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; color: var(--text-secondary); font-size: 13px; }
