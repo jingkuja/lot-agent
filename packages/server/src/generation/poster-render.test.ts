@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { emptyPosterFields, POSTER_PARTS, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
 import { contrastRatio, escapeMarkup, initializePosterFonts, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces,
-  renderPoster } from "./poster-render.js";
+  renderPoster, renderPosterPreview } from "./poster-render.js";
 
 initializePosterFonts();
 
@@ -130,6 +130,27 @@ describe("renderPoster", () => {
     // A nudge past the canvas edge clips instead of failing.
     const out = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { dx: 50, dy: 50 } } } });
     expect((await sharp(out.body).metadata()).width).toBe(800);
+  });
+
+  it("keeps the same placement and paint order when saving a move from layered preview", async () => {
+    const width = 480;
+    const height = 640;
+    const picture = await background(width, height, "#e9dcc3");
+    const draft: PosterLayout = {
+      version: 2, template: "overlay", fields: { ...emptyPosterFields(), title: "台灯", subtitle: "新品上市", price: "¥20" },
+      style: { font: "sans", titleWeight: "bold", scrim: "strong", parts: { title: { vertical: true }, price: { dy: -35 } } },
+    };
+    const scene = await renderPosterPreview(picture, draft);
+    expect(scene.layers.filter((layer) => layer.kind === "text").map((layer) => layer.part)).toEqual(["title", "subtitle", "price"]);
+    const parts = { ...draft.style!.parts, title: { ...draft.style!.parts!.title, dx: -26, dy: 30 } };
+    const composed = await sharp(picture).composite(scene.layers.map((layer) => {
+      const offset = layer.kind === "scrim" ? undefined : parts[layer.part];
+      const left = layer.left + Math.round(width * (offset?.dx ?? 0) / 100);
+      const top = layer.top + Math.round(height * (offset?.dy ?? 0) / 100);
+      return { input: Buffer.from(layer.src.split(",")[1], "base64"), left, top };
+    })).png().toBuffer();
+    const saved = await renderPoster(picture, { ...draft, style: { ...draft.style!, parts } });
+    expect(saved.body.equals(composed)).toBe(true);
   });
 
   it("writes light text on a dark picture and dark text on a light one", async () => {

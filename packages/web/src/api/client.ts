@@ -1,5 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
-import type { PosterFields, PosterLayout, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
+import type { PosterFields, PosterLayout, PosterPreviewScene, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
 import type {
   ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, SetRedoRequest,
 } from "../lib/image-settings.js";
@@ -7,6 +7,10 @@ import type { CatalogModel } from "../lib/model-filter.js";
 export type { CatalogModel };
 
 export interface VideoPublication { copy: string; tags: string; }
+
+export interface PosterPreviewEdit { fields: PosterFields; template: PosterTemplate; style: PosterStyle }
+export type PosterPreviewResult = PosterPreviewScene | Blob;
+export type PreviewPosterHandler = (messageId: string, index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
 
 export interface ConversationProject { id: string; name: string; }
 
@@ -676,12 +680,12 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) }
     ),
 
-  /** 改字预览: the rendered picture for unsaved wording and style; nothing is stored. */
+  /** 改字预览: movable layers, with a flat image fallback for older servers. */
   previewPoster: async (
-    conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate; style?: PosterStyle },
-  ): Promise<Blob> => {
+    conversationId: string, messageId: string, body: PosterPreviewEdit & { index: number }, signal: AbortSignal,
+  ): Promise<PosterPreviewResult> => {
     const res = await fetch(`${BASE}/conversations/${conversationId}/generations/${messageId}/poster/preview`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body),
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ ...body, format: "layers" }), signal,
     });
     if (res.status === 401) {
       clearToken();
@@ -692,7 +696,7 @@ export const api = {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
     }
-    return res.blob();
+    return res.headers.get("content-type")?.startsWith("application/json") ? res.json() as Promise<PosterPreviewScene> : res.blob();
   },
 
   composeGeneration: (conversationId: string, messageId: string, body: { layout: ComposeLayout; gap: boolean }) =>

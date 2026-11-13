@@ -116,6 +116,18 @@ export interface PosterLayout {
   overflow?: boolean;
 }
 
+/** Preview layers in paint order, positioned in canvas pixels before each part's dx/dy is applied. */
+export type PosterLayerPlacement = { left: number; top: number; width: number; height: number } & (
+  { kind: "scrim" } | { kind: "shadow"; part: PosterPart } | { kind: "text"; part: PosterPart }
+);
+
+export interface PosterPreviewScene {
+  width: number;
+  height: number;
+  background: string;
+  layers: (PosterLayerPlacement & { src: string })[];
+}
+
 export function parsePosterTemplate(value: unknown): PosterTemplate | null {
   return POSTER_TEMPLATES.includes(value as PosterTemplate) ? value as PosterTemplate : null;
 }

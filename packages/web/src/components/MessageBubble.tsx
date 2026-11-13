@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { ImageInputContext } from "../api/client.js";
+import type { ImageInputContext, PreviewPosterHandler } from "../api/client.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
@@ -54,7 +54,7 @@ interface MessageBubbleProps {
   /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
-  onPreviewPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
+  onPreviewPoster?: PreviewPosterHandler;
 }
 
 function ImageInputDetails({ input }: { input: ImageInputContext }) {

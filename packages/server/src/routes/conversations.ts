@@ -22,7 +22,7 @@ import {
   outputStorageKey, parseComposeLayout, storedComposites, storedSliceBoundaries, type GenerationComposite,
 } from "../generation/compose.js";
 import { IMAGE_REDO_TASK } from "../generation/run-job.js";
-import { posterRenderKey, renderPoster } from "../generation/poster-render.js";
+import { posterRenderKey, renderPoster, renderPosterPreview } from "../generation/poster-render.js";
 import { whitenBackground } from "../generation/white-background.js";
 import {
   editPosterLayout, parsePosterLayout, planPoster, posterBackgroundPrompt, PosterPlanError, posterTemplateFor, type PosterLayout,
@@ -1168,14 +1168,16 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
   // POST /:id/generations/:messageId/poster — 真实字体: change the wording (or template) of one typeset image and render
   // it again on its stored text-free background. Local work only: no model request, nothing metered. The picture is
   // stored under a key made from the background and the layout, so the same edit is rendered once.
-  // POST …/poster/preview runs the same checks and returns the picture itself: nothing stored, the message unchanged.
+  // POST …/poster/preview runs the same checks and returns the picture or editable layers without storing anything.
   // It has its own path so a server without it answers 404 instead of saving.
   app.on("POST", ["/:id/generations/:messageId/poster", "/:id/generations/:messageId/poster/preview"], async (c) => {
     const userId = c.get("userId");
     const conversationId = c.req.param("id");
     const messageId = c.req.param("messageId");
     const preview = c.req.path.endsWith("/poster/preview");
-    const body = await c.req.json().catch(() => null) as { index?: unknown; fields?: unknown; template?: unknown; style?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as {
+      index?: unknown; fields?: unknown; template?: unknown; style?: unknown; format?: unknown;
+    } | null;
     const index = body?.index;
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !body?.fields || typeof body.fields !== "object") {
       return c.json({ error: "index and fields are required" }, 400);
@@ -1198,7 +1200,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     let layout = editPosterLayout(stored, { fields: body.fields, template: body.template, style: body.style });
     if (preview) {
       try {
-        const rendered = await renderPoster(await deps.assets.get(backgroundKey), layout);
+        const background = await deps.assets.get(backgroundKey);
+        if (body.format === "layers") return c.json(await renderPosterPreview(background, layout), 200, { "Cache-Control": "no-store" });
+        const rendered = await renderPoster(background, layout);
         return new Response(new Uint8Array(rendered.body), {
           headers: { "Content-Type": rendered.mime, "Cache-Control": "no-store" },
         });

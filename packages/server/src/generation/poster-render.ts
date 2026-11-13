@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { DEFAULT_POSTER_STYLE, parsePosterStyle, POSTER_PARTS, posterHasText, posterPartVertical, posterTemplateFor, titleLineOptions,
-  type PosterLayout, type PosterPart, type PosterTemplate } from "@lot-agent/core/poster";
+  type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPreviewScene, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
@@ -422,14 +422,13 @@ async function fitBlocks(layout: PosterLayout, frame: Frame) {
 }
 
 type Layer = { input: Buffer; left: number; top: number };
-type PlacedLayer = Layer & { part: PosterPart };
+type PosterLayer = PosterLayerPlacement & { input: Buffer };
+type TextLayer = Extract<PosterLayer, { kind: "text" }>;
+type ShadowLayer = Extract<PosterLayer, { kind: "shadow" }>;
 
-/**
- * Composite layers for a fitted stack inside `region`, cut off at the region's bottom edge if it overflows, then
- * moved by each block's own nudge. A nudged block may leave the region; the canvas edge still clips it.
- */
-async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: number, layout: PosterLayout, W: number, H: number) {
-  const layers: PlacedLayer[] = [];
+/** Position a fitted stack in the region, cutting off any overflow before each part is moved. */
+async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: number) {
+  const layers: TextLayer[] = [];
   const place = async (block: Block, left: number, top: number, maxWidth: number, room: number) => {
     const { picture } = block;
     const width = Math.min(picture.width, maxWidth);
@@ -437,8 +436,7 @@ async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: n
     const input = width < picture.width || height < picture.height
       ? await sharp(picture.data).extract({ left: 0, top: 0, width, height }).png().toBuffer()
       : picture.data;
-    const shift = partShift(layout, block.part, W, H);
-    layers.push({ input, left: left + shift.x, top: Math.round(top) + shift.y, part: block.part });
+    layers.push({ kind: "text", part: block.part, input, left, top: Math.round(top), width, height });
   };
   let top = region.top + offsetTop;
   for (const row of rows) {
@@ -465,7 +463,7 @@ async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: n
 type Side = "top" | "bottom" | "left" | "right";
 
 /** A block of color along one side of the canvas, fading into the picture over `feather` pixels. */
-function panelSvg(width: number, height: number, side: Side, size: number, feather: number, color: Rgb, opacity = 1): Buffer {
+function panelLayer(width: number, height: number, side: Side, size: number, feather: number, color: Rgb, opacity: number): PosterLayer {
   const fill = hex(color);
   // The gradient runs from the canvas edge (solid) to the inner edge of the feather (clear).
   const total = size + feather;
@@ -475,16 +473,17 @@ function panelSvg(width: number, height: number, side: Side, size: number, feath
     : side === "bottom" ? `x="0" y="${height - total}" width="${width}" height="${total}"`
     : side === "left" ? `x="0" y="0" width="${total}" height="${height}"`
     : `x="${width - total}" y="0" width="${total}" height="${height}"`;
-  return Buffer.from(
+  const input = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs>`
     + `<linearGradient id="g" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">`
     + `<stop offset="0" stop-color="${fill}" stop-opacity="${opacity}"/><stop offset="${solid}" stop-color="${fill}" stop-opacity="${opacity}"/>`
     + `<stop offset="1" stop-color="${fill}" stop-opacity="0"/></linearGradient></defs><rect ${rect} fill="url(#g)"/></svg>`
   );
+  return { kind: "scrim", input, left: 0, top: 0, width, height };
 }
 
 /** A soft shadow of the text layers, so text written on a picture keeps an edge on any background. */
-async function shadowLayers(layers: PlacedLayer[], shade: (layer: PlacedLayer) => Rgb, blur: number): Promise<Layer[]> {
+async function shadowLayers(layers: TextLayer[], shade: (layer: TextLayer) => Rgb, blur: number): Promise<ShadowLayer[]> {
   return Promise.all(layers.map(async (layer) => {
     const color = shade(layer);
     const pad = Math.ceil(blur * 3);
@@ -495,7 +494,10 @@ async function shadowLayers(layers: PlacedLayer[], shade: (layer: PlacedLayer) =
     const fill = { r: color[0], g: color[1], b: color[2] };
     const input = await sharp({ create: { width: alpha.info.width, height: alpha.info.height, channels: 3, background: fill } })
       .joinChannel(alpha.data).png().toBuffer();
-    return { input, left: layer.left - pad, top: layer.top - pad + Math.round(blur * 0.5) };
+    return {
+      kind: "shadow", part: layer.part, input, left: layer.left - pad, top: layer.top - pad + Math.round(blur * 0.5),
+      width: alpha.info.width, height: alpha.info.height,
+    };
   }));
 }
 
@@ -557,12 +559,12 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : side === "bottom" ? { left: pad, top: H - size + pad, width: columnWidth, height: size - pad * 2 }
     : { left: side === "left" ? pad : W - maxSize + pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
-  const layers = await placeBlocks(fitted.rows, region, align, offset, layout, W, H);
+  const layers = await placeBlocks(fitted.rows, region, align, offset);
   const scrim = parsePosterStyle(layout.style).scrim;
   // Keep the picture visible through the upper/lower text treatment. `soft` is
   // intentionally lighter still, while `strong` preserves the opaque option.
   const opacity = scrim === "strong" ? 1 : scrim === "soft" ? 0.58 : 0.72;
-  const panel = scrim === "transparent" ? [] : [{ input: panelSvg(W, H, side, size, feather, palette.panel, opacity), left: 0, top: 0 }];
+  const panel = scrim === "transparent" ? [] : [panelLayer(W, H, side, size, feather, palette.panel, opacity)];
   return { layers: [...panel, ...layers], overflow: fitted.overflow };
 }
 
@@ -576,7 +578,7 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
   const { fields } = layout;
   const head: PosterLayout = { ...layout, fields: { ...fields, points: [], price: "", originalPrice: "", discount: "", date: "", address: "" } };
   const foot: PosterLayout = { ...layout, fields: { ...fields, title: "", subtitle: "" }, titleLines: undefined };
-  const layers: Layer[] = [];
+  const layers: PosterLayer[] = [];
   let overflow = false;
   for (const [part, side, share] of [[head, "top", 0.36], [foot, "bottom", 0.3]] as const) {
     const maxHeight = Math.round(H * share) - pad;
@@ -598,31 +600,51 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
     if (strength !== "transparent" && (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5)) {
       const scrim = lightText ? BLACK : WHITE;
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
-      layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity), left: 0, top: 0 });
+      layers.push(panelLayer(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity));
     }
-    const placed = await placeBlocks(fitted.rows, region, "centre", 0, layout, W, H);
+    const placed = await placeBlocks(fitted.rows, region, "centre", 0);
     // A shadow opposite to the text: the user's own color decides it for a recolored block.
-    const shade = (layer: PlacedLayer) => {
+    const shade = (layer: TextLayer) => {
       const own = partColor(layout, layer.part);
       return own ? (luminance(own) < 0.4 ? WHITE : BLACK) : lightText ? BLACK : WHITE;
     };
-    layers.push(...await shadowLayers(placed, shade, Math.max(2, unit * 0.06)), ...placed.map(({ part: _part, ...layer }) => layer));
+    layers.push(...await shadowLayers(placed, shade, Math.max(2, unit * 0.06)), ...placed);
   }
   return { layers, overflow };
 }
 
-/** Render `layout` onto `background`. The picture keeps the background's own size. */
-export async function renderPoster(background: Buffer, layout: PosterLayout): Promise<RenderedPoster> {
+async function buildPoster(background: Buffer, layout: PosterLayout) {
   const base = await sharp(background).rotate().flatten({ background: "#ffffff" }).png().toBuffer({ resolveWithObject: true });
   const { width: W, height: H } = base.info;
   if (!W || !H) throw new Error("background size is missing");
   const template = posterTemplateFor(layout.template, W, H);
-  if (!posterHasText(layout.fields)) return { body: base.data, mime: "image/png", width: W, height: H, template, overflow: false };
-  const { layers, overflow } = template === "overlay"
-    ? await overlayPoster(base.data, layout, W, H)
-    : await panelPoster(base.data, layout, template, W, H);
-  const body = await sharp(base.data).composite(await insideCanvas(layers, W, H)).png().toBuffer();
-  return { body, mime: "image/png", width: W, height: H, template, overflow };
+  const { layers, overflow } = !posterHasText(layout.fields) ? { layers: [], overflow: false } : template === "overlay"
+    ? await overlayPoster(base.data, layout, W, H) : await panelPoster(base.data, layout, template, W, H);
+  return { base: base.data, layers, width: W, height: H, template, overflow };
+}
+
+/** Render `layout` onto `background`. The picture keeps the background's own size. */
+export async function renderPoster(background: Buffer, layout: PosterLayout): Promise<RenderedPoster> {
+  const { base, layers, width, height, template, overflow } = await buildPoster(background, layout);
+  const placed = layers.map((layer) => {
+    const { input, left, top } = layer;
+    const shift = layer.kind === "scrim" ? { x: 0, y: 0 } : partShift(layout, layer.part, width, height);
+    return { input, left: left + shift.x, top: top + shift.y };
+  });
+  const body = placed.length ? await sharp(base).composite(await insideCanvas(placed, width, height)).png().toBuffer() : base;
+  return { body, mime: "image/png", width, height, template, overflow };
+}
+
+/** The same typesetting as the saved image, with unshifted layers the editor can move locally. */
+export async function renderPosterPreview(background: Buffer, layout: PosterLayout): Promise<PosterPreviewScene> {
+  const { base, layers, width, height } = await buildPoster(background, layout);
+  // Only the preview background needs fewer pixels. Positions still use the full canvas size.
+  const photo = await sharp(base).resize(1280, 1280, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+  const dataUrl = (input: Buffer, mime: string) => `data:${mime};base64,${input.toString("base64")}`;
+  return {
+    width, height, background: dataUrl(photo, "image/jpeg"),
+    layers: layers.map(({ input, ...layer }) => ({ ...layer, src: dataUrl(input, layer.kind === "scrim" ? "image/svg+xml" : "image/png") })),
+  };
 }
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */

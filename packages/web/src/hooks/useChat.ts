@@ -1,7 +1,7 @@
 import { storedPosters, type PosterFields, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
-import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
+import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile, type PreviewPosterHandler } from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
@@ -810,13 +810,11 @@ export function useChat(
     }
   }, []);
 
-  // 改字预览: the unsaved edit rendered as a picture; throws on failure.
-  const previewPoster = useCallback(async (
-    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
-  ): Promise<Blob> => {
+  // 改字预览: render the draft without saving it.
+  const previewPoster = useCallback<PreviewPosterHandler>(async (messageId, index, edit, signal) => {
     const cid = cidRef.current;
     if (!cid) throw new Error("预览失败，请稍后重试");
-    return api.previewPoster(cid, messageId, { index, fields, template, style });
+    return api.previewPoster(cid, messageId, { index, ...edit }, signal);
   }, []);
 
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.

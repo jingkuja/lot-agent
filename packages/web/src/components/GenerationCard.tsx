@@ -4,6 +4,7 @@ import { randomId } from "../lib/uuid.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import type { PosterFields, PosterLayout, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
+import type { PosterPreviewEdit, PosterPreviewResult, PreviewPosterHandler } from "../api/client.js";
 import { ImageEditDialog } from "./ImageEditDialog.js";
 import { POSTER_FIELD_LABELS, PosterTextDialog } from "./PosterTextDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
@@ -39,7 +40,7 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
   /** 真实字体: the wording typeset on this image, and how to change it. Both are needed for 改字. */
   poster?: PosterLayout | null;
   onRetext?: RetextHandler;
-  onPreviewPoster?: PosterPreviewHandler;
+  onPreviewPoster?: ImagePosterPreview;
   asset: Asset;
   long?: boolean;
   mediaType: "image" | "video";
@@ -96,14 +97,14 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
       {retexting && poster && onRetext && (
         <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
           onSubmit={(fields, template, style) => onRetext(index, fields, template, style)}
-          onPreview={onPreviewPoster && ((fields, template, style) => onPreviewPoster(index, fields, template, style))} />
+          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(index, edit, signal))} />
       )}
     </div>
   );
 }
 
 type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
-type PosterPreviewHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
+type ImagePosterPreview = (index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
 
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
 function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
@@ -198,7 +199,7 @@ type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onPreviewPoster, onWhite, posterBusy }: {
   onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
   onRetext?: RetextHandler;
-  onPreviewPoster?: PosterPreviewHandler;
+  onPreviewPoster?: ImagePosterPreview;
   posterBusy?: boolean;
   generation: GenerationView;
   assets: Asset[];
@@ -303,7 +304,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
         <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
           onSubmit={(fields, template, style) => onRetext(retexting, fields, template, style)}
-          onPreview={onPreviewPoster && ((fields, template, style) => onPreviewPoster(retexting, fields, template, style))} />
+          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(retexting, edit, signal))} />
       )}
       {redoing !== null && onRedo && assets[redoing] && (
         <ImageEditDialog redo imageUrl={assets[redoing].url} onClose={() => setRedoing(null)}
@@ -526,8 +527,8 @@ export function GenerationCard({
   messageId?: string;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
-  /** 改字预览: the unsaved edit rendered as a picture. */
-  onPreviewPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
+  /** 改字预览: render a draft for editing without saving it. */
+  onPreviewPoster?: PreviewPosterHandler;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
   onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
@@ -585,8 +586,8 @@ export function GenerationCard({
         setPosterBusy(false);
       }
     } : undefined;
-  const previewPoster: PosterPreviewHandler | undefined = messageId && onPreviewPoster
-    ? (index, fields, template, style) => onPreviewPoster(messageId, index, fields, template, style) : undefined;
+  const previewPoster: ImagePosterPreview | undefined = messageId && onPreviewPoster
+    ? (index, edit, signal) => onPreviewPoster(messageId, index, edit, signal) : undefined;
   const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
