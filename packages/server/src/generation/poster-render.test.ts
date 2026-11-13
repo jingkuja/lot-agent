@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { emptyPosterFields, POSTER_PARTS, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
 import { contrastRatio, escapeMarkup, initializePosterFonts, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces,
@@ -99,6 +100,52 @@ describe("renderPoster", () => {
     }
   });
 
+  it("fits a vertical headline in one column despite the planner's horizontal line breaks", async () => {
+    const picture = await background(800, 900, "#58758c");
+    const draft: PosterLayout = {
+      version: 2, template: "overlay", fields: { ...emptyPosterFields(), title: "攀峰登山鞋", subtitle: "加厚防滑，宽松舒适" },
+      titleLines: ["攀峰", "登山鞋"], style: { font: "sans", titleWeight: "regular", scrim: "transparent", parts: { title: { vertical: true } } },
+    };
+    const preview = await renderPosterPreview(picture, draft);
+    const title = preview.layers.find((layer) => layer.kind === "text" && layer.part === "title")!;
+    expect(title.height / title.width).toBeGreaterThan(4);
+    const saved = await renderPoster(picture, draft);
+    expect(saved.overflow).toBe(false);
+    expect(await inkShare(saved.body, title, [88, 117, 140])).toBeGreaterThan(0.1);
+  });
+
+  it("enlarges a vertical title beyond its template area without moving the other text", async () => {
+    const picture = await background(800, 900, "#58758c");
+    const draft: PosterLayout = {
+      version: 2, template: "overlay", fields: { ...emptyPosterFields(), title: "夏日果啤促销贩卖", subtitle: "冰爽果香" },
+      style: { font: "sans", titleWeight: "bold", scrim: "transparent", parts: { title: { vertical: true, dx: -40 } } },
+    };
+    const normal = await renderPosterPreview(picture, draft);
+    const edited: PosterLayout = { ...draft, style: { ...draft.style!, parts: { title: { ...draft.style!.parts!.title, fontScale: 200 } } } };
+    const larger = await renderPosterPreview(picture, edited);
+    const [title, subtitle] = larger.layers;
+    expect(title.height).toBeGreaterThan(0.36 * larger.height);
+    expect(title.height).toBeGreaterThan(normal.layers[0].height * 1.8);
+    expect(title.height / title.width).toBeGreaterThan(7);
+    expect(subtitle).toEqual(normal.layers[1]);
+    const saved = await renderPoster(picture, edited);
+    const movedTitle = { ...title, left: title.left - 320 };
+    expect(await inkShare(saved.body, movedTitle, [88, 117, 140])).toBeGreaterThan(0.1);
+  });
+
+  it.each(["subtitle", "points", "price", "footer"] as const)("shrinks the %s without changing other parts", async (part) => {
+    const picture = await background(800, 900, "#58758c");
+    const style = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const draft = { ...layout("overlay"), style };
+    const normal = await renderPosterPreview(picture, draft);
+    const smaller = await renderPosterPreview(picture, { ...draft, style: { ...style, parts: { [part]: { fontScale: 60 } } } });
+    const isPart = (layer: typeof normal.layers[number]) => layer.kind === "text" && layer.part === part;
+    const before = normal.layers.find(isPart)!;
+    const after = smaller.layers.find(isPart)!;
+    expect(after.width * after.height).toBeLessThan(before.width * before.height * 0.7);
+    expect(smaller.layers.filter((layer) => !isPart(layer))).toEqual(normal.layers.filter((layer) => !isPart(layer)));
+  });
+
   it("can leave a panel fully transparent while keeping the text", async () => {
     const picture = await background(800, 1200, "#557766");
     const textOnly = layout("bottom_panel", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
@@ -108,6 +155,21 @@ describe("renderPoster", () => {
     expect(await inkShare(transparent.body, corner, [85, 119, 102])).toBe(0);
     expect(await inkShare(strong.body, corner, [85, 119, 102])).toBeGreaterThan(0);
     expect(await inkShare(transparent.body, { left: 0, top: 760, width: 800, height: 440 }, [85, 119, 102])).toBeGreaterThan(0.01);
+  });
+
+  it("keeps the original background under overlay text in fully transparent mode", async () => {
+    const picture = await background(640, 800, "#58758c");
+    const draft = layout("overlay", { ...emptyPosterFields(), points: ["加厚防滑", "宽松舒适", "黑色款"] });
+    const style = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const scene = await renderPosterPreview(picture, { ...draft, style });
+    expect(scene.layers.map((layer) => layer.kind)).toEqual(["text"]);
+    const [text] = scene.layers;
+    const { left, top, src } = text;
+    const textOnly = await sharp(picture).composite([{ input: Buffer.from(src.split(",")[1], "base64"), left, top }]).png().toBuffer();
+    const rendered = await renderPoster(picture, { ...draft, style });
+    expect(rendered.body.equals(textOnly)).toBe(true);
+    const strong = await renderPosterPreview(picture, { ...draft, style: { ...style, scrim: "strong" } });
+    expect(strong.layers.map((layer) => layer.kind)).toEqual(["scrim", "shadow", "text"]);
   });
 
   it("recolors and nudges one text block on its own", async () => {
@@ -128,7 +190,7 @@ describe("renderPoster", () => {
     expect(posterRenderKey("bg.png", { ...base, style: { ...plain, parts: { title: { dy: -40 } } } }))
       .not.toBe(posterRenderKey("bg.png", { ...base, style: plain }));
     // A nudge past the canvas edge clips instead of failing.
-    const out = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { dx: 50, dy: 50 } } } });
+    const out = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { dx: 100, dy: 100 } } } });
     expect((await sharp(out.body).metadata()).width).toBe(800);
   });
 
@@ -151,6 +213,16 @@ describe("renderPoster", () => {
     })).png().toBuffer();
     const saved = await renderPoster(picture, { ...draft, style: { ...draft.style!, parts } });
     expect(saved.body.equals(composed)).toBe(true);
+  });
+
+  it("saves a subtitle moved more than half the canvas height into the bottom band", async () => {
+    const picture = await background(800, 900, "#58758c");
+    const draft = layout("overlay", { ...emptyPosterFields(), title: "攀峰登山鞋", subtitle: "加厚防滑，宽松舒适" });
+    const style = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const saved = await renderPoster(picture, { ...draft, style: { ...style, parts: { subtitle: { dy: 77 } } } });
+    const bottom = { left: 0, top: 810, width: 800, height: 90 };
+    expect(await inkShare(saved.body, bottom, [88, 117, 140])).toBeGreaterThan(0.03);
+    expect(await inkShare((await renderPoster(picture, { ...draft, style })).body, bottom, [88, 117, 140])).toBe(0);
   });
 
   it("writes light text on a dark picture and dark text on a light one", async () => {
@@ -212,5 +284,13 @@ describe("poster helpers", () => {
     expect(posterRenderKey("bg.png", layout("overlay", { price: "¥198" }))).not.toBe(a);
     expect(posterRenderKey("other.png", layout("overlay"))).not.toBe(a);
     expect(posterRenderKey("bg.png", { ...layout("overlay"), overflow: true, cleared: ["date"] })).toBe(a);
+  });
+
+  it("does not reuse a previously saved transparent render that still had shadows", () => {
+    const style = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const draft = { ...layout("overlay"), style };
+    const oldContent = JSON.stringify(["bg.png", draft.template, draft.fields, null, { version: 2, style }]);
+    const oldKey = createHash("sha256").update(oldContent).digest("hex").slice(0, 32);
+    expect(posterRenderKey("bg.png", draft)).not.toBe(oldKey);
   });
 });

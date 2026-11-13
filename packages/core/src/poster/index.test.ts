@@ -116,11 +116,11 @@ describe("layout helpers", () => {
   it("keeps valid per-part colors and nudges, clamps them, and drops anything else", () => {
     const style = parsePosterStyle({
       parts: {
-        title: { color: "#FF0000", dx: 3.4, dy: -80 }, subtitle: { color: "red", dx: 0 }, points: { dy: "5" },
-        price: { color: '#000000" font_desc="x' }, footer: { dx: -2 }, nope: { dx: 4 },
+        title: { color: "#FF0000", dx: 3.4, dy: -180 }, subtitle: { color: "red", dx: 0, dy: 76.4 }, points: { dy: "5" },
+        price: { color: '#000000" font_desc="x' }, footer: { dx: 200 }, nope: { dx: 4 },
       },
     });
-    expect(style.parts).toEqual({ title: { color: "#ff0000", dx: 3, dy: -50 }, footer: { dx: -2 } });
+    expect(style.parts).toEqual({ title: { color: "#ff0000", dx: 3, dy: -100 }, subtitle: { dy: 76 }, footer: { dx: 100 } });
     expect(parsePosterStyle({ parts: { title: { dx: 0 } } })).toEqual(DEFAULT_POSTER_STYLE);
     expect(parsePosterStyle({ parts: { title: { vertical: false }, subtitle: { vertical: "yes" } } }).parts).toEqual({ title: { vertical: false } });
   });
@@ -133,6 +133,17 @@ describe("layout helpers", () => {
     expect(posterPartVertical(style, "price", "bottom_panel")).toBe(true);
   });
 
+  it("round-trips manual sizes and treats invalid or default sizes as automatic", () => {
+    const stored = parsePosterLayout({ template: "overlay", fields: { title: "新品上市" } })!;
+    const edited = editPosterLayout(stored, { style: { parts: {
+      title: { fontScale: 169.6, vertical: true }, subtitle: { fontScale: 999 }, points: { fontScale: 1 },
+      price: { fontScale: 100 }, footer: { fontScale: "120" },
+    } } });
+    expect(parsePosterLayout(edited)?.style?.parts).toEqual({
+      title: { fontScale: 170, vertical: true }, subtitle: { fontScale: 300 }, points: { fontScale: 50 },
+    });
+  });
+
   it("fits the template to the canvas shape", () => {
     expect(posterTemplateFor("side_panel", 1024, 1536)).toBe("side_panel");
     expect(posterTemplateFor("right_panel", 1024, 1536)).toBe("right_panel");
@@ -141,10 +152,14 @@ describe("layout helpers", () => {
     expect(posterTemplateFor("overlay", 1536, 864)).toBe("overlay");
   });
 
-  it("adds the template's room and the no-text rule to the picture prompt", () => {
-    const prompt = posterBackgroundPrompt("A hot pot", "bottom_panel");
+  it.each([
+    ["bottom_panel", "bottom 40%"], ["overlay", "bottom 25%"],
+  ] as const)("reserves space on a continuous, text-free background for %s", (template, space) => {
+    const prompt = posterBackgroundPrompt("A hot pot", template);
     expect(prompt).toContain("A hot pot");
-    expect(prompt).toContain("bottom 40%");
+    expect(prompt).toContain(space);
+    expect(prompt).toContain("same surfaces, texture and detail");
+    expect(prompt).toContain("Do not add panels, color bands, haze, blur or gradient overlays");
     expect(prompt).toContain("no text");
   });
 

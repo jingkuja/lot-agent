@@ -5129,8 +5129,8 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .image-edit-error { color: var(--error); }
 
 /* 「改字」：真实字体图片的文字编辑，左侧当前图、右侧表单 */
-.poster-text-dialog { width: min(1060px, calc(100vw - 32px)); }
-.poster-text-body { display: grid; grid-template-columns: minmax(0, 380px) minmax(500px, 1fr); gap: 18px; min-height: 0; overflow: auto; }
+.poster-text-dialog { width: min(1060px, calc(100vw - 24px)); }
+.poster-text-body { display: grid; grid-template-columns: minmax(0, 380px) minmax(580px, 1fr); gap: 18px; min-height: 0; overflow: auto; }
 .poster-text-preview { --poster-preview-max-height: min(64vh, 560px); position: sticky; top: 0; align-self: start; }
 .poster-text-preview-badge {
   position: absolute; left: 8px; top: 8px; padding: 3px 8px; border-radius: var(--radius-md);
@@ -5181,7 +5181,11 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-part-color:focus-within { border-color: var(--accent); }
 .poster-part-position, .poster-part-actions { display: flex; align-items: center; gap: 8px; }
 .poster-part-actions { margin-inline-start: auto; }
-.poster-part-nudges { display: inline-flex; gap: 2px; }
+.poster-part-nudges, .poster-part-size { display: inline-flex; align-items: center; gap: 2px; }
+.poster-part-size .poster-part-nudge { font-size: 16px; line-height: 1; }
+.poster-part-size-value {
+  min-width: 4.5ch; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap;
+}
 .poster-part-nudge, .poster-part-reset {
   display: inline-grid; place-items: center; height: 28px; border: 1px solid var(--border-input); border-radius: var(--radius-md);
   background: var(--bg-input); color: var(--text-secondary); cursor: pointer;
@@ -5195,7 +5199,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-part-nudge:disabled, .poster-part-reset:disabled { opacity: 0.4; cursor: default; }
 .poster-part-nudge:focus-visible, .poster-part-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .poster-part-offset { min-width: 6ch; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (max-width: 840px) {
+@media (max-width: 880px) {
   .poster-text-body { grid-template-columns: minmax(0, 1fr); }
   .poster-text-preview { --poster-preview-max-height: 34vh; position: relative; }
 }

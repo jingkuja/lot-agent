@@ -9,8 +9,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { DEFAULT_POSTER_STYLE, parsePosterStyle, POSTER_PARTS, posterHasText, posterPartVertical, posterTemplateFor, titleLineOptions,
-  type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPreviewScene, type PosterTemplate } from "@lot-agent/core/poster";
+import { parsePosterStyle, POSTER_FONT_SCALE, POSTER_PARTS, posterHasText, posterPartVertical, posterTemplateFor, titleLineOptions,
+  type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
@@ -179,7 +179,14 @@ export function pricePieces(price: string, cjk: boolean): { before: string; numb
 const CJK = /\p{Script=Han}/u;
 
 /** `vertical` blocks are columns: consecutive ones stand side by side, right to left. */
-interface Block { picture: Picture; gapBefore: number; part: PosterPart; vertical: boolean }
+interface Block {
+  picture: Picture;
+  gapBefore: number;
+  part: PosterPart;
+  vertical: boolean;
+  /** Re-typeset at a multiple of the fitted size, with proportionate line breaking constraints. */
+  render: (factor: number) => Promise<Picture | null>;
+}
 
 async function transparent(width: number, height: number, layers: Layer[]): Promise<Buffer> {
   return sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(layers).png().toBuffer();
@@ -273,14 +280,17 @@ async function badgePicture(text: string, size: number, palette: Palette, layout
 }
 
 /** Price, struck-through original price and discount badge on one row, scaled down if the row is too wide. */
-async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb, vertical = false): Promise<Picture | null> {
+async function priceRow(
+  layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb, vertical: boolean, factor: number,
+): Promise<Picture | null> {
   const { fields } = layout;
   const span = posterSpan(layout);
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
   const cjk = CJK.test(`${fields.title}${fields.subtitle}${fields.points.join("")}${fields.address}`);
+  const sizedUnit = unit * factor;
   const build = async (scale: number) => {
     const items: Picture[] = [];
-    const big = unit * 0.92 * scale;
+    const big = sizedUnit * 0.92 * scale;
     if (fields.price) {
       const { before, number, after } = pricePieces(fields.price, cjk);
       const small = big * 0.5;
@@ -292,17 +302,17 @@ async function priceRow(layout: PosterLayout, unit: number, width: number, palet
     if (fields.originalPrice) {
       const { before, number, after } = pricePieces(fields.originalPrice, cjk);
       const text = `${before}${number}${after ? ` ${after}` : ""}`;
-      items.push(await textPicture(span(text, unit * 0.36 * scale, palette.muted, false, ' strikethrough="true"')));
+      items.push(await textPicture(span(text, sizedUnit * 0.36 * scale, palette.muted, false, ' strikethrough="true"')));
     }
-    if (fields.discount) items.push(await badgePicture(fields.discount, unit * (fields.price ? 0.34 : 0.5) * scale, palette, layout));
-    return vertical ? stackPicture(items, Math.round(unit * 0.12 * scale)) : rowPicture(items, Math.round(unit * 0.22 * scale));
+    if (fields.discount) items.push(await badgePicture(fields.discount, sizedUnit * (fields.price ? 0.34 : 0.5) * scale, palette, layout));
+    return vertical ? stackPicture(items, Math.round(sizedUnit * 0.12 * scale)) : rowPicture(items, Math.round(sizedUnit * 0.22 * scale));
   };
   const row = await build(1);
-  return row.width <= width ? row : build(width / row.width * 0.98);
+  return row.width <= width * factor ? row : build(width * factor / row.width * 0.98);
 }
 
 /** The title at the largest size (up to `max`) at which its widest line fits `width`, over the allowed line breaks. */
-async function titlePicture(layout: PosterLayout, max: number, width: number, color: Rgb, align: Align): Promise<Picture | null> {
+async function titlePicture(layout: PosterLayout, max: number, width: number, color: Rgb, align: Align, factor: number): Promise<Picture | null> {
   const span = posterSpan(layout);
   const bold = parsePosterStyle(layout.style).titleWeight === "bold";
   const title = layout.fields.title;
@@ -316,23 +326,23 @@ async function titlePicture(layout: PosterLayout, max: number, width: number, co
     if (!best || score > best.size * 0.92 ** (best.lines.length - 1)) best = { lines, size };
   }
   if (!best) return null;
-  return textPicture(span(best.lines.join("\n"), best.size, color, bold), { align, spacing: Math.round(best.size * 0.12) });
+  const size = best.size * factor;
+  return textPicture(span(best.lines.join("\n"), size, color, bold), { align, spacing: Math.round(size * 0.12) });
 }
 
-/** The title in columns at the largest size (up to `max`) whose longest column fits `height` and all columns `width`. */
-async function titleColumns(layout: PosterLayout, max: number, width: number, height: number, color: Rgb): Promise<Picture | null> {
-  const title = layout.fields.title;
-  if (!title) return null;
-  let best: { columns: string[][]; size: number } | undefined;
-  for (const lines of titleLineOptions(title, layout.titleLines)) {
-    const columns = lines.map(columnCells);
-    const longest = Math.max(...columns.map((column) => column.length));
-    const size = Math.floor(Math.min(max, height / (longest * COLUMN_PITCH), width / (columns.length + (columns.length - 1) * 0.35)));
-    const score = size * 0.92 ** (columns.length - 1);
-    if (!best || score > best.size * 0.92 ** (best.columns.length - 1)) best = { columns, size };
-  }
-  if (!best) return null;
-  return columnsPicture(best.columns, best.size, color, layout, parsePosterStyle(layout.style).titleWeight === "bold");
+/** A vertical title runs in one column, even when the planner suggested breaks for the horizontal title. */
+async function titleColumn(layout: PosterLayout, max: number, width: number, height: number, color: Rgb, factor: number): Promise<Picture | null> {
+  const cells = columnCells(layout.fields.title);
+  if (!cells.length) return null;
+  const size = Math.floor(Math.min(max, width, height / (cells.length * COLUMN_PITCH))) * factor;
+  const picture = await columnsPicture([cells], size, color, layout, parsePosterStyle(layout.style).titleWeight === "bold");
+  const limitWidth = Math.max(1, Math.floor(width * factor));
+  const limitHeight = Math.max(1, Math.floor(height * factor));
+  if (!picture || (picture.width <= limitWidth && picture.height <= limitHeight)) return picture;
+  // Font metrics vary, and Pango uses an 8 px minimum. Fit the raster to keep even long titles in one column.
+  const { data, info } = await sharp(picture.data).resize(limitWidth, limitHeight, { fit: "inside" })
+    .png().toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height };
 }
 
 interface Frame { template: PosterTemplate; width: number; height: number; unit: number; palette: Palette; align: Align }
@@ -349,38 +359,42 @@ async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): P
   const u = frame.unit * scale;
   const blocks: Block[] = [];
   const vertical = (part: PosterPart) => posterPartVertical(style, part, frame.template);
-  const add = (part: PosterPart, picture: Picture | null, gap: number) => {
-    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part, vertical: vertical(part) });
+  const add = async (part: PosterPart, gap: number, render: Block["render"]) => {
+    const picture = await render(1);
+    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part, vertical: vertical(part), render });
   };
   const color = (part: PosterPart, fallback: Rgb) => partColor(layout, part) ?? fallback;
-  const columns = (texts: string[], size: number, fill: Rgb) => {
+  const columns = (texts: string[], size: number, fill: Rgb, factor: number) => {
     const max = Math.max(1, Math.floor(height / (size * COLUMN_PITCH)));
-    return columnsPicture(texts.flatMap((text) => columnChunks(text, max)), size, fill, layout);
+    return columnsPicture(texts.flatMap((text) => columnChunks(text, max)), size * factor, fill, layout);
   };
   const titleColor = color("title", palette.text);
-  add("title", vertical("title")
-    ? await titleColumns(layout, u, width, height * scale, titleColor)
-    : await titlePicture(layout, u, width, titleColor, align), 0);
+  await add("title", 0, (factor) => vertical("title")
+    ? titleColumn(layout, u, width, height * scale, titleColor, factor)
+    : titlePicture(layout, u, width, titleColor, align, factor));
   if (fields.subtitle) {
     const fill = color("subtitle", palette.text);
-    add("subtitle", vertical("subtitle") ? await columns([fields.subtitle], u * 0.4, fill)
-      : await textPicture(span(fields.subtitle, u * 0.4, fill), { width, align, spacing: Math.round(u * 0.08) }), 0.2);
+    await add("subtitle", 0.2, (factor) => vertical("subtitle") ? columns([fields.subtitle], u * 0.4, fill, factor)
+      : textPicture(span(fields.subtitle, u * 0.4 * factor, fill), { width: width * factor, align, spacing: Math.round(u * 0.08 * factor) }));
   }
   if (fields.points.length) {
     const text = color("points", palette.text);
-    // Centered posters run the points on one flowing line; a left-aligned column lists them.
-    const markup = align === "centre"
-      ? fields.points.map((point) => span(point, u * 0.34, text)).join(span("  ·  ", u * 0.34, palette.accent, true))
-      : fields.points.map((point) => span("• ", u * 0.34, palette.accent, true) + span(point, u * 0.34, text)).join("\n");
-    add("points", vertical("points") ? await columns(fields.points, u * 0.34, text)
-      : await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
+    await add("points", 0.3, (factor) => {
+      if (vertical("points")) return columns(fields.points, u * 0.34, text, factor);
+      const size = u * 0.34 * factor;
+      // Centered posters run the points on one flowing line; a left-aligned column lists them.
+      const markup = align === "centre"
+        ? fields.points.map((point) => span(point, size, text)).join(span("  ·  ", size, palette.accent, true))
+        : fields.points.map((point) => span("• ", size, palette.accent, true) + span(point, size, text)).join("\n");
+      return textPicture(markup, { width: width * factor, align, spacing: Math.round(u * 0.14 * factor) });
+    });
   }
-  add("price", await priceRow(layout, u, width, palette, color("price", palette.accent), vertical("price")), 0.3);
+  await add("price", 0.3, (factor) => priceRow(layout, u, width, palette, color("price", palette.accent), vertical("price"), factor));
   const footer = [fields.date, fields.address].filter(Boolean);
   if (footer.length) {
     const fill = color("footer", palette.muted);
-    add("footer", vertical("footer") ? await columns(footer, u * 0.27, fill)
-      : await textPicture(span(footer.join("\n"), u * 0.27, fill), { width, align, spacing: Math.round(u * 0.1) }), 0.34);
+    await add("footer", 0.34, (factor) => vertical("footer") ? columns(footer, u * 0.27, fill, factor)
+      : textPicture(span(footer.join("\n"), u * 0.27 * factor, fill), { width: width * factor, align, spacing: Math.round(u * 0.1 * factor) }));
   }
   return blocks;
 }
@@ -426,13 +440,28 @@ type PosterLayer = PosterLayerPlacement & { input: Buffer };
 type TextLayer = Extract<PosterLayer, { kind: "text" }>;
 type ShadowLayer = Extract<PosterLayer, { kind: "shadow" }>;
 
-/** Position a fitted stack in the region, cutting off any overflow before each part is moved. */
-async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: number) {
+/** Keep the fitted positions, then apply each part's size change without reflowing the other parts. */
+async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: number, parts: PosterStyle["parts"], canvas: Pick<Rect, "width" | "height">) {
   const layers: TextLayer[] = [];
   const place = async (block: Block, left: number, top: number, maxWidth: number, room: number) => {
     const { picture } = block;
     const width = Math.min(picture.width, maxWidth);
     const height = Math.min(picture.height, room);
+    const fontScale = parts?.[block.part]?.fontScale;
+    if (fontScale !== undefined) {
+      // Use the whole canvas for a resized part, even when its base template uses a small text region.
+      const factor = Math.min(fontScale / POSTER_FONT_SCALE.default, canvas.width / picture.width, canvas.height / picture.height);
+      const resized = await block.render(factor);
+      if (resized) {
+        const x = left + Math.round((width - resized.width) / 2);
+        const y = Math.round(top + (height - resized.height) / 2);
+        layers.push({
+          kind: "text", part: block.part, input: resized.data, width: resized.width, height: resized.height,
+          left: Math.max(0, Math.min(canvas.width - resized.width, x)), top: Math.max(0, Math.min(canvas.height - resized.height, y)),
+        });
+        return;
+      }
+    }
     const input = width < picture.width || height < picture.height
       ? await sharp(picture.data).extract({ left: 0, top: 0, width, height }).png().toBuffer()
       : picture.data;
@@ -542,7 +571,8 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
   const maxSize = Math.round(across ? H * PANEL_MAX_SHARE : W * SIDE_PANEL_SHARE);
   const columnWidth = (across ? W : maxSize) - pad * 2;
   // Columns are bounded by the panel's height, not its narrow width, so a side panel with columns sets larger type.
-  const columns = POSTER_PARTS.some((part) => posterPartVertical(parsePosterStyle(layout.style), part, template));
+  const style = parsePosterStyle(layout.style);
+  const columns = POSTER_PARTS.some((part) => posterPartVertical(style, part, template));
   const unit = Math.min(!across && columns ? Infinity : columnWidth * 0.13, Math.min(W, H) * 0.1);
   // Color comes from the picture where the panel sits, so the panel continues the picture instead of sitting on it.
   const under: Rect = side === "top" ? { left: 0, top: 0, width: W, height: maxSize }
@@ -559,8 +589,8 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : side === "bottom" ? { left: pad, top: H - size + pad, width: columnWidth, height: size - pad * 2 }
     : { left: side === "left" ? pad : W - maxSize + pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
-  const layers = await placeBlocks(fitted.rows, region, align, offset);
-  const scrim = parsePosterStyle(layout.style).scrim;
+  const layers = await placeBlocks(fitted.rows, region, align, offset, style.parts, { width: W, height: H });
+  const { scrim } = style;
   // Keep the picture visible through the upper/lower text treatment. `soft` is
   // intentionally lighter still, while `strong` preserves the opaque option.
   const opacity = scrim === "strong" ? 1 : scrim === "soft" ? 0.58 : 0.72;
@@ -575,6 +605,7 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
   const pad = Math.round(Math.min(W, H) * 0.07);
   const columnWidth = W - pad * 2;
   const unit = Math.min(columnWidth * 0.13, Math.min(W, H) * 0.105);
+  const { scrim: strength, parts } = parsePosterStyle(layout.style);
   const { fields } = layout;
   const head: PosterLayout = { ...layout, fields: { ...fields, points: [], price: "", originalPrice: "", discount: "", date: "", address: "" } };
   const foot: PosterLayout = { ...layout, fields: { ...fields, title: "", subtitle: "" }, titleLines: undefined };
@@ -596,19 +627,20 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
     const region: Rect = side === "top" ? { left: pad, top: pad, width: columnWidth, height: maxHeight }
       : { left: pad, top: H - pad - height, width: columnWidth, height };
     // Not enough open space or contrast: put a scrim under the text rather than paying for another picture.
-    const strength = parsePosterStyle(layout.style).scrim;
     if (strength !== "transparent" && (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5)) {
       const scrim = lightText ? BLACK : WHITE;
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
       layers.push(panelLayer(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity));
     }
-    const placed = await placeBlocks(fitted.rows, region, "centre", 0);
-    // A shadow opposite to the text: the user's own color decides it for a recolored block.
-    const shade = (layer: TextLayer) => {
-      const own = partColor(layout, layer.part);
-      return own ? (luminance(own) < 0.4 ? WHITE : BLACK) : lightText ? BLACK : WHITE;
-    };
-    layers.push(...await shadowLayers(placed, shade, Math.max(2, unit * 0.06)), ...placed);
+    const placed = await placeBlocks(fitted.rows, region, "centre", 0, parts, { width: W, height: H });
+    if (strength !== "transparent") {
+      const shade = (layer: TextLayer) => {
+        const own = partColor(layout, layer.part);
+        return (own ? luminance(own) < 0.4 : !lightText) ? WHITE : BLACK;
+      };
+      layers.push(...await shadowLayers(placed, shade, Math.max(2, unit * 0.06)));
+    }
+    layers.push(...placed);
   }
   return { layers, overflow };
 }
@@ -649,10 +681,8 @@ export async function renderPosterPreview(background: Buffer, layout: PosterLayo
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  const style = parsePosterStyle(layout.style);
-  const values: unknown[] = [backgroundKey, layout.template, layout.fields, layout.titleLines ?? null];
-  // Keep the v1 key for its exact defaults; non-default styles have a versioned namespace.
-  if (JSON.stringify(style) !== JSON.stringify(DEFAULT_POSTER_STYLE)) values.push({ version: 2, style });
+  // Render revision 3 uses one column for vertical titles and removes shadows in transparent mode.
+  const values = [3, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null, parsePosterStyle(layout.style)];
   const content = JSON.stringify(values);
   return createHash("sha256").update(content).digest("hex").slice(0, 32);
 }

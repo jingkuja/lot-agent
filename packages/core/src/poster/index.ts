@@ -14,12 +14,16 @@ export const POSTER_SCRIMS = ["auto", "transparent", "soft", "strong"] as const;
 export const POSTER_PARTS = ["title", "subtitle", "points", "price", "footer"] as const;
 export type PosterPart = typeof POSTER_PARTS[number];
 /** Furthest nudge, in percent of the canvas width (dx) or height (dy). */
-export const POSTER_NUDGE_LIMIT = 50;
+export const POSTER_NUDGE_LIMIT = 100;
+export const POSTER_FONT_SCALE = { default: 100, min: 50, max: 300, step: 10 } as const;
+
 export interface PosterPartStyle {
   /** `#rrggbb`; absent means the color picked from the picture. */
   color?: string;
   dx?: number;
   dy?: number;
+  /** Percentage of the font size chosen by automatic layout. */
+  fontScale?: number;
   /** Written top to bottom in columns; absent means the template's own default (vertical in side panels). */
   vertical?: boolean;
 }
@@ -43,12 +47,16 @@ function partStyles(value: unknown): PosterStyle["parts"] {
   for (const name of POSTER_PARTS) {
     const raw = (value as Record<string, unknown>)[name];
     if (!raw || typeof raw !== "object") continue;
-    const { color, dx, dy, vertical } = raw as Record<string, unknown>;
+    const { color, dx, dy, vertical, fontScale } = raw as Record<string, unknown>;
     const part: PosterPartStyle = {};
     if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) part.color = color.toLowerCase();
     if (nudge(dx)) part.dx = nudge(dx);
     if (nudge(dy)) part.dy = nudge(dy);
     if (typeof vertical === "boolean") part.vertical = vertical;
+    if (typeof fontScale === "number" && Number.isFinite(fontScale)) {
+      const size = Math.max(POSTER_FONT_SCALE.min, Math.min(POSTER_FONT_SCALE.max, Math.round(fontScale)));
+      if (size !== POSTER_FONT_SCALE.default) part.fontScale = size;
+    }
     if (Object.keys(part).length) parts[name] = part;
   }
   return Object.keys(parts).length ? parts : undefined;
@@ -301,21 +309,19 @@ export function posterTemplateFor(template: PosterTemplate, width: number, heigh
 const NO_TEXT = "Absolutely no text, letters, numbers, characters, logos, watermarks, signage or labels anywhere in the image.";
 
 const COMPOSITION: Record<PosterTemplate, string> = {
-  bottom_panel: "Composition: keep the main subject and every important detail within the top 60% of the frame. The bottom 40% will be "
-    + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
-  top_panel: "Composition: keep the main subject and every important detail within the bottom 60% of the frame. The top 40% will be "
-    + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
-  side_panel: "Composition: keep the main subject and every important detail within the right 55% of the frame. The left 45% will be "
-    + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
-  right_panel: "Composition: keep the main subject and every important detail within the left 55% of the frame. The right 45% will be "
-    + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
-  overlay: "Composition: leave large clean copy space in the top 35% and the bottom 25% of the frame: smooth, even-toned, low-detail areas "
-    + "such as sky, wall, table surface or soft gradient. Keep the main subject in the middle of the frame.",
+  bottom_panel: "Composition: keep the main subject in the top 60% of the frame and leave natural space in the bottom 40%.",
+  top_panel: "Composition: keep the main subject in the bottom 60% of the frame and leave natural space in the top 40%.",
+  side_panel: "Composition: keep the main subject in the right 55% of the frame and leave natural space in the left 45%.",
+  right_panel: "Composition: keep the main subject in the left 55% of the frame and leave natural space in the right 45%.",
+  overlay: "Composition: keep the main subject in the middle of the frame and leave natural space in the top 35% and bottom 25%.",
 };
+
+const NATURAL_COPY_SPACE = "Keep the same surfaces, texture and detail across the reserved areas and the rest of the scene. "
+  + "Do not add panels, color bands, haze, blur or gradient overlays to make room for text.";
 
 /** The prompt sent to the image model: the planned picture plus the room the template needs and the no-text rule. */
 export function posterBackgroundPrompt(prompt: string, template: PosterTemplate): string {
-  return `${prompt.trim()}\n\n${COMPOSITION[template]}\n${NO_TEXT}`;
+  return `${prompt.trim()}\n\n${COMPOSITION[template]}\n${NATURAL_COPY_SPACE}\n${NO_TEXT}`;
 }
 
 /** System prompt of the poster planner. Model-facing text stays English; the poster text follows the user's language. */

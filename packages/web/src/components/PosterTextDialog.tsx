@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
-import { POSTER_LIMITS, POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_TEMPLATES, parsePosterStyle, posterPartVertical, posterTemplateFor,
+import { POSTER_FONT_SCALE, POSTER_LIMITS, POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_TEMPLATES, parsePosterStyle, posterPartVertical, posterTemplateFor,
   type PosterFieldName, type PosterFields, type PosterLayout, type PosterPart, type PosterPartStyle, type PosterPreviewScene,
   type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { ApiClientError, type PosterPreviewEdit, type PosterPreviewResult } from "../api/client.js";
@@ -52,7 +52,7 @@ type Preview = { key: string } & ({ scene: PosterPreviewScene; url?: never } | {
 function previewLayoutKey(fields: PosterFields, template: PosterTemplate, style: PosterStyle): string {
   const parts = POSTER_PARTS.flatMap((part) => {
     const own = style.parts?.[part];
-    return own?.color || own?.vertical !== undefined ? [[part, own.color, own.vertical]] : [];
+    return own?.color || own?.vertical !== undefined || own?.fontScale !== undefined ? [[part, own.color, own.vertical, own.fontScale]] : [];
   });
   return JSON.stringify([fields, template, style.font, style.titleWeight, style.scrim, parts]);
 }
@@ -144,6 +144,9 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
   const nudge = (part: PosterPart, axis: "dx" | "dy", step: number) => setPart(part, (current) => ({
     ...current, [axis]: Math.max(-POSTER_NUDGE_LIMIT, Math.min(POSTER_NUDGE_LIMIT, (current[axis] ?? 0) + step)),
   }));
+  const resizePart = (part: PosterPart, step: number) => setPart(part, (current) => ({
+    ...current, fontScale: (current.fontScale ?? POSTER_FONT_SCALE.default) + step,
+  }));
   const parts = POSTER_PARTS.filter((part) => partHasText(part, fields, points));
   const hint = preview?.scene && !previewError ? "拖动图片上的文字调整位置，方向键可微调"
     : canPreview && !preview && !previewError ? "正在加载可拖动预览…" : "每次移动画布的 1%，保存后生效";
@@ -212,6 +215,7 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
               const own = style.parts?.[part];
               const label = t(POSTER_PART_LABELS[part]);
               const vertical = posterPartVertical(style, part, effective);
+              const fontScale = own?.fontScale ?? POSTER_FONT_SCALE.default;
               return <div className="poster-part-row" key={part}>
                 <span className="poster-part-name" title={label}>{label}</span>
                 <label className={`poster-part-color${own?.color ? "" : " auto"}`} title={t("文字颜色")}>
@@ -235,6 +239,15 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
                   </span>
                 </div>
                 <div className="poster-part-actions">
+                  <div className="poster-part-size" role="group" aria-label={t("{0}字号", [label])}>
+                    <button type="button" className="poster-part-nudge" disabled={fontScale <= POSTER_FONT_SCALE.min}
+                      aria-label={t("缩小{0}字号", [label])} title={t("缩小{0}字号", [label])}
+                      onClick={() => resizePart(part, -POSTER_FONT_SCALE.step)}>−</button>
+                    <span className="poster-part-size-value" aria-live="polite">{fontScale}%</span>
+                    <button type="button" className="poster-part-nudge" disabled={fontScale >= POSTER_FONT_SCALE.max}
+                      aria-label={t("放大{0}字号", [label])} title={t("放大{0}字号", [label])}
+                      onClick={() => resizePart(part, POSTER_FONT_SCALE.step)}>+</button>
+                  </div>
                   <button type="button" className="poster-part-nudge poster-part-turn" aria-pressed={vertical}
                     aria-label={t("{0}反转", [label])} title={t(vertical ? "反转：改为横排" : "反转：改为竖排")}
                     onClick={() => setPart(part, (current) => ({ ...current, vertical: !vertical }))}>
