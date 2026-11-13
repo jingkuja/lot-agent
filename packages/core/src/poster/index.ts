@@ -10,20 +10,56 @@ export const POSTER_VERSION = 2;
 export const POSTER_FONTS = ["sans", "serif"] as const;
 export const POSTER_TITLE_WEIGHTS = ["regular", "bold"] as const;
 export const POSTER_SCRIMS = ["auto", "transparent", "soft", "strong"] as const;
+/** Text blocks a user can recolor and nudge one by one; `footer` is the date and address together. */
+export const POSTER_PARTS = ["title", "subtitle", "points", "price", "footer"] as const;
+export type PosterPart = typeof POSTER_PARTS[number];
+/** Furthest nudge, in percent of the canvas width (dx) or height (dy). */
+export const POSTER_NUDGE_LIMIT = 50;
+export interface PosterPartStyle {
+  /** `#rrggbb`; absent means the color picked from the picture. */
+  color?: string;
+  dx?: number;
+  dy?: number;
+}
+
 export interface PosterStyle {
   font: typeof POSTER_FONTS[number];
   titleWeight: typeof POSTER_TITLE_WEIGHTS[number];
   scrim: typeof POSTER_SCRIMS[number];
+  parts?: Partial<Record<PosterPart, PosterPartStyle>>;
 }
 export const DEFAULT_POSTER_STYLE: PosterStyle = { font: "sans", titleWeight: "bold", scrim: "auto" };
+
+function nudge(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(-POSTER_NUDGE_LIMIT, Math.min(POSTER_NUDGE_LIMIT, Math.round(value)));
+}
+
+function partStyles(value: unknown): PosterStyle["parts"] {
+  if (!value || typeof value !== "object") return undefined;
+  const parts: NonNullable<PosterStyle["parts"]> = {};
+  for (const name of POSTER_PARTS) {
+    const raw = (value as Record<string, unknown>)[name];
+    if (!raw || typeof raw !== "object") continue;
+    const { color, dx, dy } = raw as Record<string, unknown>;
+    const part: PosterPartStyle = {};
+    if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) part.color = color.toLowerCase();
+    if (nudge(dx)) part.dx = nudge(dx);
+    if (nudge(dy)) part.dy = nudge(dy);
+    if (Object.keys(part).length) parts[name] = part;
+  }
+  return Object.keys(parts).length ? parts : undefined;
+}
 
 /** Only known styles reach Pango. Old layouts and unknown values retain the original appearance. */
 export function parsePosterStyle(value: unknown): PosterStyle {
   const style = (value && typeof value === "object" ? value : {}) as Partial<PosterStyle>;
+  const parts = partStyles(style.parts);
   return {
     font: POSTER_FONTS.includes(style.font!) ? style.font! : "sans",
     titleWeight: POSTER_TITLE_WEIGHTS.includes(style.titleWeight!) ? style.titleWeight! : "bold",
     scrim: POSTER_SCRIMS.includes(style.scrim!) ? style.scrim! : "auto",
+    ...(parts ? { parts } : {}),
   };
 }
 

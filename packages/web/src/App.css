@@ -5144,6 +5144,30 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 }
 .poster-text-field input:focus, .poster-text-field textarea:focus, .poster-text-field select:focus { border-color: var(--accent); }
 .poster-text-field input::placeholder, .poster-text-field textarea::placeholder { color: var(--text-muted); }
+.poster-part-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 8px 10px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
+.poster-part-list legend { padding: 0 4px; color: var(--text-secondary); font-size: 12px; }
+.poster-part-hint { margin: 0 0 2px; color: var(--text-muted); font-size: 12px; }
+.poster-part-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.poster-part-name { flex: 0 0 4.5em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poster-part-color {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-width: 92px; padding: 2px 8px 2px 2px;
+  border: 1px solid var(--border-input); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 12px; cursor: pointer;
+}
+.poster-part-color input { width: 24px; height: 24px; padding: 0; border: none; border-radius: 6px; background: none; cursor: pointer; }
+.poster-part-color.auto input { opacity: 0.35; }
+.poster-part-color:focus-within { border-color: var(--accent); }
+.poster-part-nudges { display: inline-flex; gap: 2px; }
+.poster-part-nudge, .poster-part-reset {
+  display: inline-grid; place-items: center; height: 28px; border: 1px solid var(--border-input); border-radius: var(--radius-md);
+  background: var(--bg-input); color: var(--text-secondary); cursor: pointer;
+}
+.poster-part-nudge { width: 28px; padding: 0; }
+.poster-part-nudge svg { width: 14px; height: 14px; }
+.poster-part-reset { margin-left: auto; padding: 0 10px; font-size: 12px; }
+.poster-part-nudge:hover:not(:disabled), .poster-part-reset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.poster-part-nudge:disabled, .poster-part-reset:disabled { opacity: 0.4; cursor: default; }
+.poster-part-nudge:focus-visible, .poster-part-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.poster-part-offset { min-width: 3.5em; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) {
   .poster-text-body { grid-template-columns: 1fr; }
   .poster-text-preview img { max-height: 34vh; }

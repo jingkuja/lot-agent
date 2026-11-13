@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { POSTER_LIMITS, POSTER_TEMPLATES, parsePosterStyle, posterTemplateFor,
-  type PosterFieldName, type PosterFields, type PosterLayout, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
+import { POSTER_LIMITS, POSTER_NUDGE_LIMIT, POSTER_TEMPLATES, parsePosterStyle, posterTemplateFor, type PosterFieldName, type PosterFields,
+  type PosterLayout, type PosterPart, type PosterPartStyle, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_TEMPLATE_LABELS: Record<PosterTemplate, string> = {
@@ -10,6 +10,24 @@ export const POSTER_TEMPLATE_LABELS: Record<PosterTemplate, string> = {
 export const POSTER_FIELD_LABELS: Record<PosterFieldName, string> = {
   title: "标题", subtitle: "副标题", points: "卖点", price: "价格", originalPrice: "原价", discount: "折扣", date: "时间", address: "地址",
 };
+
+const PART_LABELS: Record<PosterPart, string> = {
+  title: "标题", subtitle: "副标题", points: "卖点", price: "价格", footer: "时间地址",
+};
+
+const NUDGES: { label: string; icon: string; axis: "dx" | "dy"; step: number }[] = [
+  { label: "上移", icon: "M12 19V5M5 12l7-7 7 7", axis: "dy", step: -1 },
+  { label: "下移", icon: "M12 5v14M5 12l7 7 7-7", axis: "dy", step: 1 },
+  { label: "左移", icon: "M19 12H5M12 5l-7 7 7 7", axis: "dx", step: -1 },
+  { label: "右移", icon: "M5 12h14M12 5l7 7-7 7", axis: "dx", step: 1 },
+];
+
+function partHasText(part: PosterPart, fields: PosterFields, points: string): boolean {
+  if (part === "points") return !!points.trim();
+  if (part === "price") return !!(fields.price || fields.originalPrice);
+  if (part === "footer") return !!(fields.date || fields.address);
+  return !!fields[part].trim();
+}
 
 const SHORT_FIELDS: { name: Exclude<PosterFieldName, "title" | "subtitle" | "points">; placeholder: string }[] = [
   { name: "price", placeholder: "如：¥199" },
@@ -72,6 +90,13 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     if (failure) setError(failure);
   };
   const cleared = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name]));
+  const setPart = (part: PosterPart, change: (current: PosterPartStyle) => PosterPartStyle) => {
+    setStyle((current) => parsePosterStyle({ ...current, parts: { ...current.parts, [part]: change(current.parts?.[part] ?? {}) } }));
+  };
+  const nudge = (part: PosterPart, axis: "dx" | "dy", step: number) => setPart(part, (current) => ({
+    ...current, [axis]: Math.max(-POSTER_NUDGE_LIMIT, Math.min(POSTER_NUDGE_LIMIT, (current[axis] ?? 0) + step)),
+  }));
+  const parts = (Object.keys(PART_LABELS) as PosterPart[]).filter((part) => partHasText(part, fields, points));
 
   return (
     <dialog ref={dialog} className="image-edit-dialog poster-text-dialog" aria-labelledby={titleId}
@@ -117,6 +142,38 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
               </select>
             </label>)}
           </div>
+          {parts.length > 0 && <fieldset className="poster-part-list" disabled={busy}>
+            <legend>{t("逐段调整")}</legend>
+            <p className="poster-part-hint">{t("每次移动画布的 1%，保存后生效")}</p>
+            {parts.map((part) => {
+              const own = style.parts?.[part];
+              const label = t(PART_LABELS[part]);
+              return <div className="poster-part-row" key={part}>
+                <span className="poster-part-name">{label}</span>
+                <label className={`poster-part-color${own?.color ? "" : " auto"}`} title={t("文字颜色")}>
+                  <input type="color" value={own?.color ?? "#ffffff"} aria-label={t("{0}文字颜色", [label])}
+                    onChange={(event) => setPart(part, (current) => ({ ...current, color: event.target.value }))} />
+                  <span>{own?.color ? own.color.toUpperCase() : t("自动")}</span>
+                </label>
+                <div className="poster-part-nudges" role="group" aria-label={t("{0}位置", [label])}>
+                  {NUDGES.map(({ label: name, icon, axis, step }) => (
+                    <button key={name} type="button" className="poster-part-nudge" aria-label={t(name)} title={t(name)}
+                      disabled={Math.abs((own?.[axis] ?? 0) + step) > POSTER_NUDGE_LIMIT} onClick={() => nudge(part, axis, step)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d={icon} />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+                <span className="poster-part-offset" aria-live="polite">
+                  {own?.dx || own?.dy ? `${own.dx ?? 0}, ${own.dy ?? 0}` : ""}
+                </span>
+                <button type="button" className="poster-part-reset" disabled={!own} onClick={() => setPart(part, () => ({}))}>
+                  {t("还原")}
+                </button>
+              </div>;
+            })}
+          </fieldset>}
           <label className="poster-text-field">
             <span>{t("标题")}</span>
             <input autoFocus value={fields.title} maxLength={POSTER_LIMITS.title} onChange={(event) => set("title", event.target.value)} />

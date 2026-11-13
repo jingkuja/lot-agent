@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { DEFAULT_POSTER_STYLE, parsePosterStyle, posterHasText, posterTemplateFor, titleLineOptions,
-  type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
+  type PosterLayout, type PosterPart, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
@@ -135,6 +135,18 @@ export function escapeMarkup(text: string): string {
   return escapeXml(text);
 }
 
+/** The user's own color for a text block, if they picked one. */
+function partColor(layout: PosterLayout, part: PosterPart): Rgb | undefined {
+  const color = parsePosterStyle(layout.style).parts?.[part]?.color;
+  return color ? [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)) as Rgb : undefined;
+}
+
+/** A block's nudge in pixels on a W×H canvas. */
+function partShift(layout: PosterLayout, part: PosterPart, W: number, H: number): { x: number; y: number } {
+  const style = parsePosterStyle(layout.style).parts?.[part];
+  return { x: Math.round((style?.dx ?? 0) * W / 100), y: Math.round((style?.dy ?? 0) * H / 100) };
+}
+
 function posterSpan(layout: PosterLayout) {
   const family = parsePosterStyle(layout.style).font === "serif" ? "Noto Serif SC" : POSTER_FONT_FAMILY;
   return (text: string, size: number, color: Rgb, bold = false, extra = ""): string => {
@@ -166,7 +178,7 @@ export function pricePieces(price: string, cjk: boolean): { before: string; numb
 
 const CJK = /\p{Script=Han}/u;
 
-interface Block { picture: Picture; gapBefore: number }
+interface Block { picture: Picture; gapBefore: number; part: PosterPart }
 
 /** Several pictures side by side on one row, bottoms aligned. */
 async function rowPicture(items: Picture[], gap: number): Promise<Picture> {
@@ -198,7 +210,7 @@ async function badgePicture(text: string, size: number, palette: Palette, layout
 }
 
 /** Price, struck-through original price and discount badge on one row, scaled down if the row is too wide. */
-async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette): Promise<Picture | null> {
+async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb): Promise<Picture | null> {
   const { fields } = layout;
   const span = posterSpan(layout);
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
@@ -210,8 +222,8 @@ async function priceRow(layout: PosterLayout, unit: number, width: number, palet
       const { before, number, after } = pricePieces(fields.price, cjk);
       const small = big * 0.5;
       items.push(await textPicture(
-        (before ? span(before, small, palette.accent, true) : "") + span(number, big, palette.accent, true)
-        + (after ? span(` ${after}`, small, palette.accent, true) : "")
+        (before ? span(before, small, color, true) : "") + span(number, big, color, true)
+        + (after ? span(` ${after}`, small, color, true) : "")
       ));
     }
     if (fields.originalPrice) {
@@ -250,22 +262,28 @@ async function buildBlocks(layout: PosterLayout, width: number, unit: number, sc
   const fields = layout.fields;
   const u = unit * scale;
   const blocks: Block[] = [];
-  const add = (picture: Picture | null, gap: number) => {
-    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0 });
+  const add = (part: PosterPart, picture: Picture | null, gap: number) => {
+    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part });
   };
-  add(await titlePicture(layout, u, width, palette.text, align), 0);
-  if (fields.subtitle) add(await textPicture(span(fields.subtitle, u * 0.4, palette.text), { width, align, spacing: Math.round(u * 0.08) }), 0.2);
+  const color = (part: PosterPart, fallback: Rgb) => partColor(layout, part) ?? fallback;
+  add("title", await titlePicture(layout, u, width, color("title", palette.text), align), 0);
+  if (fields.subtitle) {
+    const markup = span(fields.subtitle, u * 0.4, color("subtitle", palette.text));
+    add("subtitle", await textPicture(markup, { width, align, spacing: Math.round(u * 0.08) }), 0.2);
+  }
   if (fields.points.length) {
+    const text = color("points", palette.text);
     // Centered posters run the points on one flowing line; a left-aligned column lists them.
     const markup = align === "centre"
-      ? fields.points.map((point) => span(point, u * 0.34, palette.text)).join(span("  ·  ", u * 0.34, palette.accent, true))
-      : fields.points.map((point) => span("• ", u * 0.34, palette.accent, true) + span(point, u * 0.34, palette.text)).join("\n");
-    add(await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
+      ? fields.points.map((point) => span(point, u * 0.34, text)).join(span("  ·  ", u * 0.34, palette.accent, true))
+      : fields.points.map((point) => span("• ", u * 0.34, palette.accent, true) + span(point, u * 0.34, text)).join("\n");
+    add("points", await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
   }
-  add(await priceRow(layout, u, width, palette), 0.3);
+  add("price", await priceRow(layout, u, width, palette, color("price", palette.accent)), 0.3);
   const footer = [fields.date, fields.address].filter(Boolean);
   if (footer.length) {
-    add(await textPicture(span(footer.join("\n"), u * 0.27, palette.muted), { width, align, spacing: Math.round(u * 0.1) }), 0.34);
+    const markup = span(footer.join("\n"), u * 0.27, color("footer", palette.muted));
+    add("footer", await textPicture(markup, { width, align, spacing: Math.round(u * 0.1) }), 0.34);
   }
   return blocks;
 }
@@ -289,10 +307,14 @@ async function fitBlocks(layout: PosterLayout, width: number, maxHeight: number,
 }
 
 type Layer = { input: Buffer; left: number; top: number };
+type PlacedLayer = Layer & { part: PosterPart };
 
-/** Composite layers for a fitted stack inside `region`, cut off at the region's bottom edge if it overflows. */
-async function placeBlocks(blocks: Block[], region: Rect, align: Align, offsetTop: number): Promise<Layer[]> {
-  const layers: Layer[] = [];
+/**
+ * Composite layers for a fitted stack inside `region`, cut off at the region's bottom edge if it overflows, then
+ * moved by each block's own nudge. A nudged block may leave the region; the canvas edge still clips it.
+ */
+async function placeBlocks(blocks: Block[], region: Rect, align: Align, offsetTop: number, layout: PosterLayout, W: number, H: number) {
+  const layers: PlacedLayer[] = [];
   let top = region.top + offsetTop;
   for (const block of blocks) {
     top += block.gapBefore;
@@ -305,7 +327,8 @@ async function placeBlocks(blocks: Block[], region: Rect, align: Align, offsetTo
       ? await sharp(picture.data).extract({ left: 0, top: 0, width, height }).png().toBuffer()
       : picture.data;
     const left = align === "centre" ? region.left + Math.round((region.width - width) / 2) : region.left;
-    layers.push({ input, left, top: Math.round(top) });
+    const shift = partShift(layout, block.part, W, H);
+    layers.push({ input, left: left + shift.x, top: Math.round(top) + shift.y, part: block.part });
     top += picture.height;
   }
   return layers;
@@ -332,8 +355,9 @@ function panelSvg(width: number, height: number, side: Side, size: number, feath
 }
 
 /** A soft shadow of the text layers, so text written on a picture keeps an edge on any background. */
-async function shadowLayers(layers: Layer[], color: Rgb, blur: number): Promise<Layer[]> {
+async function shadowLayers(layers: PlacedLayer[], shade: (layer: PlacedLayer) => Rgb, blur: number): Promise<Layer[]> {
   return Promise.all(layers.map(async (layer) => {
+    const color = shade(layer);
     const pad = Math.ceil(blur * 3);
     // Two steps: sharp extracts a channel at the end of a pipeline, after extend and blur would have run on all four.
     const mask = await sharp(layer.input).extractChannel("alpha").png().toBuffer();
@@ -401,7 +425,7 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : side === "bottom" ? { left: pad, top: H - size + pad, width: columnWidth, height: size - pad * 2 }
     : { left: pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
-  const layers = await placeBlocks(fitted.blocks, region, align, offset);
+  const layers = await placeBlocks(fitted.blocks, region, align, offset, layout, W, H);
   const scrim = parsePosterStyle(layout.style).scrim;
   // Keep the picture visible through the upper/lower text treatment. `soft` is
   // intentionally lighter still, while `strong` preserves the opaque option.
@@ -444,8 +468,13 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
       layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity), left: 0, top: 0 });
     }
-    const placed = await placeBlocks(fitted.blocks, region, "centre", 0);
-    layers.push(...await shadowLayers(placed, lightText ? BLACK : WHITE, Math.max(2, unit * 0.06)), ...placed);
+    const placed = await placeBlocks(fitted.blocks, region, "centre", 0, layout, W, H);
+    // A shadow opposite to the text: the user's own color decides it for a recolored block.
+    const shade = (layer: PlacedLayer) => {
+      const own = partColor(layout, layer.part);
+      return own ? (luminance(own) < 0.4 ? WHITE : BLACK) : lightText ? BLACK : WHITE;
+    };
+    layers.push(...await shadowLayers(placed, shade, Math.max(2, unit * 0.06)), ...placed.map(({ part: _part, ...layer }) => layer));
   }
   return { layers, overflow };
 }

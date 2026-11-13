@@ -113,6 +113,17 @@ describe("layout helpers", () => {
     expect(editPosterLayout(edited, { style: { font: '<span font_desc="evil">', titleWeight: 999, scrim: "invisible" } }).style)
       .toEqual(DEFAULT_POSTER_STYLE);
   });
+  it("keeps valid per-part colors and nudges, clamps them, and drops anything else", () => {
+    const style = parsePosterStyle({
+      parts: {
+        title: { color: "#FF0000", dx: 3.4, dy: -80 }, subtitle: { color: "red", dx: 0 }, points: { dy: "5" },
+        price: { color: '#000000" font_desc="x' }, footer: { dx: -2 }, nope: { dx: 4 },
+      },
+    });
+    expect(style.parts).toEqual({ title: { color: "#ff0000", dx: 3, dy: -50 }, footer: { dx: -2 } });
+    expect(parsePosterStyle({ parts: { title: { dx: 0 } } })).toEqual(DEFAULT_POSTER_STYLE);
+  });
+
   it("fits the template to the canvas shape", () => {
     expect(posterTemplateFor("side_panel", 1024, 1536)).toBe("bottom_panel");
     expect(posterTemplateFor("bottom_panel", 1536, 864)).toBe("side_panel");

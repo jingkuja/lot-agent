@@ -79,6 +79,28 @@ describe("renderPoster", () => {
     expect(await inkShare(transparent.body, { left: 0, top: 760, width: 800, height: 440 }, [85, 119, 102])).toBeGreaterThan(0.01);
   });
 
+  it("recolors and nudges one text block on its own", async () => {
+    const picture = await background(800, 1200, "#e9dcc3");
+    const base = layout("bottom_panel", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
+    const plain = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const red = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { color: "#ff0000" } } } });
+    const { data } = await sharp(red.body).extract({ left: 0, top: 760, width: 800, height: 440 }).removeAlpha().raw()
+      .toBuffer({ resolveWithObject: true });
+    let reddish = 0;
+    for (let i = 0; i < data.length; i += 3) if (data[i] > 200 && data[i + 1] < 80 && data[i + 2] < 80) reddish++;
+    expect(reddish).toBeGreaterThan(100);
+    // Moved up by 40% of the height, the title lands in the picture area a plain render leaves alone.
+    const moved = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { dy: -40 } } } });
+    const top = { left: 0, top: 0, width: 800, height: 500 };
+    expect(await inkShare((await renderPoster(picture, { ...base, style: plain })).body, top, [233, 220, 195])).toBe(0);
+    expect(await inkShare(moved.body, top, [233, 220, 195])).toBeGreaterThan(0.005);
+    expect(posterRenderKey("bg.png", { ...base, style: { ...plain, parts: { title: { dy: -40 } } } }))
+      .not.toBe(posterRenderKey("bg.png", { ...base, style: plain }));
+    // A nudge past the canvas edge clips instead of failing.
+    const out = await renderPoster(picture, { ...base, style: { ...plain, parts: { title: { dx: 50, dy: 50 } } } });
+    expect((await sharp(out.body).metadata()).width).toBe(800);
+  });
+
   it("writes light text on a dark picture and dark text on a light one", async () => {
     const title = layout("overlay", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
     const top = { left: 0, top: 0, width: 800, height: 300 };
