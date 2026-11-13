@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../i18n/index.js";
+import { ImageShareControl } from "./ImageShareControl.js";
 
 export interface ViewerImage {
   url: string;
@@ -70,6 +71,7 @@ export function ImageViewerDialog({ images, index, onIndexChange, onClose, onEdi
         )}
       </div>
       <footer className="image-viewer-actions">
+        <ImageShareControl key={image.url} url={image.url} />
         <button type="button" className="image-viewer-edit" aria-pressed={fitWidth}
           onClick={() => setFit({ url: image.url, width: !fitWidth })}>{t("适合宽度")}</button>
         {onRetext && <button type="button" className="image-viewer-edit" onClick={() => onRetext(index)}>{t("改字")}</button>}

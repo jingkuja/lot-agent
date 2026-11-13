@@ -124,6 +124,7 @@ export const migrations: Migration[] = [
   businessProfile,
   marketingProductImages,
   imageCallReceipts,
+  imageAssetRoles,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -168,3 +169,4 @@ import { assignmentTeam } from "./0079-assignment-team.js";
 import { businessProfile } from "./0080-business-profile.js";
 import { marketingProductImages } from "./0081-marketing-product-images.js";
 import { imageCallReceipts } from "./0082-image-call-receipts.js";
+import { imageAssetRoles } from "./0083-image-asset-roles.js";

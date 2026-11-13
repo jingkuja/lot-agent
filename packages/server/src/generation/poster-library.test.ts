@@ -7,6 +7,24 @@ const HEADER = "\uFEFF品类,商品名,图片本地路径,图片原始URL\r\n";
 const food = "食品零食,饼干,/workspace/posters/食品零食/cookies.png,https://untrusted.example/cookies.png";
 
 describe("poster library", () => {
+  it("filters the entire category before paging, with exact dimensions and unknowns only in all", async () => {
+    const rows = Array.from({ length: 55 }, (_, i) => `食品零食,${i % 2 ? "Tea" : "饼干"} ${i},/workspace/posters/食品零食/${i}.png,${i},20`);
+    const library = new PosterLibrary(async () => "品类,商品名,图片本地路径,width,height\n" + rows.join("\n"));
+    await library.refresh();
+    expect(library.hasDimensions()).toBe(true);
+    const first = library.page("食品零食", 0, "ＴＥＡ")!;
+    expect(first.items).toHaveLength(24); expect(first.nextOffset).toBe(24);
+    expect(library.page("食品零食", 24, "tea")?.items).toHaveLength(3);
+    expect(library.page("食品零食", 0, "", "square")?.items.map(item => item.filename)).toEqual(["20.png"]);
+    expect(library.page("食品零食", 0, "", "portrait")?.items).toHaveLength(19);
+    expect(library.page("食品零食", 0, "", "landscape")?.items).toHaveLength(24);
+    expect(library.page("食品零食", 24, "", "landscape")?.items).toHaveLength(10);
+    const app = createPosterLibraryRoutes(library);
+    const path = `/images?category=${encodeURIComponent("食品零食")}`;
+    expect((await (await app.request(`${path}&q=Tea&orientation=square`)).json() as PosterPage).items).toEqual([]);
+    expect((await app.request(`${path}&orientation=guess`)).status).toBe(400);
+    expect((await app.request(`${path}&q=${"a".repeat(101)}`)).status).toBe(400);
+  });
   it("coalesces failures, backs off, recovers and aborts an on-demand request on shutdown", async () => {
     vi.useFakeTimers();
     const load = vi.fn(async () => HEADER + food).mockRejectedValueOnce(new Error("offline"));
@@ -47,7 +65,7 @@ describe("poster library", () => {
     const app = createPosterLibraryRoutes(library);
     expect((await app.request("/categories")).status).toBe(200);
     await library.refresh();
-    expect(await (await app.request("/categories")).json()).toEqual({ categories: ["食品零食", "家居日用"] });
+    expect(await (await app.request("/categories")).json()).toEqual({ categories: ["食品零食", "家居日用"], orientations: false });
     const query = `/images?category=${encodeURIComponent("食品零食")}`;
     const first = await (await app.request(query)).json() as PosterPage;
     expect(first.items).toHaveLength(24);

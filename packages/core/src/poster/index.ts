@@ -5,7 +5,27 @@
  * it. Nothing in this module touches fonts or pixels, so the web client shares it.
  */
 
-export const POSTER_VERSION = 1;
+export const POSTER_VERSION = 2;
+
+export const POSTER_FONTS = ["sans", "serif"] as const;
+export const POSTER_TITLE_WEIGHTS = ["regular", "bold"] as const;
+export const POSTER_SCRIMS = ["auto", "soft", "strong"] as const;
+export interface PosterStyle {
+  font: typeof POSTER_FONTS[number];
+  titleWeight: typeof POSTER_TITLE_WEIGHTS[number];
+  scrim: typeof POSTER_SCRIMS[number];
+}
+export const DEFAULT_POSTER_STYLE: PosterStyle = { font: "sans", titleWeight: "bold", scrim: "auto" };
+
+/** Only known styles reach Pango. Old layouts and unknown values retain the original appearance. */
+export function parsePosterStyle(value: unknown): PosterStyle {
+  const style = (value && typeof value === "object" ? value : {}) as Partial<PosterStyle>;
+  return {
+    font: POSTER_FONTS.includes(style.font!) ? style.font! : "sans",
+    titleWeight: POSTER_TITLE_WEIGHTS.includes(style.titleWeight!) ? style.titleWeight! : "bold",
+    scrim: POSTER_SCRIMS.includes(style.scrim!) ? style.scrim! : "auto",
+  };
+}
 
 /**
  * Where the text goes. The three panel templates put it on a block of color taken from the picture, so it is always
@@ -36,6 +56,7 @@ export interface PosterLayout {
   version: number;
   template: PosterTemplate;
   fields: PosterFields;
+  style?: PosterStyle;
   /** Title line breaks suggested by the planner; used only while they still spell the title exactly. */
   titleLines?: string[];
   /** Fields the planner filled with a number the user never wrote. They were emptied; the card asks the user to fill them. */
@@ -357,6 +378,7 @@ export function parsePosterLayout(raw: unknown): PosterLayout | null {
     version: POSTER_VERSION,
     template,
     fields,
+    ...(value.style ? { style: parsePosterStyle(value.style) } : {}),
     ...(titleLines ? { titleLines } : {}),
     ...(cleared.length ? { cleared } : {}),
     ...(typeof url === "string" && url ? { background: { url } } : {}),
@@ -376,7 +398,7 @@ export function storedPosters(raw: unknown): (PosterLayout | null)[] | undefined
  * against the request again; fields they filled are no longer marked as cleared, and the planner's title lines are
  * dropped once the title changes.
  */
-export function editPosterLayout(layout: PosterLayout, edit: { fields?: unknown; template?: unknown }): PosterLayout {
+export function editPosterLayout(layout: PosterLayout, edit: { fields?: unknown; template?: unknown; style?: unknown }): PosterLayout {
   const fields = edit.fields === undefined ? layout.fields : sanitizePosterFields(edit.fields);
   const template = parsePosterTemplate(edit.template) ?? layout.template;
   const titleLines = fields.title === layout.fields.title ? layout.titleLines : undefined;
@@ -384,6 +406,7 @@ export function editPosterLayout(layout: PosterLayout, edit: { fields?: unknown;
     version: POSTER_VERSION,
     template,
     fields,
+    ...(edit.style !== undefined || layout.style ? { style: parsePosterStyle(edit.style ?? layout.style) } : {}),
     ...(titleLines ? { titleLines } : {}),
     ...(layout.background ? { background: layout.background } : {}),
   };

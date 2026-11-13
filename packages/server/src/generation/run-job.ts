@@ -260,14 +260,17 @@ function producedUrls(mediaType: MediaType, input: Record<string, unknown>, p: P
   return urls.slice(0, requested);
 }
 
-async function storeGeneratedAsset(deps: RunJobDeps, job: JobLike, type: MediaType, file: { body: Buffer; mime: string }, durationSec?: number) {
+async function storeGeneratedAsset(
+  deps: RunJobDeps, job: JobLike, type: MediaType, file: { body: Buffer; mime: string }, durationSec?: number,
+  materialPurpose: "output" | "dependency" | "version" = job.input.redoMessageId ? "version" : "output",
+) {
   const { body, mime } = file;
   const hash = createHash("sha256").update(job.userId).update(job.id).update(body).digest("hex");
   const id = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   const key = `${id}.${deps.extFor(mime)}`;
   const { url } = await deps.storage.put({ key, body, contentType: mime });
   await deps.db.createAsset({ id, taskId: job.id, userId: job.userId, type, storageKey: key, url, mime,
-    sizeBytes: body.byteLength, durationSec, idempotent: true });
+    sizeBytes: body.byteLength, durationSec, idempotent: true, materialPurpose: type === "image" ? materialPurpose : "output" });
   return { id, asset: durationSec != null ? { url, mime, durationSec } : { url, mime } };
 }
 
@@ -305,7 +308,7 @@ async function downloadAndFinalize(
       let { body, mime } = file;
       if (poster) {
         // The model's picture has no text. Keep it as its own asset (a text edit renders on it again), then typeset.
-        const background = await storeGeneratedAsset(deps, job, mediaType, { body, mime });
+        const background = await storeGeneratedAsset(deps, job, mediaType, { body, mime }, undefined, "dependency");
         const layout: PosterLayout = { ...poster, background: { url: background.asset.url } };
         try {
           const rendered = await renderPoster(body, layout);
@@ -410,13 +413,10 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
 
   try {
     await assertNotCancelled();
-    const cacheKey = mediaType === "image" && input.fresh === true ? null : genCacheKey(`${mediaType}.generate`, {
+    // A new image task is a new creation. Recovery uses its own durable receipts, never another task's result.
+    const cacheKey = mediaType === "image" ? null : genCacheKey(`${mediaType}.generate`, {
       userId: job.userId,
       prompt, ...(setPrompts ? { prompts: setPrompts } : {}),
-      // The same picture prompt with other wording is another poster.
-      ...(mediaType === "image" && parsePosterLayout(input.poster) ? { poster: input.poster } : {}),
-      ...(mediaType === "image" && input.scene ? { scene: input.scene } : {}),
-      ...(posterRemix ? { posterReference: input.posterReference } : {}),
       size: input.size, n: input.n, quality: input.quality, durationSec: input.durationSec, ratio: input.ratio,
       ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
       input_reference: inputReference,

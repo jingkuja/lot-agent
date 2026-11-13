@@ -16,7 +16,11 @@ export interface PosterReference {
 export interface CatalogPoster extends PosterReference {
   name: string;
   url: string;
+  width?: number;
+  height?: number;
 }
+
+export type PosterOrientation = "all" | "portrait" | "landscape" | "square";
 
 function safeName(name: unknown): name is string {
   return typeof name === "string" && !!name && !name.startsWith(".") && !/[\\/\u0000-\u001f\u007f]/.test(name)
@@ -43,6 +47,8 @@ function parseCatalog(csv: string, revision: string): Map<string, Map<string, Ca
   const pathIndex = header.indexOf("图片本地路径");
   if (pathIndex < 0) throw new Error("Missing local image path column");
   const nameIndex = header.indexOf("商品名");
+  const widthIndex = header.findIndex(name => name === "宽度" || name === "width");
+  const heightIndex = header.findIndex(name => name === "高度" || name === "height");
   const categories = new Map<string, Map<string, CatalogPoster>>();
   for (const row of records) {
     const path = row[pathIndex]?.trim();
@@ -52,7 +58,9 @@ function parseCatalog(csv: string, revision: string): Map<string, Map<string, Ca
     const { category, filename } = reference;
     const items = categories.get(category) ?? new Map<string, CatalogPoster>();
     if (!items.has(filename)) {
-      items.set(filename, { ...reference, name: row[nameIndex]?.trim() || filename, url: posterImageUrl(reference, revision) });
+      const width = Number(row[widthIndex]), height = Number(row[heightIndex]);
+      const dimensions = Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0 ? { width, height } : {};
+      items.set(filename, { ...reference, name: row[nameIndex]?.trim() || filename, url: posterImageUrl(reference, revision), ...dimensions });
     }
     categories.set(category, items);
   }
@@ -107,12 +115,24 @@ export class PosterLibrary {
     return this.snapshot && [...this.snapshot.categories.keys()];
   }
 
-  page(category: string, offset: number) {
+  hasDimensions(): boolean {
+    return !!this.snapshot && [...this.snapshot.categories.values()].some(group => [...group.values()].some(item => item.width && item.height));
+  }
+
+  page(category: string, offset: number, query = "", orientation: PosterOrientation = "all") {
     if (!this.snapshot) return undefined;
     const group = this.snapshot.categories.get(category);
     if (!group) return null;
+    const normalized = query.normalize("NFKC").trim().toLocaleLowerCase();
+    const items = [...group.values()].filter(item => {
+      if (!item.name.normalize("NFKC").toLocaleLowerCase().includes(normalized)) return false;
+      if (orientation === "all") return true;
+      if (!item.width || !item.height) return false;
+      return orientation === "square" ? item.width === item.height
+        : orientation === "landscape" ? item.width > item.height : item.width < item.height;
+    });
     const end = offset + PAGE_SIZE;
-    return { items: [...group.values()].slice(offset, end), nextOffset: end < group.size ? end : null };
+    return { items: items.slice(offset, end), nextOffset: end < items.length ? end : null };
   }
 
   select(reference: PosterReference): (PosterReference & { revision: string }) | null | undefined {

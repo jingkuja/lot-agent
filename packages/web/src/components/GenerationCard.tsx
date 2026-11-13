@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { randomId } from "../lib/uuid.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
-import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
+import type { PosterFields, PosterLayout, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
 import { ImageEditDialog } from "./ImageEditDialog.js";
 import { POSTER_FIELD_LABELS, PosterTextDialog } from "./PosterTextDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
@@ -94,13 +94,13 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
       )}
       {retexting && poster && onRetext && (
         <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
-          onSubmit={(fields, template) => onRetext(index, fields, template)} />
+          onSubmit={(fields, template, style) => onRetext(index, fields, template, style)} />
       )}
     </div>
   );
 }
 
-type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
 
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
 function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
@@ -290,7 +290,7 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       )}
       {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
         <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
-          onSubmit={(fields, template) => onRetext(retexting, fields, template)} />
+          onSubmit={(fields, template, style) => onRetext(retexting, fields, template, style)} />
       )}
       {redoing !== null && onRedo && assets[redoing] && (
         <ImageEditDialog redo imageUrl={assets[redoing].url} onClose={() => setRedoing(null)}
@@ -511,7 +511,7 @@ export function GenerationCard({
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   messageId?: string;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
-  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
   onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
@@ -552,7 +552,7 @@ export function GenerationCard({
   };
 
   const retext: RetextHandler | undefined = messageId && onEditPoster
-    ? (index, fields, template) => onEditPoster(messageId, index, fields, template) : undefined;
+    ? (index, fields, template, style) => onEditPoster(messageId, index, fields, template, style) : undefined;
   const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos

@@ -170,6 +170,7 @@ describe("runGenerationJob", () => {
     expect(out.assets).toHaveLength(1);
     expect(calls.progress).toEqual([40, 100, 100]);
     expect(calls.asset.userId).toBe("u1");
+    expect(calls.asset.materialPurpose).toBe("output");
     expect(calls.message.at(-1)).toMatchObject({ id: "m1", status: "completed" });
     expect(calls.metered).toBe(true);
   });
@@ -543,17 +544,17 @@ describe("runGenerationJob", () => {
     expect(result.assetIds).not.toContain("deleted");
   });
 
-  it("uses cache hit without creating/polling", async () => {
+  it("keeps video cache hits without creating/polling", async () => {
     const provider: JobGenerationProvider = { create: vi.fn(), poll: vi.fn() };
     const cached = { assetIds: ["a"], assets: [{ url: "/static/assets/a.svg", mime: "image/svg+xml" }] };
     const { deps, calls } = fakeDeps(provider, { cache: { get: vi.fn(async () => cached), set: vi.fn() } });
-    const out = await runGenerationJob(deps, job, "image");
+    const out = await runGenerationJob(deps, job, "video");
     expect(out).toEqual(cached);
     expect(provider.create).not.toHaveBeenCalled();
     expect(calls.message.at(-1)).toMatchObject({ status: "completed" });
   });
 
-  it("hits the cache on a second run by the same user with identical input", async () => {
+  it("generates again for a new image task with identical input", async () => {
     const store = new Map<string, unknown>();
     const sharedCache = {
       get: vi.fn(async (k: string) => (store.has(k) ? store.get(k) : null)),
@@ -568,17 +569,19 @@ describe("runGenerationJob", () => {
     expect(provider.create).toHaveBeenCalledTimes(1);
 
     const { deps: deps2 } = fakeDeps(provider, { cache: sharedCache });
-    await runGenerationJob(deps2, job, "image");
-    expect(provider.create).toHaveBeenCalledTimes(1); // still one — second run is a cache hit
+    await runGenerationJob(deps2, { ...job, id: "job2" }, "image");
+    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(sharedCache.get).not.toHaveBeenCalled();
+    expect(sharedCache.set).not.toHaveBeenCalled();
   });
 
-  it("a confirmed fresh image request neither reads nor updates the result cache", async () => {
+  it.each([undefined, false, true])("an image request ignores the result cache even with fresh=%s", async (fresh) => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),
       poll: vi.fn(async () => ({ status: "completed", progress: 100, url: "data:image/png;base64,YQ==" })),
     };
     const { deps } = fakeDeps(provider);
-    await runGenerationJob(deps, { ...job, input: { ...job.input, fresh: true } }, "image");
+    await runGenerationJob(deps, { ...job, input: { ...job.input, fresh } }, "image");
     expect(deps.cache.get).not.toHaveBeenCalled();
     expect(deps.cache.set).not.toHaveBeenCalled();
     expect(provider.create).toHaveBeenCalledTimes(1);
@@ -1049,6 +1052,7 @@ describe("image set redo", () => {
     expect(out.assets).toHaveLength(1);
     expect(state.metadata.assets).toEqual([a, out.assets[0]]);
     expect(state.metadata.redo).toBeUndefined();
+    expect(deps.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ materialPurpose: "version" }));
     expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ taskId: "r1", usage: { inputCount: 0, outputCount: 1 } }));
   });
 
@@ -1131,7 +1135,7 @@ describe("真实字体 posters", () => {
     expect((put.mock.calls[1][0].body as Buffer).equals(picture)).toBe(false);
     const background = `/static/assets/${put.mock.calls[0][0].key}`;
     expect(out.assets).toEqual([{ url: `/static/assets/${put.mock.calls[1][0].key}`, mime: "image/png" }]);
-    expect(out.posters).toEqual([{ ...poster, background: { url: background } }]);
+    expect(out.posters).toEqual([{ ...poster, version: 2, background: { url: background } }]);
     expect(calls.message.at(-1).metadata).toMatchObject({ status: "completed", prompt: "火锅店开业海报", poster, posters: out.posters });
     // One image was made and billed; the stored background is not a second result.
     expect(deps.meter.record).toHaveBeenCalledWith(expect.objectContaining({ usage: { inputCount: 0, outputCount: 1 } }));
@@ -1147,6 +1151,6 @@ describe("真实字体 posters", () => {
     };
     await run("火锅店盛大开业");
     await run("火锅店周年庆");
-    expect(new Set(keys).size).toBe(2);
+    expect(keys).toEqual([]);
   });
 });

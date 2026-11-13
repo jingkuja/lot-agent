@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { emptyPosterFields, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
-import { contrastRatio, escapeMarkup, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces, renderPoster } from "./poster-render.js";
+import { contrastRatio, escapeMarkup, initializePosterFonts, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces,
+  renderPoster } from "./poster-render.js";
+
+initializePosterFonts();
 
 async function background(width: number, height: number, color: string): Promise<Buffer> {
   return sharp({ create: { width, height, channels: 3, background: color } }).png().toBuffer();
@@ -24,6 +27,25 @@ async function inkShare(image: Buffer, area: { left: number; top: number; width:
 }
 
 describe("renderPoster", () => {
+  it.each(["新品上市", "Summer collection", "Koleksi baru"])("renders both fonts and weights with distinct styles for %s", async (title) => {
+    const backgroundImage = await background(480, 640, "#557766");
+    const base = layout("overlay", { title, subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
+    const old = await renderPoster(backgroundImage, base);
+    const hashes = new Set<string>();
+    for (const font of ["sans", "serif"] as const) for (const titleWeight of ["regular", "bold"] as const) {
+      const styled = { ...base, version: 2, style: { font, titleWeight, scrim: "soft" as const } };
+      const rendered = await renderPoster(backgroundImage, styled);
+      expect(rendered.overflow).toBe(false);
+      expect(rendered.body.equals(old.body)).toBe(false);
+      hashes.add(posterRenderKey("bg.png", styled));
+    }
+    expect(hashes.size).toBe(4);
+    expect(posterRenderKey("bg.png", { ...base, style: { font: "sans", titleWeight: "bold", scrim: "auto" } }))
+      .toBe(posterRenderKey("bg.png", base));
+    const soft = await renderPoster(backgroundImage, { ...base, style: { font: "serif", titleWeight: "bold", scrim: "soft" } });
+    const strong = await renderPoster(backgroundImage, { ...base, style: { font: "serif", titleWeight: "bold", scrim: "strong" } });
+    expect(soft.body.equals(strong.body)).toBe(false);
+  });
   it("finds the bundled fonts", () => {
     expect(posterFontsAvailable()).toBe(true);
   });

@@ -919,7 +919,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           ...(scene !== "free" ? { scene, displayPrompt: prompt } : {}),
           ...(posterReference ? { posterReference } : {}),
           ...(poster ? { poster, displayPrompt: prompt } : {}),
-          ...(frozen ? { fresh: true, displayPrompt: prompt } : {}),
+          ...(mediaType === "image" ? { fresh: true } : {}),
+          ...(frozen ? { displayPrompt: prompt } : {}),
           conversationId,
           assistantMessageId,
           requireUserModelKey: agentExtension(conv.agent_id)?.ownerKeyOnly === true,
@@ -1154,7 +1155,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       kind: "generation", mediaType: "image", prompt, status: "completed", settings: {},
       assets: [{ url, mime: composed.mime }],
       composedFrom: {
-        layout, gap, count: urls.length, ...(composed.sliceBoundaries ? { sliceBoundaries: composed.sliceBoundaries } : {}),
+        layout, gap, count: urls.length, urls, ...(composed.sliceBoundaries ? { sliceBoundaries: composed.sliceBoundaries } : {}),
       },
     };
     await service.db.addMessage(assistantMessageId, conversationId, "assistant", "", { metadata });
@@ -1171,7 +1172,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const userId = c.get("userId");
     const conversationId = c.req.param("id");
     const messageId = c.req.param("messageId");
-    const body = await c.req.json().catch(() => null) as { index?: unknown; fields?: unknown; template?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { index?: unknown; fields?: unknown; template?: unknown; style?: unknown } | null;
     const index = body?.index;
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !body?.fields || typeof body.fields !== "object") {
       return c.json({ error: "index and fields are required" }, 400);
@@ -1191,7 +1192,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (!backgroundKey || !owned || owned.user_id !== userId || !await deps.assets.exists(backgroundKey)) {
       return c.json({ error: "背景图已不存在，无法改字" }, 409);
     }
-    let layout = editPosterLayout(stored, { fields: body.fields, template: body.template });
+    let layout = editPosterLayout(stored, { fields: body.fields, template: body.template, style: body.style });
     let asset: { url: string; mime: string };
     let overflow = false;
     try {
@@ -1210,6 +1211,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           await service.db.createAsset({
             id: randomUUID(), taskId: typeof meta.taskId === "string" ? meta.taskId : null, userId, type: "image", storageKey: key, url,
             mime: rendered.mime, sizeBytes: rendered.body.byteLength, width: rendered.width, height: rendered.height,
+            materialPurpose: "version",
           });
         }
         asset = { url, mime: rendered.mime };
@@ -1223,7 +1225,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const saved = await service.db.updateGenerationMetadata(messageId, { conversationId, userId }, (current) => {
       const assets = Array.isArray(current.assets) ? [...current.assets] : [];
       const posters = Array.isArray(current.posters) ? [...current.posters] : [];
-      const same = (posters[index] as { background?: { url?: unknown } } | undefined)?.background?.url === backgroundUrl;
+      const same = JSON.stringify(posters[index]) === JSON.stringify((meta.posters as unknown[])[index]);
       if (current.status !== "completed" || index >= assets.length || !same) return null;
       assets[index] = asset;
       posters[index] = poster;
@@ -1268,7 +1270,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         const id = randomUUID();
         const storageKey = `${id}.png`;
         const { url } = await deps.assets.put({ key: storageKey, body: result.body, contentType: result.mime });
-        await service.db.createAsset({ id, userId, type: "image", storageKey, url, mime: result.mime, sizeBytes: result.body.length });
+        await service.db.createAsset({ id, userId, type: "image", storageKey, url, mime: result.mime,
+          sizeBytes: result.body.length, materialPurpose: "version" });
         asset = { url, mime: result.mime };
       }
     } catch { return c.json({ error: "白底处理失败，原图已保留" }, 500); }

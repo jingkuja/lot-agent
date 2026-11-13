@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { POSTER_LIMITS, POSTER_TEMPLATES, posterTemplateFor, type PosterFieldName, type PosterFields, type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
+import { POSTER_LIMITS, POSTER_TEMPLATES, parsePosterStyle, posterTemplateFor,
+  type PosterFieldName, type PosterFields, type PosterLayout, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_TEMPLATE_LABELS: Record<PosterTemplate, string> = {
@@ -22,7 +23,7 @@ interface Props {
   imageUrl: string;
   poster: PosterLayout;
   /** Renders the image again with this wording. Resolves to an error to keep the dialog open, or nothing once saved. */
-  onSubmit: (fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+  onSubmit: (fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
   onClose: () => void;
 }
 
@@ -34,6 +35,7 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
   const [fields, setFields] = useState<PosterFields>(poster.fields);
   const [points, setPoints] = useState(poster.fields.points.join("\n"));
   const [template, setTemplate] = useState<PosterTemplate>(poster.template);
+  const [style, setStyle] = useState(() => parsePosterStyle(poster.style));
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>();
   const fit = (value: PosterTemplate) => dimensions ? posterTemplateFor(value, dimensions.width, dimensions.height) : value;
   const effective = fit(template);
@@ -57,7 +59,7 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     const lines = points.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, POSTER_LIMITS.points);
     let failure: string | undefined;
     try {
-      failure = await onSubmit({ ...fields, points: lines }, effective);
+      failure = await onSubmit({ ...fields, points: lines }, effective, style);
     } catch {
       failure = "改字失败，请稍后重试";
     }
@@ -97,6 +99,20 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
           {effective !== fit(poster.template) && (
             <p className="poster-text-notice" role="status">{t("改变文字位置后，文字可能遮挡图片主体。")}</p>
           )}
+          <div className="poster-text-grid">
+            {([
+              ["font", "字体", [["sans", "黑体"], ["serif", "宋体"]]],
+              ["titleWeight", "标题字重", [["regular", "常规"], ["bold", "粗体"]]],
+              ["scrim", "文字底色", [["auto", "自动"], ["soft", "轻柔遮罩"], ["strong", "加强遮罩"]]],
+            ] as const).map(([name, label, options]) => <label className="poster-text-field" key={name}>
+              <span>{t(label)}</span>
+              <select value={style[name]} disabled={busy} onChange={event => setStyle(current => parsePosterStyle({
+                ...current, [name]: event.target.value,
+              }))}>
+                {options.map(([value, text]) => <option value={value} key={value}>{t(text)}</option>)}
+              </select>
+            </label>)}
+          </div>
           <label className="poster-text-field">
             <span>{t("标题")}</span>
             <input autoFocus value={fields.title} maxLength={POSTER_LIMITS.title} onChange={(event) => set("title", event.target.value)} />

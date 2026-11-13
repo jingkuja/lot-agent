@@ -16,6 +16,14 @@ function fakeService() {
       releaseConversationRun: vi.fn(async () => {}),
       getMessages: vi.fn(async () => messages),
       getConversation: vi.fn(async () => ({ id: "c1", user_id: "u1" })),
+      getUploadByStorageKey: vi.fn(async (storageKey: string) => ({
+        type: "upload", storage_key: storageKey, user_id: "u1", mime: "image/png", is_private: false,
+      })),
+      getGeneratedByStorageKey: vi.fn(async (storageKey: string) => ({
+        type: "image", storage_key: storageKey, user_id: "u1", mime: "image/png", is_private: false,
+      })),
+      getTask: vi.fn(async () => null),
+      findOriginalImageTask: vi.fn(async () => null),
       addMessage: vi.fn(async (id: string, _cid: string, role: string, content: string, opts: any) => {
         messages.push({ id, role, content, ...opts });
       }),
@@ -902,7 +910,7 @@ describe("POST /conversations/:id/compose", () => {
       ["a.png", await png("#ff0000")], ["b.png", await png("#00ff00", 64)], ["c.png", await png("#0000ff")], ["other.png", await png("#000000")],
     ]);
     service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => ({
-      user_id: key === "other.png" ? "u2" : "u1", storage_key: key, mime: key === "clip.mp4" ? "video/mp4" : "image/png",
+      id: key, user_id: key === "other.png" ? "u2" : "u1", storage_key: key, mime: key === "clip.mp4" ? "video/mp4" : "image/png",
     }));
     service.db.createAsset = vi.fn(async () => {});
     const assets = {
@@ -931,9 +939,12 @@ describe("POST /conversations/:id/compose", () => {
     expect(asset.url).toMatch(/^\/static\/assets\/[0-9a-f-]+\.jpg$/);
     expect(service.db.createAsset).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", type: "image", taskId: null }));
     expect(service.db.addMessage).toHaveBeenNthCalledWith(1, body.userMessage.id, "c1", "user", "合成 3 张图片 · 一大多小");
-    expect(service.db.addMessage).toHaveBeenNthCalledWith(2, body.assistantMessage.id, "c1", "assistant", "", {
-      metadata: expect.objectContaining({ kind: "generation", mediaType: "image", status: "completed", composedFrom: { layout: "hero", gap: true, count: 3 } }),
-    });
+      expect(service.db.addMessage).toHaveBeenNthCalledWith(2, body.assistantMessage.id, "c1", "assistant", "", {
+        metadata: expect.objectContaining({
+          kind: "generation", mediaType: "image", status: "completed",
+          composedFrom: expect.objectContaining({ layout: "hero", gap: true, count: 3 }),
+        }),
+      });
     expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
     expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
   });
@@ -969,7 +980,7 @@ describe("POST /conversations/:id/generations/:messageId/redo", () => {
     };
     service.db.getGenerationMessage = vi.fn(async () => ({ status: "completed", metadata: meta }));
     service.db.getTask = vi.fn(async () => ({
-      id: "orig", user_id: "u1",
+      id: "orig", type: "image.generate", user_id: "u1",
       input: { prompt: "main", prompts: ["main", "angle", "detail", "scene"], size: "1024x1024", quality: "high", ratio: "1:1", resolution: "1K",
         modelId: "gpt-image-2", requireUserModelKey: false, conversationId: "c1", assistantMessageId: "m1", ...taskInput },
     }));
@@ -1116,7 +1127,7 @@ describe("真实字体 posters", () => {
     expect(input.displayPrompt).toBe("火锅店开业海报，全场 8 折，套餐 199 元");
     // A side panel does not fit a portrait canvas, and the invented original price is emptied.
     expect(input.poster).toMatchObject({
-      template: "bottom_panel", cleared: ["originalPrice"], fields: { title: "火锅店盛大开业", price: "¥199", originalPrice: "", discount: "8 折" },
+      template: "bottom_panel", cleared: ["price", "originalPrice"], fields: { title: "火锅店盛大开业", price: "", originalPrice: "", discount: "8 折" },
     });
     expect(service.messages.at(-1).metadata).toMatchObject({ poster: input.poster, prompt: "火锅店开业海报，全场 8 折，套餐 199 元" });
   });
@@ -1208,4 +1219,3 @@ describe("真实字体 posters", () => {
     expect((await gone.edit({ index: 0, fields })).status).toBe(404);
   });
 });
-

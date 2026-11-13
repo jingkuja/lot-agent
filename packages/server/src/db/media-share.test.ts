@@ -9,6 +9,7 @@ describe("shared media selectors", () => {
     await db.createImageShare("video.mp4", "owner", "token", "title");
     for (const [sql, params] of query.mock.calls) {
       expect(sql).toContain("storage_key = $1 AND user_id = $2");
+      expect(sql).toContain("material_purpose = 'output'");
       expect(sql).toContain("OR (type = 'video' AND mime = 'video/mp4'))");
       expect(params.slice(0, 2)).toEqual(["video.mp4", "owner"]);
     }

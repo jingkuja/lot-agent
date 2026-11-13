@@ -15,6 +15,19 @@ function button(text: string): HTMLButtonElement {
 }
 
 describe("image composer settings", () => {
+  it("reuses upload from the folded row and disables it while a submission needs verification", async () => {
+    const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    const props = { mode: "image" as const, imageScenes: true, imageCollapsible: true, onSend: vi.fn() };
+    act(() => root!.render(createElement(InputBox, props)));
+    const upload = document.querySelector<HTMLButtonElement>(".image-collapsed-upload")!;
+    expect(upload).not.toBeNull(); expect(upload.getAttribute("aria-label")).toBe("参考图");
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const pick = vi.spyOn(input, "click").mockImplementation(() => {});
+    act(() => upload.click()); expect(pick).toHaveBeenCalledOnce();
+    act(() => root!.render(createElement(InputBox, { ...props, disabled: true })));
+    expect(document.querySelector<HTMLButtonElement>(".image-collapsed-upload")?.disabled).toBe(true);
+    act(() => upload.click()); expect(pick).toHaveBeenCalledOnce();
+  });
   it("waits for slow reference decoding and sends its ratio only once", async () => {
     let decode!: () => void;
     vi.stubGlobal("Image", class {

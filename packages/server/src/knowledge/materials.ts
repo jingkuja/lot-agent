@@ -19,6 +19,9 @@ export class KnowledgeMaterials {
       AND ($6::text IS NULL OR ($6='upload' AND a.type='upload') OR ($6='generated' AND a.type<>'upload') OR ($6='archived' AND EXISTS(SELECT 1 FROM rag_items i WHERE i.owner_id=$1::uuid AND i.source_asset_id=a.id AND i.deleted_at IS NULL)))
       AND ($7::text IS NULL OR EXISTS(SELECT 1 FROM rag_items i JOIN rag_item_tags t ON t.owner_id=i.owner_id AND t.item_id=i.id WHERE i.owner_id=$1::uuid AND i.source_asset_id=a.id AND i.deleted_at IS NULL AND t.tag=$7))
       AND ($8::text IS NULL OR COALESCE(a.original_name,'素材-'||a.id::text) ILIKE '%'||$8||'%')
+      AND (a.material_purpose='output' OR a.share_token IS NOT NULL
+        OR EXISTS(SELECT 1 FROM generation_asset_references r WHERE r.asset_id=a.id AND r.role='output')
+        OR EXISTS(SELECT 1 FROM rag_items i WHERE i.owner_id=$1::uuid AND i.source_asset_id=a.id AND i.deleted_at IS NULL))
       ORDER BY a.created_at DESC,a.id DESC LIMIT $3`, [owner, before ?? null, limit, beforeId ?? null, filter.type || null, filter.source || null, filter.tag || null, filter.query || null]);
     return rows;
   }
@@ -34,17 +37,33 @@ export class KnowledgeMaterials {
     return { materialSource: row.type === "upload" ? "upload" as const : "generated" as const, path: resolvedPath, mime: row.mime as string, title: row.original_name || `素材-${row.id}`, size: Number(row.size_bytes) };
   }
   async remove(owner: string, assetId: string) {
+    const client = await this.repository.pool.connect();
     try {
-      const source = await this.source(owner, assetId);
-      await unlink(source.path);
+      await client.query("BEGIN");
+      const { rows } = await client.query(`SELECT a.id FROM assets a WHERE ${personal} AND a.id=$2 FOR UPDATE OF a`, [owner, assetId]);
+      if (!rows.length) throw new KnowledgeError("NOT_FOUND", 404, "素材不存在");
+      // Keep the asset lock through deletion. A concurrent message reference needs the FK's key-share lock.
+      const used = await client.query(`SELECT 1 FROM assets a WHERE a.id=$1 AND (
+        a.material_purpose<>'output' OR a.share_token IS NOT NULL OR a.task_id IS NOT NULL
+        OR EXISTS(SELECT 1 FROM generation_asset_references r WHERE r.asset_id=a.id))`, [assetId]);
+      if (used.rows.length) throw new KnowledgeError("CONFLICT", 409, "素材仍被作品使用，无法删除");
+      try {
+        const source = await this.source(owner, assetId);
+        await unlink(source.path);
+      } catch (error) {
+        // A missing original should not prevent removal of its stale metadata.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      await client.query(`DELETE FROM assets a WHERE ${personal} AND a.id=$2`, [owner, assetId]);
+      await client.query("COMMIT");
+      // Knowledge archives are independent private copies and remain available.
+      return { ok: true };
     } catch (error) {
-      // A missing original should not prevent removal of its stale metadata.
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
     }
-    const result = await this.repository.pool.query(`DELETE FROM assets a WHERE ${personal} AND a.id=$2 RETURNING a.id`, [owner, assetId]);
-    if (!result.rows.length) throw new KnowledgeError("NOT_FOUND", 404, "素材不存在");
-    // Knowledge archives are independent private copies and remain available.
-    return { ok: true };
   }
   async read(owner: string, assetId: string) {
     const source = await this.source(owner, assetId);

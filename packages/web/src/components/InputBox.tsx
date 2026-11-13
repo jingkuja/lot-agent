@@ -747,6 +747,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     ].filter(Boolean).join(" ")}>
       {collapsed && <ImageComposerSlate scene={imageScene} realText={realTextAvailable && realText}
         onUnfold={() => { setFolded(false); if (!draftLocked) textareaRef.current?.focus(); }} />}
+      {collapsed && <button type="button" className="btn-reference image-collapsed-upload" disabled={draftLocked}
+        aria-label={t(posterRemix ? "上传产品图" : "参考图")} onClick={() => {
+          if (files.length >= maxFiles) { setUploadLimitNotice(true); setFolded(false); return; }
+          fileInputRef.current?.click();
+        }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <rect x="3" y="3" width="14" height="14" rx="2" /><path d="m3 14 5-5 9 8M19 15v8M15 19h8" />
+        </svg>
+      </button>}
       {sceneTabs && !collapsed && <>
         <ImageComposerHeader scene={imageScene} onChange={setImageScene} disabled={draftLocked}
           onFold={imageCollapsible ? () => setFolded(true) : undefined} />

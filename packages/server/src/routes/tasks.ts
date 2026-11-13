@@ -100,7 +100,7 @@ export function createTaskRoutes(service: AgentService) {
       return c.json({ error: quota.reason, code: quota.code, estimatedCost }, 402);
     }
 
-    const jobId = await service.jobQueue.enqueue(type, safeInput, userId);
+    const jobId = await service.jobQueue.enqueue(type, { ...safeInput, ...(type === "image.generate" ? { fresh: true } : {}) }, userId);
     return c.json({ jobId }, 202);
   });
 

@@ -1706,6 +1706,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 }
 .image-studio-slate-refs { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .input-box--collapsed .input-toolbar { flex: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.image-collapsed-upload { flex: 0 0 32px; width: 32px; height: 32px; padding: 6px; }
 .input-box--collapsed.input-box--busy::before { left: 14px; right: 14px; }
 @media (prefers-reduced-motion: reduce) {
   .scene-dock-tab, .scene-dock-icon { transition: none; }
@@ -4993,6 +4994,16 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .image-viewer-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .image-viewer-nav svg { width: 20px; height: 20px; }
 .image-viewer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
+.image-share-control { margin-right: auto; }
+.image-share-panel { width: min(480px, 100%); padding: 12px; background: var(--bg-card); border-radius: 10px; }
+.image-share-panel p { margin: 0 0 8px; color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.image-share-panel input { box-sizing: border-box; width: 100%; padding: 8px; color: var(--text); background: var(--bg); border: 1px solid var(--border); }
+.image-share-panel button { margin: 8px 8px 0 0; color: var(--text); background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+.public-image-share { max-width: 960px; margin: 0 auto; padding: 24px 20px; color: var(--text); }
+.public-image-share header { display: flex; gap: 16px; align-items: center; color: var(--text-secondary); }
+.public-image-share a { color: var(--accent); }
+.public-image-share h1 { font-size: clamp(20px, 4vw, 30px); overflow-wrap: anywhere; }
+.public-image-share :is(img, video) { display: block; max-width: 100%; height: auto; margin: 24px auto; border-radius: 12px; }
 .image-viewer-edit {
   padding: 6px 18px; border: 1.5px solid var(--accent); border-radius: 999px;
   background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
@@ -5055,6 +5066,12 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 }
 .poster-library-categories button:hover, .poster-library-more:hover { background: var(--bg-hover); color: var(--text); }
 .poster-library-gallery { min-height: 0; overflow-y: auto; padding: 4px; }
+.poster-library-filters { display: flex; gap: 8px; padding: 4px; }
+.poster-library-filters :is(input, select) {
+  min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+.poster-library-filters input { flex: 1; width: 0; }
 .poster-library-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .poster-library-tile {
   display: grid; align-content: start; min-width: 0; padding: 4px;
@@ -5119,11 +5136,11 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-text-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .poster-text-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
 .poster-text-field--wide { grid-column: 1 / -1; }
-.poster-text-field input, .poster-text-field textarea {
+.poster-text-field input, .poster-text-field textarea, .poster-text-field select {
   width: 100%; padding: 8px 10px; border: 1.5px solid var(--border-input); border-radius: var(--radius-md);
   background: var(--bg-input); color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; outline: none; resize: vertical;
 }
-.poster-text-field input:focus, .poster-text-field textarea:focus { border-color: var(--accent); }
+.poster-text-field input:focus, .poster-text-field textarea:focus, .poster-text-field select:focus { border-color: var(--accent); }
 .poster-text-field input::placeholder, .poster-text-field textarea::placeholder { color: var(--text-muted); }
 @media (max-width: 720px) {
   .poster-text-body { grid-template-columns: 1fr; }

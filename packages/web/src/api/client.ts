@@ -1,5 +1,5 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
-import type { PosterFields, PosterLayout, PosterTemplate } from "@lot-agent/core/poster";
+import type { PosterFields, PosterLayout, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
 import type {
   ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, SetRedoRequest,
 } from "../lib/image-settings.js";
@@ -264,6 +264,12 @@ export interface AgentRunRecord {
 }
 
 export const api = {
+  imageShare: (url: string, signal?: AbortSignal) =>
+    request<{ token: string | null }>(`/assets/shares?${new URLSearchParams({ url })}`, { signal }),
+  createImageShare: (url: string) => request<{ token: string }>("/assets/shares", {
+    method: "POST", body: JSON.stringify({ url }),
+  }),
+  revokeImageShare: (token: string) => request<{ ok: boolean }>(`/assets/shares/${encodeURIComponent(token)}`, { method: "DELETE" }),
   getAgentRuns: (conversationId: string) => request<{ runs: AgentRunRecord[] }>(`/conversations/${encodeURIComponent(conversationId)}/runs`),
   verifyAgentOperation: (conversationId: string, operationId: string, outcome: "succeeded" | "failed") =>
     request<{ ok: boolean }>(`/conversations/${encodeURIComponent(conversationId)}/operations/${encodeURIComponent(operationId)}/verify`, {
@@ -565,10 +571,10 @@ export const api = {
     request<{ url: string }>("/knowledge-bases/link", { method: "POST" }),
 
   // ── Generation (image/video via conversation) ────────────────────────────
-  posterCategories: (signal?: AbortSignal) => request<{ categories: string[] }>("/poster-library/categories", { signal }),
-  posterImages: (category: string, offset: number, signal?: AbortSignal) =>
+  posterCategories: (signal?: AbortSignal) => request<{ categories: string[]; orientations?: boolean }>("/poster-library/categories", { signal }),
+  posterImages: (category: string, offset: number, signal?: AbortSignal, query = "", orientation = "all") =>
     request<{ items: PosterLibraryImage[]; nextOffset: number | null }>(
-      `/poster-library/images?${new URLSearchParams({ category, offset: String(offset) })}`, { signal }
+      `/poster-library/images?${new URLSearchParams({ category, offset: String(offset), q: query, orientation })}`, { signal }
     ),
 
   generate: (
@@ -664,7 +670,7 @@ export const api = {
     ),
 
   /** 真实字体: change one typeset image's wording or template; rendered again on the server, free. */
-  editPoster: (conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate }) =>
+  editPoster: (conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate; style?: PosterStyle }) =>
     request<{ index: number; asset: { url: string; mime: string }; poster: PosterLayout }>(
       `/conversations/${conversationId}/generations/${messageId}/poster`,
       { method: "POST", body: JSON.stringify(body) }

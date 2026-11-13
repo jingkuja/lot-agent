@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptedTitleLines, editPosterLayout, emptyPosterFields, parsePosterLayout, parsePosterPlan, PosterPlanError, posterBackgroundPrompt,
-  posterTemplateFor, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields,
+  posterTemplateFor, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
 } from "./index.js";
 
 const request = "做一张火锅店开业海报，全场 8 折，套餐 199 元，11 月 20 日开业，地址人民路 88 号";
@@ -102,6 +102,17 @@ describe("parsePosterPlan", () => {
 });
 
 describe("layout helpers", () => {
+  it("round-trips versioned styles, keeps old defaults, and ignores unknown fonts and markup", () => {
+    const old = parsePosterLayout({ version: 1, template: "overlay", fields: { title: "旧海报" } })!;
+    expect(old.version).toBe(2);
+    expect(parsePosterStyle(old.style)).toEqual(DEFAULT_POSTER_STYLE);
+    const style = { font: "serif", titleWeight: "regular", scrim: "soft" } as const;
+    const edited = editPosterLayout(old, { style });
+    expect(parsePosterLayout(JSON.parse(JSON.stringify(edited)))?.style).toEqual(style);
+    expect(editPosterLayout(edited, { fields: { title: "手动输入价格¥888" } }).style).toEqual(style);
+    expect(editPosterLayout(edited, { style: { font: '<span font_desc="evil">', titleWeight: 999, scrim: "invisible" } }).style)
+      .toEqual(DEFAULT_POSTER_STYLE);
+  });
   it("fits the template to the canvas shape", () => {
     expect(posterTemplateFor("side_panel", 1024, 1536)).toBe("bottom_panel");
     expect(posterTemplateFor("bottom_panel", 1536, 864)).toBe("side_panel");
@@ -123,7 +134,7 @@ describe("layout helpers", () => {
     })!;
     const same = editPosterLayout(stored, { fields: { ...stored.fields, price: "¥99" }, template: "overlay" });
     expect(same).toEqual({
-      version: 1, template: "overlay", fields: { ...stored.fields, price: "¥99" }, titleLines: ["火锅店", "盛大开业"], background: { url: "/static/assets/bg.png" },
+      version: 2, template: "overlay", fields: { ...stored.fields, price: "¥99" }, titleLines: ["火锅店", "盛大开业"], background: { url: "/static/assets/bg.png" },
     });
     expect(editPosterLayout(stored, { fields: { ...stored.fields, title: "新店开业" } }).titleLines).toBeUndefined();
   });

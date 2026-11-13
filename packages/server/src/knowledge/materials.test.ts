@@ -11,15 +11,21 @@ async function fixture(type = "image", key = "picture.png") {
   const folder = join(root, type === "upload" ? "uploads" : "assets");
   await mkdir(folder); await writeFile(join(folder, "picture.png"), "image");
   const query = vi.fn(async (_sql: string, _values: string[]) => ({ rows: [{ id: "asset", type, storage_key: key }] }));
-  const service = new KnowledgeMaterials({ pool: { query } } as any, {} as any, root);
-  return { root, folder, query, service };
+  const transaction = vi.fn(async (sql: string, values?: string[]) => {
+    if (sql.startsWith("SELECT a.id")) return query(sql, values!);
+    return { rows: [] as { id: string; type: string; storage_key: string }[] };
+  });
+  const release = vi.fn();
+  const service = new KnowledgeMaterials({ pool: { query, connect: async () => ({ query: transaction, release }) } } as any, {} as any, root);
+  return { root, folder, query, service, transaction, release };
 }
 describe("permanent material deletion", () => {
   it.each(["image", "upload"])("deletes the %s original and asset record", async (type) => {
-    const { service, folder, query } = await fixture(type);
+    const { service, folder, transaction } = await fixture(type);
     expect(await service.remove("owner", "asset")).toEqual({ ok: true });
     await expect(readFile(join(folder, "picture.png"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(query.mock.calls.at(-1)).toEqual([expect.stringContaining("DELETE FROM assets"), ["owner", "asset"]]);
+    expect(transaction).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM assets"), ["owner", "asset"]);
+    expect(transaction).toHaveBeenLastCalledWith("COMMIT");
   });
   it("rejects materials outside the personal ownership scope without deleting files", async () => {
     const { service, folder, query } = await fixture();
@@ -35,11 +41,19 @@ describe("permanent material deletion", () => {
     await symlink(join(root, "outside.png"), join(folder, "escape.png"));
     await expect(service.remove("owner", "asset")).rejects.toMatchObject({ status: 404 });
     expect(await readFile(join(root, "outside.png"), "utf8")).toBe("keep");
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
   });
   it("can finish deletion when the original file is already absent", async () => {
-    const { service, query } = await fixture("image", "missing.png");
+    const { service, transaction } = await fixture("image", "missing.png");
     expect(await service.remove("owner", "asset")).toEqual({ ok: true });
-    expect(query.mock.calls.at(-1)?.[0]).toContain("DELETE FROM assets");
+    expect(transaction).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM assets"), ["owner", "asset"]);
+  });
+  it("preserves an image referenced by a poster, task or share", async () => {
+    const { service, folder, transaction, release } = await fixture();
+    transaction.mockResolvedValue({ rows: [{ id: "asset", type: "image", storage_key: "picture.png" }] });
+    await expect(service.remove("owner", "asset")).rejects.toMatchObject({ status: 409 });
+    expect(await readFile(join(folder, "picture.png"), "utf8")).toBe("image");
+    expect(transaction).toHaveBeenLastCalledWith("ROLLBACK");
+    expect(release).toHaveBeenCalled();
   });
 });

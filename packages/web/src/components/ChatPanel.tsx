@@ -1,4 +1,4 @@
-import type { PosterFields, PosterTemplate } from "@lot-agent/core/poster";
+import type { PosterFields, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
 import { DesktopWorkspace, DesktopWorkspaceBar, DesktopApprovalCards } from "./DesktopWorkspace.js";
 import { useDesktopWorkspace } from "../hooks/useDesktopWorkspace.js";
 import { useI18n } from "../i18n/index.js";
@@ -57,7 +57,7 @@ interface ChatPanelProps {
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. */
-  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate) => Promise<string | undefined>;
+  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
   onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;

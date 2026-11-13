@@ -1068,6 +1068,8 @@ export class DB {
   async getOwnedImageShare(storageKey: string, userId: string): Promise<{ token: string | null } | null> {
     const { rows } = await this.pool.query(
       `SELECT share_token AS token FROM assets WHERE storage_key = $1 AND user_id = $2
+       AND (material_purpose = 'output' OR share_token IS NOT NULL OR EXISTS(
+         SELECT 1 FROM generation_asset_references r WHERE r.asset_id = assets.id AND r.role = 'output'))
        AND ((type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) OR (type = 'video' AND mime = 'video/mp4'))`,
       [storageKey, userId]
     );
@@ -1078,6 +1080,8 @@ export class DB {
     const { rows } = await this.pool.query(
       `UPDATE assets SET share_token = COALESCE(share_token, $3), share_title = $4
        WHERE storage_key = $1 AND user_id = $2
+         AND (material_purpose = 'output' OR share_token IS NOT NULL OR EXISTS(
+           SELECT 1 FROM generation_asset_references r WHERE r.asset_id = assets.id AND r.role = 'output'))
          AND ((type = 'image' AND mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')) OR (type = 'video' AND mime = 'video/mp4'))
        RETURNING share_token AS token, share_title AS title, url`,
       [storageKey, userId, token, title]
@@ -1117,10 +1121,12 @@ export class DB {
     originalName?: string | null;
     isPrivate?: boolean;
     idempotent?: boolean;
+    materialPurpose?: "output" | "dependency" | "version";
   }): Promise<void> {
     await this.pool.query(
-      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec, original_name, is_private)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)${a.idempotent ? " ON CONFLICT (id) DO NOTHING" : ""}`,
+      `INSERT INTO assets (id, task_id, user_id, type, storage_key, url, mime, size_bytes, width, height, duration_sec,
+         original_name, is_private, material_purpose)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)${a.idempotent ? " ON CONFLICT (id) DO NOTHING" : ""}`,
       [
         a.id,
         a.taskId ?? null,
@@ -1135,6 +1141,7 @@ export class DB {
         a.durationSec ?? null,
         a.originalName ?? null,
         a.isPrivate ?? false,
+        a.materialPurpose ?? "output",
       ]
     );
   }

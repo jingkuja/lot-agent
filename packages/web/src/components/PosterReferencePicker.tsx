@@ -57,6 +57,9 @@ function PosterLibraryDialog({ selected, onClose, onPick }: {
   const titleId = useId();
   const [categories, setCategories] = useState<string[] | null>(null);
   const [category, setCategory] = useState(selected?.category ?? "");
+  const [query, setQuery] = useState("");
+  const [orientations, setOrientations] = useState(false);
+  const [orientation, setOrientation] = useState("all");
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const active = categories?.includes(category) ? category : categories?.[0];
@@ -71,7 +74,12 @@ function PosterLibraryDialog({ selected, onClose, onPick }: {
     const controller = new AbortController();
     setError(false);
     void api.posterCategories(controller.signal).then(
-      (result) => { if (!controller.signal.aborted) setCategories(result.categories); },
+      (result) => {
+        if (controller.signal.aborted) return;
+        setCategories(result.categories);
+        setOrientations(!!result.orientations);
+        if (!result.orientations) setOrientation("all");
+      },
       () => { if (!controller.signal.aborted) setError(true); },
     );
     return () => controller.abort();
@@ -91,7 +99,19 @@ function PosterLibraryDialog({ selected, onClose, onPick }: {
               {t(name)}
             </button>)}
           </div>}
-    {active && <PosterGallery key={active} category={active} selectedUrl={selected?.url} onPick={onPick} />}
+    {active && <>
+      <div className="poster-library-filters">
+        <input type="search" value={query} maxLength={100} placeholder={t("搜索商品名")}
+          aria-label={t("搜索商品名")} onChange={event => setQuery(event.target.value)} />
+        {orientations && <select value={orientation} aria-label={t("图片方向")} onChange={event => setOrientation(event.target.value)}>
+          {[["all", "全部方向"], ["portrait", "竖版"], ["landscape", "横版"], ["square", "方图"]].map(([value, label]) => (
+            <option key={value} value={value}>{t(label)}</option>
+          ))}
+        </select>}
+      </div>
+      <PosterGallery key={JSON.stringify([active, query, orientation])} category={active} query={query} orientation={orientation}
+        selectedUrl={selected?.url} onPick={onPick} />
+    </>}
   </dialog>;
 }
 
@@ -103,8 +123,10 @@ function PosterLoadError({ onRetry }: { onRetry: () => void }) {
   </div>;
 }
 
-function PosterGallery({ category, selectedUrl, onPick }: {
+function PosterGallery({ category, query, orientation, selectedUrl, onPick }: {
   category: string;
+  query: string;
+  orientation: string;
   selectedUrl?: string;
   onPick: (poster: PosterSelection) => void;
 }) {
@@ -118,14 +140,14 @@ function PosterGallery({ category, selectedUrl, onPick }: {
   useEffect(() => {
     const controller = new AbortController();
     setStatus("loading");
-    void api.posterImages(category, offset, controller.signal).then(({ items: page, nextOffset: next }) => {
+    const timer = setTimeout(() => void api.posterImages(category, offset, controller.signal, query, orientation).then(({ items: page, nextOffset: next }) => {
       if (controller.signal.aborted) return;
       setItems((current) => offset > 0 ? [...current, ...page] : page);
       setNextOffset(next);
       setStatus("ready");
-    }, () => { if (!controller.signal.aborted) setStatus("error"); });
-    return () => controller.abort();
-  }, [category, offset, attempt]);
+    }, () => { if (!controller.signal.aborted) setStatus("error"); }), offset === 0 ? 250 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [category, query, orientation, offset, attempt]);
 
   return <div className="poster-library-gallery" aria-busy={status === "loading"}>
     <div className="poster-library-grid">
@@ -133,7 +155,7 @@ function PosterGallery({ category, selectedUrl, onPick }: {
     </div>
     {status === "error" && <PosterLoadError onRetry={() => setAttempt((count) => count + 1)} />}
     {status === "loading" && <p className="poster-library-status" role="status">{t("读取中…")}</p>}
-    {status === "ready" && !items.length && <p className="poster-library-status" role="status">{t("此分类暂无爆款参考图")}</p>}
+    {status === "ready" && !items.length && <p className="poster-library-status" role="status">{t("没有符合条件的参考图")}</p>}
     {status === "ready" && nextOffset !== null && <button type="button" className="poster-library-more"
       onClick={() => setOffset(nextOffset)}>{t("加载更多")}</button>}
   </div>;

@@ -1,4 +1,4 @@
-import { storedPosters, type PosterFields, type PosterTemplate } from "@lot-agent/core/poster";
+import { storedPosters, type PosterFields, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile } from "../api/client.js";
@@ -795,12 +795,12 @@ export function useChat(
 
   // 真实字体: new wording for one typeset image. Rendered again on the server, free; resolves to an error text to show.
   const editPoster = useCallback(async (
-    messageId: string, index: number, fields: PosterFields, template: PosterTemplate,
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
   ): Promise<string | undefined> => {
     const cid = cidRef.current;
     if (!cid) return "改字失败，请稍后重试";
     try {
-      const result = await api.editPoster(cid, messageId, { index, fields, template });
+      const result = await api.editPoster(cid, messageId, { index, fields, template, style });
       if (cidRef.current === cid) dispatch({ type: "generation_poster_edited", messageId, index, asset: result.asset, poster: result.poster });
       return undefined;
     } catch (e) {

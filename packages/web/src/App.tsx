@@ -7,6 +7,7 @@ import { Titlebar } from "./components/Titlebar.js";
 import { DownloadToast } from "./components/DownloadToast.js";
 import { DesktopDownload } from "./components/DesktopDownload.js";
 import { DesktopUpdate } from "./components/DesktopUpdate.js";
+import { PublicImageShare } from "./components/PublicImageShare.js";
 import { api, getToken, setToken, clearToken, type User } from "./api/client.js";
 import { readTokenFromUrl, stripTokenFromUrl } from "./lib/url-token.js";
 import "./App.css";
@@ -16,6 +17,14 @@ type View = "loading" | "login" | "ready";
 const AUTO_LOGIN_FAIL = "自动登录失败，请手动登录";
 
 export default function App() {
+  if (/^\/share(?:\/|$)/.test(window.location.pathname)) {
+    const token = /^\/share\/([^/]+)\/?$/.exec(window.location.pathname)?.[1] ?? "";
+    return <><PublicImageShare token={token} /><ThemeToggle /></>;
+  }
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const { t, enabled: international } = useI18n();
   const [view, setView] = useState<View>("loading");
   const [user, setUser] = useState<User | null>(null);

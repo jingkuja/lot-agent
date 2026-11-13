@@ -9,11 +9,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { posterHasText, posterTemplateFor, titleLineOptions, type PosterFields, type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
+import { DEFAULT_POSTER_STYLE, parsePosterStyle, posterHasText, posterTemplateFor, titleLineOptions,
+  type PosterLayout, type PosterTemplate } from "@lot-agent/core/poster";
 
-/** The only font family posters use; both weights ship in `assets/fonts`. */
+/** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
-const FONT_FILES = ["NotoSansSC-Regular.otf", "NotoSansSC-Bold.otf"];
+const FONT_FILES = ["NotoSansSC-Regular.otf", "NotoSansSC-Bold.otf", "NotoSerifSC-Regular.otf", "NotoSerifSC-Bold.otf"];
 
 function findFontDirectory(): string | null {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -134,9 +135,12 @@ export function escapeMarkup(text: string): string {
   return escapeXml(text);
 }
 
-function span(text: string, size: number, color: Rgb, bold = false, extra = ""): string {
-  const font = `${POSTER_FONT_FAMILY}${bold ? " Bold" : ""} ${Math.max(8, Math.round(size))}`;
-  return `<span font_desc="${font}" foreground="${hex(color)}"${extra}>${escapeMarkup(text)}</span>`;
+function posterSpan(layout: PosterLayout) {
+  const family = parsePosterStyle(layout.style).font === "serif" ? "Noto Serif SC" : POSTER_FONT_FAMILY;
+  return (text: string, size: number, color: Rgb, bold = false, extra = ""): string => {
+    const font = `${family}${bold ? " Bold" : ""} ${Math.max(8, Math.round(size))}`;
+    return `<span font_desc="${font}" foreground="${hex(color)}"${extra}>${escapeMarkup(text)}</span>`;
+  };
 }
 
 /** Render Pango markup to a transparent picture. `width` wraps the text; without it the text keeps its own lines. */
@@ -180,7 +184,8 @@ async function rowPicture(items: Picture[], gap: number): Promise<Picture> {
 }
 
 /** Text on a rounded block of the accent color (the discount badge). */
-async function badgePicture(text: string, size: number, palette: Palette): Promise<Picture> {
+async function badgePicture(text: string, size: number, palette: Palette, layout: PosterLayout): Promise<Picture> {
+  const span = posterSpan(layout);
   const label = await textPicture(span(text, size, palette.onAccent, true));
   const padX = Math.round(size * 0.55);
   const padY = Math.round(size * 0.28);
@@ -193,7 +198,9 @@ async function badgePicture(text: string, size: number, palette: Palette): Promi
 }
 
 /** Price, struck-through original price and discount badge on one row, scaled down if the row is too wide. */
-async function priceRow(fields: PosterFields, unit: number, width: number, palette: Palette): Promise<Picture | null> {
+async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette): Promise<Picture | null> {
+  const { fields } = layout;
+  const span = posterSpan(layout);
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
   const cjk = CJK.test(`${fields.title}${fields.subtitle}${fields.points.join("")}${fields.address}`);
   const build = async (scale: number) => {
@@ -212,7 +219,7 @@ async function priceRow(fields: PosterFields, unit: number, width: number, palet
       const text = `${before}${number}${after ? ` ${after}` : ""}`;
       items.push(await textPicture(span(text, unit * 0.36 * scale, palette.muted, false, ' strikethrough="true"')));
     }
-    if (fields.discount) items.push(await badgePicture(fields.discount, unit * (fields.price ? 0.34 : 0.5) * scale, palette));
+    if (fields.discount) items.push(await badgePicture(fields.discount, unit * (fields.price ? 0.34 : 0.5) * scale, palette, layout));
     return rowPicture(items, Math.round(unit * 0.22 * scale));
   };
   const row = await build(1);
@@ -221,22 +228,25 @@ async function priceRow(fields: PosterFields, unit: number, width: number, palet
 
 /** The title at the largest size (up to `max`) at which its widest line fits `width`, over the allowed line breaks. */
 async function titlePicture(layout: PosterLayout, max: number, width: number, color: Rgb, align: Align): Promise<Picture | null> {
+  const span = posterSpan(layout);
+  const bold = parsePosterStyle(layout.style).titleWeight === "bold";
   const title = layout.fields.title;
   if (!title) return null;
   let best: { lines: string[]; size: number } | undefined;
   for (const lines of titleLineOptions(title, layout.titleLines)) {
-    const probe = await textPicture(span(lines.join("\n"), 100, color, true));
+    const probe = await textPicture(span(lines.join("\n"), 100, color, bold));
     const size = Math.min(max, Math.floor(100 * width / probe.width));
     // More lines must buy clearly larger type to be worth the height.
     const score = size * 0.92 ** (lines.length - 1);
     if (!best || score > best.size * 0.92 ** (best.lines.length - 1)) best = { lines, size };
   }
   if (!best) return null;
-  return textPicture(span(best.lines.join("\n"), best.size, color, true), { align, spacing: Math.round(best.size * 0.12) });
+  return textPicture(span(best.lines.join("\n"), best.size, color, bold), { align, spacing: Math.round(best.size * 0.12) });
 }
 
 /** Every text block of a poster stacked top to bottom for a column `width` wide, with type scaled by `scale`. */
 async function buildBlocks(layout: PosterLayout, width: number, unit: number, scale: number, palette: Palette, align: Align): Promise<Block[]> {
+  const span = posterSpan(layout);
   const fields = layout.fields;
   const u = unit * scale;
   const blocks: Block[] = [];
@@ -252,7 +262,7 @@ async function buildBlocks(layout: PosterLayout, width: number, unit: number, sc
       : fields.points.map((point) => span("• ", u * 0.34, palette.accent, true) + span(point, u * 0.34, palette.text)).join("\n");
     add(await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
   }
-  add(await priceRow(fields, u, width, palette), 0.3);
+  add(await priceRow(layout, u, width, palette), 0.3);
   const footer = [fields.date, fields.address].filter(Boolean);
   if (footer.length) {
     add(await textPicture(span(footer.join("\n"), u * 0.27, palette.muted), { width, align, spacing: Math.round(u * 0.1) }), 0.34);
@@ -392,7 +402,8 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : { left: pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
   const layers = await placeBlocks(fitted.blocks, region, align, offset);
-  return { layers: [{ input: panelSvg(W, H, side, size, feather, palette.panel), left: 0, top: 0 }, ...layers], overflow: fitted.overflow };
+  const opacity = parsePosterStyle(layout.style).scrim === "soft" ? 0.72 : 1;
+  return { layers: [{ input: panelSvg(W, H, side, size, feather, palette.panel, opacity), left: 0, top: 0 }, ...layers], overflow: fitted.overflow };
 }
 
 /** Area variation above which text written on the picture gets a scrim (0–255 standard deviation). */
@@ -423,9 +434,11 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
     const region: Rect = side === "top" ? { left: pad, top: pad, width: columnWidth, height: maxHeight }
       : { left: pad, top: H - pad - height, width: columnWidth, height };
     // Not enough open space or contrast: put a scrim under the text rather than paying for another picture.
-    if (spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5) {
+    const strength = parsePosterStyle(layout.style).scrim;
+    if (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5) {
       const scrim = lightText ? BLACK : WHITE;
-      layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, 0.58), left: 0, top: 0 });
+      const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
+      layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity), left: 0, top: 0 });
     }
     const placed = await placeBlocks(fitted.blocks, region, "centre", 0);
     layers.push(...await shadowLayers(placed, lightText ? BLACK : WHITE, Math.max(2, unit * 0.06)), ...placed);
@@ -449,6 +462,10 @@ export async function renderPoster(background: Buffer, layout: PosterLayout): Pr
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  const content = JSON.stringify([backgroundKey, layout.template, layout.fields, layout.titleLines ?? null]);
+  const style = parsePosterStyle(layout.style);
+  const values: unknown[] = [backgroundKey, layout.template, layout.fields, layout.titleLines ?? null];
+  // Keep the v1 key for its exact defaults; non-default styles have a versioned namespace.
+  if (JSON.stringify(style) !== JSON.stringify(DEFAULT_POSTER_STYLE)) values.push({ version: 2, style });
+  const content = JSON.stringify(values);
   return createHash("sha256").update(content).digest("hex").slice(0, 32);
 }
