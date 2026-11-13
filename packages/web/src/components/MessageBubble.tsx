@@ -54,6 +54,7 @@ interface MessageBubbleProps {
   /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  onPreviewPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
 }
 
 function ImageInputDetails({ input }: { input: ImageInputContext }) {
@@ -100,6 +101,7 @@ export function MessageBubble({
   onRedoGeneration,
   onExportGeneration,
   onEditPoster,
+  onPreviewPoster,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -117,6 +119,7 @@ export function MessageBubble({
             onRedo={onRedoGeneration}
             onExport={onExportGeneration}
             onEditPoster={onEditPoster}
+            onPreviewPoster={onPreviewPoster}
           />
         </div>
       </div>

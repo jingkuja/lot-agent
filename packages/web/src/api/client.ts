@@ -676,6 +676,25 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) }
     ),
 
+  /** 改字预览: the rendered picture for unsaved wording and style; nothing is stored. */
+  previewPoster: async (
+    conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate; style?: PosterStyle },
+  ): Promise<Blob> => {
+    const res = await fetch(`${BASE}/conversations/${conversationId}/generations/${messageId}/poster/preview`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body),
+    });
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event("lot:unauthorized"));
+      throw new Error("Unauthorized");
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
+    }
+    return res.blob();
+  },
+
   composeGeneration: (conversationId: string, messageId: string, body: { layout: ComposeLayout; gap: boolean }) =>
     request<{ composite: GenerationComposite }>(
       `/conversations/${conversationId}/generations/${messageId}/compose`,

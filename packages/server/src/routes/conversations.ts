@@ -1168,10 +1168,13 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
   // POST /:id/generations/:messageId/poster — 真实字体: change the wording (or template) of one typeset image and render
   // it again on its stored text-free background. Local work only: no model request, nothing metered. The picture is
   // stored under a key made from the background and the layout, so the same edit is rendered once.
-  app.post("/:id/generations/:messageId/poster", async (c) => {
+  // POST …/poster/preview runs the same checks and returns the picture itself: nothing stored, the message unchanged.
+  // It has its own path so a server without it answers 404 instead of saving.
+  app.on("POST", ["/:id/generations/:messageId/poster", "/:id/generations/:messageId/poster/preview"], async (c) => {
     const userId = c.get("userId");
     const conversationId = c.req.param("id");
     const messageId = c.req.param("messageId");
+    const preview = c.req.path.endsWith("/poster/preview");
     const body = await c.req.json().catch(() => null) as { index?: unknown; fields?: unknown; template?: unknown; style?: unknown } | null;
     const index = body?.index;
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !body?.fields || typeof body.fields !== "object") {
@@ -1193,6 +1196,17 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       return c.json({ error: "背景图已不存在，无法改字" }, 409);
     }
     let layout = editPosterLayout(stored, { fields: body.fields, template: body.template, style: body.style });
+    if (preview) {
+      try {
+        const rendered = await renderPoster(await deps.assets.get(backgroundKey), layout);
+        return new Response(new Uint8Array(rendered.body), {
+          headers: { "Content-Type": rendered.mime, "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        console.warn("[image.poster] preview failed", { messageId, errorType: (error as Error)?.name });
+        return c.json({ error: "预览失败，请稍后重试" }, 500);
+      }
+    }
     let asset: { url: string; mime: string };
     let overflow = false;
     try {

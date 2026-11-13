@@ -1125,9 +1125,10 @@ describe("真实字体 posters", () => {
     expect(input.prompt).toContain("A steaming hot pot");
     expect(input.prompt).toContain("no text");
     expect(input.displayPrompt).toBe("火锅店开业海报，全场 8 折，套餐 199 元");
-    // A side panel does not fit a portrait canvas, and the invented original price is emptied.
+    // A side panel writes in columns, so it stays on a portrait canvas; the invented original price is emptied.
+    expect(input.prompt).toContain("right 55% of the frame");
     expect(input.poster).toMatchObject({
-      template: "bottom_panel", cleared: ["price", "originalPrice"], fields: { title: "火锅店盛大开业", price: "", originalPrice: "", discount: "8 折" },
+      template: "side_panel", cleared: ["price", "originalPrice"], fields: { title: "火锅店盛大开业", price: "", originalPrice: "", discount: "8 折" },
     });
     expect(service.messages.at(-1).metadata).toMatchObject({ poster: input.poster, prompt: "火锅店开业海报，全场 8 折，套餐 199 元" });
   });

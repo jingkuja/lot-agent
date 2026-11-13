@@ -58,6 +58,7 @@ interface ChatPanelProps {
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. */
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  onPreviewPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
   onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;
@@ -174,6 +175,7 @@ export function ChatPanel({
   onRedoGeneration,
   onExportGeneration,
   onEditPoster,
+  onPreviewPoster,
   onWhiteBackground,
   onEditImage,
   knowledgeBases,
@@ -362,6 +364,7 @@ export function ChatPanel({
               onRedoGeneration={readOnly ? undefined : onRedoGeneration}
               onExportGeneration={onExportGeneration}
               onEditPoster={readOnly ? undefined : onEditPoster}
+              onPreviewPoster={readOnly ? undefined : onPreviewPoster}
               onWhiteBackground={readOnly ? undefined : onWhiteBackground}
               onEditImage={editImage}
               onCancelGeneration={onStop}

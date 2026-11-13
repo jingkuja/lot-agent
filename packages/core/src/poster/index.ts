@@ -20,6 +20,8 @@ export interface PosterPartStyle {
   color?: string;
   dx?: number;
   dy?: number;
+  /** Written top to bottom in columns; absent means the template's own default (vertical in side panels). */
+  vertical?: boolean;
 }
 
 export interface PosterStyle {
@@ -41,11 +43,12 @@ function partStyles(value: unknown): PosterStyle["parts"] {
   for (const name of POSTER_PARTS) {
     const raw = (value as Record<string, unknown>)[name];
     if (!raw || typeof raw !== "object") continue;
-    const { color, dx, dy } = raw as Record<string, unknown>;
+    const { color, dx, dy, vertical } = raw as Record<string, unknown>;
     const part: PosterPartStyle = {};
     if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) part.color = color.toLowerCase();
     if (nudge(dx)) part.dx = nudge(dx);
     if (nudge(dy)) part.dy = nudge(dy);
+    if (typeof vertical === "boolean") part.vertical = vertical;
     if (Object.keys(part).length) parts[name] = part;
   }
   return Object.keys(parts).length ? parts : undefined;
@@ -64,12 +67,22 @@ export function parsePosterStyle(value: unknown): PosterStyle {
 }
 
 /**
- * Where the text goes. The three panel templates put it on a block of color taken from the picture, so it is always
- * readable; `overlay` writes straight onto the picture and relies on open space plus a scrim.
+ * Where the text goes. The panel templates put it on a block of color taken from the picture, so it is always
+ * readable; `overlay` writes straight onto the picture and relies on open space plus a scrim. `side_panel` has the
+ * text on the left, `right_panel` on the right.
  */
-export const POSTER_TEMPLATES = ["bottom_panel", "top_panel", "side_panel", "overlay"] as const;
+export const POSTER_TEMPLATES = ["bottom_panel", "top_panel", "side_panel", "right_panel", "overlay"] as const;
 export type PosterTemplate = typeof POSTER_TEMPLATES[number];
 export const DEFAULT_POSTER_TEMPLATE: PosterTemplate = "overlay";
+
+export function posterSideTemplate(template: PosterTemplate): boolean {
+  return template === "side_panel" || template === "right_panel";
+}
+
+/** Whether a part is written in columns: the user's own choice, else vertical in the side panels only. */
+export function posterPartVertical(style: PosterStyle | undefined, part: PosterPart, template: PosterTemplate): boolean {
+  return style?.parts?.[part]?.vertical ?? posterSideTemplate(template);
+}
 
 export interface PosterFields {
   title: string;
@@ -265,13 +278,11 @@ export function titleLineOptions(title: string, suggested?: unknown): string[][]
 }
 
 /**
- * The template actually used on a canvas: a side panel needs width and top / bottom panels need height, so each
- * falls back to the other on the wrong shape. Every template therefore works at any ratio.
+ * The template actually used on a canvas. Top / bottom panels need height, so a wide canvas gets the left panel;
+ * side panels write in columns by default and work at any ratio. Every template therefore works at any ratio.
  */
 export function posterTemplateFor(template: PosterTemplate, width: number, height: number): PosterTemplate {
-  const shape = width / height;
-  if (template === "side_panel" && shape < 1.2) return "bottom_panel";
-  if ((template === "bottom_panel" || template === "top_panel") && shape > 1.5) return "side_panel";
+  if ((template === "bottom_panel" || template === "top_panel") && width / height > 1.5) return "side_panel";
   return template;
 }
 
@@ -283,6 +294,8 @@ const COMPOSITION: Record<PosterTemplate, string> = {
   top_panel: "Composition: keep the main subject and every important detail within the bottom 60% of the frame. The top 40% will be "
     + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
   side_panel: "Composition: keep the main subject and every important detail within the right 55% of the frame. The left 45% will be "
+    + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
+  right_panel: "Composition: keep the main subject and every important detail within the left 55% of the frame. The right 45% will be "
     + "covered by a text panel, so let the scene simply continue there with plain, low-detail background.",
   overlay: "Composition: leave large clean copy space in the top 35% and the bottom 25% of the frame: smooth, even-toned, low-detail areas "
     + "such as sky, wall, table surface or soft gradient. Keep the main subject in the middle of the frame.",
@@ -313,7 +326,8 @@ export function posterPlanSystemPrompt(referenceImages: number): string {
     '"template": where the wording goes. One of:',
     '- "bottom_panel": picture on top, text panel at the bottom.',
     '- "top_panel": text panel at the top, picture below.',
-    '- "side_panel": text panel on the left, picture on the right. For landscape posters.',
+    '- "side_panel": text panel on the left, picture on the right; the wording is written in vertical columns.',
+    '- "right_panel": text panel on the right, picture on the left; the wording is written in vertical columns.',
     '- "overlay": wording written directly over the picture, the default for a clean poster. Use it when the picture has calm copy space; the user can change it later.',
     "",
     "The wording, in the language of the user's request:",

@@ -810,6 +810,15 @@ export function useChat(
     }
   }, []);
 
+  // 改字预览: the unsaved edit rendered as a picture; throws on failure.
+  const previewPoster = useCallback(async (
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+  ): Promise<Blob> => {
+    const cid = cidRef.current;
+    if (!cid) throw new Error("预览失败，请稍后重试");
+    return api.previewPoster(cid, messageId, { index, fields, template, style });
+  }, []);
+
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
   const composeGeneration = useCallback(async (messageId: string, layout: ComposeLayout, gap: boolean): Promise<string | undefined> => {
     const cid = cidRef.current;
@@ -913,6 +922,7 @@ export function useChat(
     composeGeneration,
     composeImages,
     editPoster,
+    previewPoster,
     whiteBackground,
     redoGenerationImages,
     exportGeneration,

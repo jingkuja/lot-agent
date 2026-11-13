@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { DEFAULT_POSTER_STYLE, parsePosterStyle, posterHasText, posterTemplateFor, titleLineOptions,
+import { DEFAULT_POSTER_STYLE, parsePosterStyle, POSTER_PARTS, posterHasText, posterPartVertical, posterTemplateFor, titleLineOptions,
   type PosterLayout, type PosterPart, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
@@ -178,21 +178,84 @@ export function pricePieces(price: string, cjk: boolean): { before: string; numb
 
 const CJK = /\p{Script=Han}/u;
 
-interface Block { picture: Picture; gapBefore: number; part: PosterPart }
+/** `vertical` blocks are columns: consecutive ones stand side by side, right to left. */
+interface Block { picture: Picture; gapBefore: number; part: PosterPart; vertical: boolean }
 
-/** Several pictures side by side on one row, bottoms aligned. */
-async function rowPicture(items: Picture[], gap: number): Promise<Picture> {
+async function transparent(width: number, height: number, layers: Layer[]): Promise<Buffer> {
+  return sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(layers).png().toBuffer();
+}
+
+/** Several pictures side by side on one row, bottoms (or tops) aligned. */
+async function rowPicture(items: Picture[], gap: number, align: "bottom" | "top" = "bottom"): Promise<Picture> {
   if (items.length === 1) return items[0];
   const width = items.reduce((sum, item) => sum + item.width, 0) + gap * (items.length - 1);
   const height = Math.max(...items.map((item) => item.height));
   let left = 0;
   const layers = items.map((item) => {
-    const layer = { input: item.data, left, top: height - item.height };
+    const layer = { input: item.data, left, top: align === "top" ? 0 : height - item.height };
     left += item.width + gap;
     return layer;
   });
-  const data = await sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(layers).png().toBuffer();
-  return { data, width, height };
+  return { data: await transparent(width, height, layers), width, height };
+}
+
+/** Several pictures one below the other, centered. */
+async function stackPicture(items: Picture[], gap: number): Promise<Picture> {
+  if (items.length === 1) return items[0];
+  const width = Math.max(...items.map((item) => item.width));
+  const height = items.reduce((sum, item) => sum + item.height, 0) + gap * (items.length - 1);
+  let top = 0;
+  const layers = items.map((item) => {
+    const layer = { input: item.data, left: Math.round((width - item.width) / 2), top };
+    top += item.height + gap;
+    return layer;
+  });
+  return { data: await transparent(width, height, layers), width, height };
+}
+
+/** Punctuation as its vertical presentation form, so it sits right in a column. */
+const VERTICAL_FORMS: Record<string, string> = {
+  "，": "︐", ",": "︐", "、": "︑", "。": "︒", "：": "︓", ":": "︓", "；": "︔", ";": "︔", "！": "︕", "!": "︕", "？": "︖", "?": "︖",
+  "（": "︵", "(": "︵", "）": "︶", ")": "︶", "「": "﹁", "」": "﹂", "『": "﹃", "』": "﹄", "《": "︽", "》": "︾", "【": "︻", "】": "︼",
+  "—": "︱", "－": "︱", "–": "︲", "-": "︲", "~": "︴", "～": "︴", "…": "︙",
+};
+
+/** Distance from one character to the next in a column, in font sizes. */
+const COLUMN_PITCH = 1.04;
+
+/** A column's lines: one character each, a number of one or two digits kept upright together, a space as an empty line. */
+function columnCells(text: string): string[] {
+  const cells: string[] = [];
+  for (const token of text.trim().replace(/\s+/g, " ").match(/\d+|./gu) ?? []) {
+    if (token === " ") cells.push("");
+    else if (/^\d{1,2}$/.test(token)) cells.push(token);
+    else cells.push(...Array.from(token).map((char) => VERTICAL_FORMS[char] ?? char));
+  }
+  return cells;
+}
+
+/** `text` as columns of at most `max` lines, without a blank line at either end of a column. */
+function columnChunks(text: string, max: number): string[][] {
+  const cells = columnCells(text);
+  const columns: string[][] = [];
+  for (let start = 0; start < cells.length; start += max) {
+    const column = cells.slice(start, start + max);
+    while (column[0] === "") column.shift();
+    while (column.at(-1) === "") column.pop();
+    if (column.length) columns.push(column);
+  }
+  return columns;
+}
+
+/** Columns written top to bottom, the first on the right, tops aligned. */
+async function columnsPicture(columns: string[][], size: number, color: Rgb, layout: PosterLayout, bold = false): Promise<Picture | null> {
+  if (!columns.length) return null;
+  const span = posterSpan(layout);
+  const pictures: Picture[] = [];
+  // Pango spaces CJK lines about 1.4 sizes apart; a negative spacing brings a column to its usual pitch.
+  const spacing = -Math.round(size * (1.41 - COLUMN_PITCH));
+  for (const cells of columns) pictures.push(await textPicture(span(cells.join("\n"), size, color, bold), { align: "centre", spacing }));
+  return rowPicture(pictures.reverse(), Math.round(size * 0.35), "top");
 }
 
 /** Text on a rounded block of the accent color (the discount badge). */
@@ -210,7 +273,7 @@ async function badgePicture(text: string, size: number, palette: Palette, layout
 }
 
 /** Price, struck-through original price and discount badge on one row, scaled down if the row is too wide. */
-async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb): Promise<Picture | null> {
+async function priceRow(layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb, vertical = false): Promise<Picture | null> {
   const { fields } = layout;
   const span = posterSpan(layout);
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
@@ -232,7 +295,7 @@ async function priceRow(layout: PosterLayout, unit: number, width: number, palet
       items.push(await textPicture(span(text, unit * 0.36 * scale, palette.muted, false, ' strikethrough="true"')));
     }
     if (fields.discount) items.push(await badgePicture(fields.discount, unit * (fields.price ? 0.34 : 0.5) * scale, palette, layout));
-    return rowPicture(items, Math.round(unit * 0.22 * scale));
+    return vertical ? stackPicture(items, Math.round(unit * 0.12 * scale)) : rowPicture(items, Math.round(unit * 0.22 * scale));
   };
   const row = await build(1);
   return row.width <= width ? row : build(width / row.width * 0.98);
@@ -256,20 +319,52 @@ async function titlePicture(layout: PosterLayout, max: number, width: number, co
   return textPicture(span(best.lines.join("\n"), best.size, color, bold), { align, spacing: Math.round(best.size * 0.12) });
 }
 
-/** Every text block of a poster stacked top to bottom for a column `width` wide, with type scaled by `scale`. */
-async function buildBlocks(layout: PosterLayout, width: number, unit: number, scale: number, palette: Palette, align: Align): Promise<Block[]> {
+/** The title in columns at the largest size (up to `max`) whose longest column fits `height` and all columns `width`. */
+async function titleColumns(layout: PosterLayout, max: number, width: number, height: number, color: Rgb): Promise<Picture | null> {
+  const title = layout.fields.title;
+  if (!title) return null;
+  let best: { columns: string[][]; size: number } | undefined;
+  for (const lines of titleLineOptions(title, layout.titleLines)) {
+    const columns = lines.map(columnCells);
+    const longest = Math.max(...columns.map((column) => column.length));
+    const size = Math.floor(Math.min(max, height / (longest * COLUMN_PITCH), width / (columns.length + (columns.length - 1) * 0.35)));
+    const score = size * 0.92 ** (columns.length - 1);
+    if (!best || score > best.size * 0.92 ** (best.columns.length - 1)) best = { columns, size };
+  }
+  if (!best) return null;
+  return columnsPicture(best.columns, best.size, color, layout, parsePosterStyle(layout.style).titleWeight === "bold");
+}
+
+interface Frame { template: PosterTemplate; width: number; height: number; unit: number; palette: Palette; align: Align }
+
+/**
+ * Every text block of a poster, top to bottom, for an area `width` × `height`, with type scaled by `scale`. A part
+ * written in columns breaks into as many columns as `height` needs.
+ */
+async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): Promise<Block[]> {
+  const { width, height, palette, align } = frame;
   const span = posterSpan(layout);
+  const style = parsePosterStyle(layout.style);
   const fields = layout.fields;
-  const u = unit * scale;
+  const u = frame.unit * scale;
   const blocks: Block[] = [];
+  const vertical = (part: PosterPart) => posterPartVertical(style, part, frame.template);
   const add = (part: PosterPart, picture: Picture | null, gap: number) => {
-    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part });
+    if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part, vertical: vertical(part) });
   };
   const color = (part: PosterPart, fallback: Rgb) => partColor(layout, part) ?? fallback;
-  add("title", await titlePicture(layout, u, width, color("title", palette.text), align), 0);
+  const columns = (texts: string[], size: number, fill: Rgb) => {
+    const max = Math.max(1, Math.floor(height / (size * COLUMN_PITCH)));
+    return columnsPicture(texts.flatMap((text) => columnChunks(text, max)), size, fill, layout);
+  };
+  const titleColor = color("title", palette.text);
+  add("title", vertical("title")
+    ? await titleColumns(layout, u, width, height * scale, titleColor)
+    : await titlePicture(layout, u, width, titleColor, align), 0);
   if (fields.subtitle) {
-    const markup = span(fields.subtitle, u * 0.4, color("subtitle", palette.text));
-    add("subtitle", await textPicture(markup, { width, align, spacing: Math.round(u * 0.08) }), 0.2);
+    const fill = color("subtitle", palette.text);
+    add("subtitle", vertical("subtitle") ? await columns([fields.subtitle], u * 0.4, fill)
+      : await textPicture(span(fields.subtitle, u * 0.4, fill), { width, align, spacing: Math.round(u * 0.08) }), 0.2);
   }
   if (fields.points.length) {
     const text = color("points", palette.text);
@@ -277,32 +372,52 @@ async function buildBlocks(layout: PosterLayout, width: number, unit: number, sc
     const markup = align === "centre"
       ? fields.points.map((point) => span(point, u * 0.34, text)).join(span("  ·  ", u * 0.34, palette.accent, true))
       : fields.points.map((point) => span("• ", u * 0.34, palette.accent, true) + span(point, u * 0.34, text)).join("\n");
-    add("points", await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
+    add("points", vertical("points") ? await columns(fields.points, u * 0.34, text)
+      : await textPicture(markup, { width, align, spacing: Math.round(u * 0.14) }), 0.3);
   }
-  add("price", await priceRow(layout, u, width, palette, color("price", palette.accent)), 0.3);
+  add("price", await priceRow(layout, u, width, palette, color("price", palette.accent), vertical("price")), 0.3);
   const footer = [fields.date, fields.address].filter(Boolean);
   if (footer.length) {
-    const markup = span(footer.join("\n"), u * 0.27, color("footer", palette.muted));
-    add("footer", await textPicture(markup, { width, align, spacing: Math.round(u * 0.1) }), 0.34);
+    const fill = color("footer", palette.muted);
+    add("footer", vertical("footer") ? await columns(footer, u * 0.27, fill)
+      : await textPicture(span(footer.join("\n"), u * 0.27, fill), { width, align, spacing: Math.round(u * 0.1) }), 0.34);
   }
   return blocks;
 }
 
-function stackHeight(blocks: Block[]): number {
-  return blocks.reduce((sum, block) => sum + block.gapBefore + block.picture.height, 0);
+/** One line of the stack: a single block, or columns side by side as far as `width` allows. */
+interface Row { blocks: Block[]; width: number; height: number; gapBefore: number; gap: number; columns: boolean }
+
+function stackRows(blocks: Block[], width: number, gap: number): Row[] {
+  const rows: Row[] = [];
+  for (const block of blocks) {
+    const last = rows.at(-1);
+    const { width: w, height: h } = block.picture;
+    if (block.vertical && last?.columns && last.width + gap + w <= width) {
+      last.blocks.push(block);
+      last.width += gap + w;
+      last.height = Math.max(last.height, h);
+    } else {
+      rows.push({ blocks: [block], width: w, height: h, gapBefore: block.gapBefore, gap, columns: block.vertical });
+    }
+  }
+  return rows;
 }
 
 const MIN_SCALE = 0.42;
 
-/** The blocks at the largest scale whose stack is no taller than `maxHeight`; `overflow` when even the smallest is. */
-async function fitBlocks(layout: PosterLayout, width: number, maxHeight: number, unit: number, palette: Palette, align: Align) {
+/** The rows at the largest scale that fit `frame`; `overflow` when even the smallest does not. */
+async function fitBlocks(layout: PosterLayout, frame: Frame) {
   let scale = 1;
   for (;;) {
-    const blocks = await buildBlocks(layout, width, unit, scale, palette, align);
-    const height = stackHeight(blocks);
-    if (height <= maxHeight || scale <= MIN_SCALE) return { blocks, height, overflow: height > maxHeight };
-    // Jump most of the way from the measured height, then step down until it fits.
-    scale = Math.max(MIN_SCALE, Math.min(scale * 0.92, scale * Math.sqrt(maxHeight / height)));
+    const blocks = await buildBlocks(layout, frame, scale);
+    const rows = stackRows(blocks, frame.width, Math.round(frame.unit * scale * 0.45));
+    const height = rows.reduce((sum, row) => sum + row.gapBefore + row.height, 0);
+    const width = Math.max(0, ...rows.filter((row) => row.columns).map((row) => row.width));
+    const over = Math.max(height / frame.height, width / frame.width);
+    if (over <= 1 || scale <= MIN_SCALE) return { rows, height, overflow: over > 1 };
+    // Jump most of the way from the measured size, then step down until it fits.
+    scale = Math.max(MIN_SCALE, Math.min(scale * 0.92, scale / Math.sqrt(over)));
   }
 }
 
@@ -313,28 +428,41 @@ type PlacedLayer = Layer & { part: PosterPart };
  * Composite layers for a fitted stack inside `region`, cut off at the region's bottom edge if it overflows, then
  * moved by each block's own nudge. A nudged block may leave the region; the canvas edge still clips it.
  */
-async function placeBlocks(blocks: Block[], region: Rect, align: Align, offsetTop: number, layout: PosterLayout, W: number, H: number) {
+async function placeBlocks(rows: Row[], region: Rect, align: Align, offsetTop: number, layout: PosterLayout, W: number, H: number) {
   const layers: PlacedLayer[] = [];
-  let top = region.top + offsetTop;
-  for (const block of blocks) {
-    top += block.gapBefore;
+  const place = async (block: Block, left: number, top: number, maxWidth: number, room: number) => {
     const { picture } = block;
-    const room = region.top + region.height - top;
-    if (room <= 0) break;
-    const width = Math.min(picture.width, region.width);
+    const width = Math.min(picture.width, maxWidth);
     const height = Math.min(picture.height, room);
     const input = width < picture.width || height < picture.height
       ? await sharp(picture.data).extract({ left: 0, top: 0, width, height }).png().toBuffer()
       : picture.data;
-    const left = align === "centre" ? region.left + Math.round((region.width - width) / 2) : region.left;
     const shift = partShift(layout, block.part, W, H);
     layers.push({ input, left: left + shift.x, top: Math.round(top) + shift.y, part: block.part });
-    top += picture.height;
+  };
+  let top = region.top + offsetTop;
+  for (const row of rows) {
+    top += row.gapBefore;
+    const room = region.top + region.height - top;
+    if (room <= 0) break;
+    if (row.columns) {
+      // Columns are read right to left and stay centered as a group, whatever the alignment of the other blocks.
+      let right = region.left + Math.round((region.width + row.width) / 2);
+      for (const block of row.blocks) {
+        await place(block, right - block.picture.width, top, block.picture.width, room);
+        right -= block.picture.width + row.gap;
+      }
+    } else {
+      const [block] = row.blocks;
+      const width = Math.min(block.picture.width, region.width);
+      await place(block, align === "centre" ? region.left + Math.round((region.width - width) / 2) : region.left, top, width, room);
+    }
+    top += row.height;
   }
   return layers;
 }
 
-type Side = "top" | "bottom" | "left";
+type Side = "top" | "bottom" | "left" | "right";
 
 /** A block of color along one side of the canvas, fading into the picture over `feather` pixels. */
 function panelSvg(width: number, height: number, side: Side, size: number, feather: number, color: Rgb, opacity = 1): Buffer {
@@ -342,10 +470,11 @@ function panelSvg(width: number, height: number, side: Side, size: number, feath
   // The gradient runs from the canvas edge (solid) to the inner edge of the feather (clear).
   const total = size + feather;
   const solid = (size / total).toFixed(4);
-  const [x1, y1, x2, y2] = side === "top" ? [0, 0, 0, 1] : side === "bottom" ? [0, 1, 0, 0] : [0, 0, 1, 0];
+  const [x1, y1, x2, y2] = side === "top" ? [0, 0, 0, 1] : side === "bottom" ? [0, 1, 0, 0] : side === "left" ? [0, 0, 1, 0] : [1, 0, 0, 0];
   const rect = side === "top" ? `x="0" y="0" width="${width}" height="${total}"`
     : side === "bottom" ? `x="0" y="${height - total}" width="${width}" height="${total}"`
-    : `x="0" y="0" width="${total}" height="${height}"`;
+    : side === "left" ? `x="0" y="0" width="${total}" height="${height}"`
+    : `x="${width - total}" y="0" width="${total}" height="${height}"`;
   return Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs>`
     + `<linearGradient id="g" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">`
@@ -405,27 +534,30 @@ const SIDE_PANEL_SHARE = 0.42;
 
 async function panelPoster(background: Buffer, layout: PosterLayout, template: PosterTemplate, W: number, H: number) {
   const pad = Math.round(Math.min(W, H) * 0.06);
-  const side: Side = template === "top_panel" ? "top" : template === "bottom_panel" ? "bottom" : "left";
-  const vertical = side !== "left";
-  const feather = Math.round((vertical ? H : W) * 0.07);
-  const maxSize = Math.round(vertical ? H * PANEL_MAX_SHARE : W * SIDE_PANEL_SHARE);
-  const columnWidth = (vertical ? W : maxSize) - pad * 2;
-  const unit = Math.min(columnWidth * 0.13, Math.min(W, H) * 0.1);
+  const side: Side = template === "top_panel" ? "top" : template === "bottom_panel" ? "bottom" : template === "right_panel" ? "right" : "left";
+  const across = side === "top" || side === "bottom";
+  const feather = Math.round((across ? H : W) * 0.07);
+  const maxSize = Math.round(across ? H * PANEL_MAX_SHARE : W * SIDE_PANEL_SHARE);
+  const columnWidth = (across ? W : maxSize) - pad * 2;
+  // Columns are bounded by the panel's height, not its narrow width, so a side panel with columns sets larger type.
+  const columns = POSTER_PARTS.some((part) => posterPartVertical(parsePosterStyle(layout.style), part, template));
+  const unit = Math.min(!across && columns ? Infinity : columnWidth * 0.13, Math.min(W, H) * 0.1);
   // Color comes from the picture where the panel sits, so the panel continues the picture instead of sitting on it.
   const under: Rect = side === "top" ? { left: 0, top: 0, width: W, height: maxSize }
     : side === "bottom" ? { left: 0, top: H - maxSize, width: W, height: maxSize }
-    : { left: 0, top: 0, width: maxSize, height: H };
+    : side === "left" ? { left: 0, top: 0, width: maxSize, height: H }
+    : { left: W - maxSize, top: 0, width: maxSize, height: H };
   const palette = posterPalette((await areaStats(background, clampRect(under, W, H))).mean);
-  const align: Align = vertical ? "centre" : "left";
-  const maxHeight = (vertical ? maxSize : H) - pad * 2;
-  const fitted = await fitBlocks(layout, columnWidth, maxHeight, unit, palette, align);
+  const align: Align = across ? "centre" : "left";
+  const maxHeight = (across ? maxSize : H) - pad * 2;
+  const fitted = await fitBlocks(layout, { template, width: columnWidth, height: maxHeight, unit, palette, align });
   // A top / bottom panel is only as tall as its text needs; a side panel runs the full height with the text centered.
-  const size = vertical ? Math.min(maxSize, Math.max(Math.round(H * 0.16), fitted.height + pad * 2)) : maxSize;
+  const size = across ? Math.min(maxSize, Math.max(Math.round(H * 0.16), fitted.height + pad * 2)) : maxSize;
   const region: Rect = side === "top" ? { left: pad, top: pad, width: columnWidth, height: size - pad * 2 }
     : side === "bottom" ? { left: pad, top: H - size + pad, width: columnWidth, height: size - pad * 2 }
-    : { left: pad, top: pad, width: columnWidth, height: H - pad * 2 };
+    : { left: side === "left" ? pad : W - maxSize + pad, top: pad, width: columnWidth, height: H - pad * 2 };
   const offset = Math.max(0, Math.round((region.height - fitted.height) / 2));
-  const layers = await placeBlocks(fitted.blocks, region, align, offset, layout, W, H);
+  const layers = await placeBlocks(fitted.rows, region, align, offset, layout, W, H);
   const scrim = parsePosterStyle(layout.style).scrim;
   // Keep the picture visible through the upper/lower text treatment. `soft` is
   // intentionally lighter still, while `strong` preserves the opaque option.
@@ -455,8 +587,8 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
     const palette: Palette = {
       panel: mean, text, muted: mix(text, mean, 0.18), accent: lightText ? [255, 214, 102] : [196, 44, 8], onAccent: lightText ? [24, 24, 24] : WHITE,
     };
-    const fitted = await fitBlocks(part, columnWidth, maxHeight, unit, palette, "centre");
-    if (!fitted.blocks.length) continue;
+    const fitted = await fitBlocks(part, { template: "overlay", width: columnWidth, height: maxHeight, unit, palette, align: "centre" });
+    if (!fitted.rows.length) continue;
     overflow ||= fitted.overflow;
     const height = Math.min(fitted.height, maxHeight);
     const region: Rect = side === "top" ? { left: pad, top: pad, width: columnWidth, height: maxHeight }
@@ -468,7 +600,7 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
       layers.push({ input: panelSvg(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity), left: 0, top: 0 });
     }
-    const placed = await placeBlocks(fitted.blocks, region, "centre", 0, layout, W, H);
+    const placed = await placeBlocks(fitted.rows, region, "centre", 0, layout, W, H);
     // A shadow opposite to the text: the user's own color decides it for a recolored block.
     const shade = (layer: PlacedLayer) => {
       const own = partColor(layout, layer.part);

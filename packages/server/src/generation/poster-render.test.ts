@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { emptyPosterFields, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
+import { emptyPosterFields, POSTER_PARTS, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
 import { contrastRatio, escapeMarkup, initializePosterFonts, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces,
   renderPoster } from "./poster-render.js";
 
@@ -66,6 +66,37 @@ describe("renderPoster", () => {
     const rendered = await renderPoster(picture, layout("bottom_panel"));
     expect(await inkShare(rendered.body, { left: 0, top: 0, width: 800, height: 500 }, [233, 220, 195])).toBe(0);
     expect(await inkShare(rendered.body, { left: 0, top: 760, width: 800, height: 440 }, [233, 220, 195])).toBeGreaterThan(0.01);
+  });
+
+  it("writes side panels in columns on the chosen side, and a turned part across", async () => {
+    const picture = await background(800, 1200, "#e9dcc3");
+    const beige = [233, 220, 195];
+    const short = layout("side_panel", { subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" });
+    const plain = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
+    const left = await renderPoster(picture, { ...short, style: plain });
+    const right = await renderPoster(picture, { ...short, template: "right_panel", style: plain });
+    expect([left.template, right.template, left.overflow, right.overflow]).toEqual(["side_panel", "right_panel", false, false]);
+    const leftHalf = { left: 0, top: 0, width: 400, height: 1200 };
+    const rightHalf = { left: 400, top: 0, width: 400, height: 1200 };
+    expect(await inkShare(left.body, rightHalf, beige)).toBe(0);
+    expect(await inkShare(right.body, leftHalf, beige)).toBe(0);
+    // A column runs most of the panel's height; turned across, the title takes only a band of it.
+    const rows = async (body: Buffer) => {
+      let inked = 0;
+      for (let top = 0; top < 1200; top += 40) if (await inkShare(body, { left: 0, top, width: 400, height: 40 }, beige) > 0) inked++;
+      return inked;
+    };
+    expect(await rows(left.body)).toBeGreaterThan(15);
+    expect(await rows((await renderPoster(picture, { ...short, style: { ...plain, parts: { title: { vertical: false } } } })).body)).toBeLessThan(8);
+  });
+
+  it("fits every part in columns without overflow", async () => {
+    const picture = await background(768, 1024, "#e9dcc3");
+    const parts = Object.fromEntries(POSTER_PARTS.map((part) => [part, { vertical: true }]));
+    for (const template of POSTER_TEMPLATES) {
+      const rendered = await renderPoster(picture, { ...layout(template), style: { font: "serif", titleWeight: "bold", scrim: "auto", parts } });
+      expect(rendered.overflow).toBe(false);
+    }
   });
 
   it("can leave a panel fully transparent while keeping the text", async () => {

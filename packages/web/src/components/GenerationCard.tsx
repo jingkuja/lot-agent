@@ -35,10 +35,11 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
-function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext, long }: {
+function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext, onPreviewPoster, long }: {
   /** 真实字体: the wording typeset on this image, and how to change it. Both are needed for 改字. */
   poster?: PosterLayout | null;
   onRetext?: RetextHandler;
+  onPreviewPoster?: PosterPreviewHandler;
   asset: Asset;
   long?: boolean;
   mediaType: "image" | "video";
@@ -94,13 +95,15 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
       )}
       {retexting && poster && onRetext && (
         <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
-          onSubmit={(fields, template, style) => onRetext(index, fields, template, style)} />
+          onSubmit={(fields, template, style) => onRetext(index, fields, template, style)}
+          onPreview={onPreviewPoster && ((fields, template, style) => onPreviewPoster(index, fields, template, style))} />
       )}
     </div>
   );
 }
 
 type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+type PosterPreviewHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
 
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
 function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
@@ -192,9 +195,10 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onWhite, posterBusy }: {
+function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onPreviewPoster, onWhite, posterBusy }: {
   onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
   onRetext?: RetextHandler;
+  onPreviewPoster?: PosterPreviewHandler;
   posterBusy?: boolean;
   generation: GenerationView;
   assets: Asset[];
@@ -298,7 +302,8 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       )}
       {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
         <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
-          onSubmit={(fields, template, style) => onRetext(retexting, fields, template, style)} />
+          onSubmit={(fields, template, style) => onRetext(retexting, fields, template, style)}
+          onPreview={onPreviewPoster && ((fields, template, style) => onPreviewPoster(retexting, fields, template, style))} />
       )}
       {redoing !== null && onRedo && assets[redoing] && (
         <ImageEditDialog redo imageUrl={assets[redoing].url} onClose={() => setRedoing(null)}
@@ -511,6 +516,7 @@ export function GenerationCard({
   onRedo,
   onExport,
   onEditPoster,
+  onPreviewPoster,
   onCancelGeneration,
   onWhiteBackground,
 }: {
@@ -520,6 +526,8 @@ export function GenerationCard({
   messageId?: string;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
   onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  /** 改字预览: the unsaved edit rendered as a picture. */
+  onPreviewPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
   onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
@@ -577,6 +585,8 @@ export function GenerationCard({
         setPosterBusy(false);
       }
     } : undefined;
+  const previewPoster: PosterPreviewHandler | undefined = messageId && onPreviewPoster
+    ? (index, fields, template, style) => onPreviewPoster(messageId, index, fields, template, style) : undefined;
   const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
@@ -585,7 +595,8 @@ export function GenerationCard({
       if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
         return (
           <>
-            <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onWhite={onWhite} posterBusy={posterBusy}
+            <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onPreviewPoster={previewPoster} onWhite={onWhite}
+              posterBusy={posterBusy}
               onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
               onRedo={messageId && onRedo && imageSet && !generation.unknownResult ? (request) => onRedo(messageId, request) : undefined}
               onExport={messageId && onExport ? (preset, names, compositeNames) => onExport(messageId, preset, names, compositeNames) : undefined} />
@@ -601,7 +612,7 @@ export function GenerationCard({
             {assets.map((a, i) => (
               <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
                 onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
-                poster={generation.posters?.[i]} onRetext={retext} long={generation.longImage} />
+                poster={generation.posters?.[i]} onRetext={retext} onPreviewPoster={previewPoster} long={generation.longImage} />
             ))}
           </div>
           {posterBusy && <PosterBusyMask />}

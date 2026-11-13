@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { POSTER_LIMITS, POSTER_NUDGE_LIMIT, POSTER_TEMPLATES, parsePosterStyle, posterTemplateFor, type PosterFieldName, type PosterFields,
+import { POSTER_LIMITS, POSTER_NUDGE_LIMIT, POSTER_TEMPLATES, parsePosterStyle, posterPartVertical, posterTemplateFor, type PosterFieldName,
+  type PosterFields,
   type PosterLayout, type PosterPart, type PosterPartStyle, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
+import { ApiClientError } from "../api/client.js";
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_TEMPLATE_LABELS: Record<PosterTemplate, string> = {
-  bottom_panel: "上图下文", top_panel: "上文下图", side_panel: "左文右图", overlay: "文字压图",
+  bottom_panel: "上图下文", top_panel: "上文下图", side_panel: "左文右图", right_panel: "右文左图", overlay: "文字压图",
 };
 
 export const POSTER_FIELD_LABELS: Record<PosterFieldName, string> = {
@@ -42,11 +44,13 @@ interface Props {
   poster: PosterLayout;
   /** Renders the image again with this wording. The dialog closes while the chat card shows progress. */
   onSubmit: (fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  /** Renders the unsaved edit without storing it. Undefined hides 预览. */
+  onPreview?: (fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<Blob>;
   onClose: () => void;
 }
 
 /** 改字: edit the wording typeset on a 真实字体 image. The server renders it again on the stored picture; no model, no charge. */
-export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props) {
+export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClose }: Props) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -59,6 +63,14 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
   const effective = fit(template);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [preview, setPreview] = useState<{ url: string; edit: string }>();
+  const [previewing, setPreviewing] = useState(false);
+  const previewRequest = useRef(0);
+  const lines = () => points.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, POSTER_LIMITS.points);
+  const edit = JSON.stringify([fields, lines(), effective, style]);
+
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
+  useEffect(() => () => { previewRequest.current += 1; }, []);
 
   useEffect(() => {
     const element = dialog.current;
@@ -74,12 +86,11 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     if (busy) return;
     setBusy(true);
     setError(undefined);
-    const lines = points.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, POSTER_LIMITS.points);
     let failure: string | undefined;
     try {
       // Return to the chat immediately. The generation card keeps the old
       // image under a progress mask until the newly rendered image arrives.
-      const request = onSubmit({ ...fields, points: lines }, effective, style);
+      const request = onSubmit({ ...fields, points: lines() }, effective, style);
       onClose();
       failure = await request;
     } catch {
@@ -88,6 +99,20 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
     if (!dialog.current?.isConnected) return;
     setBusy(false);
     if (failure) setError(failure);
+  };
+  const showPreview = async () => {
+    if (!onPreview || previewing) return;
+    const request = ++previewRequest.current;
+    setPreviewing(true);
+    setError(undefined);
+    try {
+      const blob = await onPreview({ ...fields, points: lines() }, effective, style);
+      if (request === previewRequest.current) setPreview({ url: URL.createObjectURL(blob), edit });
+    } catch (e) {
+      if (request === previewRequest.current) setError(e instanceof ApiClientError && e.message ? e.message : "预览失败，请稍后重试");
+    } finally {
+      if (request === previewRequest.current) setPreviewing(false);
+    }
   };
   const cleared = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name]));
   const setPart = (part: PosterPart, change: (current: PosterPartStyle) => PosterPartStyle) => {
@@ -109,9 +134,12 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
       </header>
       <form className="poster-text-body" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="image-edit-preview poster-text-preview">
-          <img src={imageUrl} alt={t("当前生成图")} onLoad={({ currentTarget }) => {
+          <img src={preview?.url ?? imageUrl} alt={t(preview ? "预览效果" : "当前生成图")} onLoad={({ currentTarget }) => {
             setDimensions({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight });
           }} />
+          {preview && <span className={`poster-text-preview-badge${preview.edit === edit ? "" : " stale"}`} role="status">
+            {t(preview.edit === edit ? "预览效果，保存后生效" : "已有新改动，点预览更新")}
+          </span>}
         </div>
         <div className="poster-text-fields">
           {cleared.length > 0 && (
@@ -144,10 +172,17 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
           </div>
           {parts.length > 0 && <fieldset className="poster-part-list" disabled={busy}>
             <legend>{t("逐段调整")}</legend>
-            <p className="poster-part-hint">{t("每次移动画布的 1%，保存后生效")}</p>
+            <div className="poster-part-head">
+              <p className="poster-part-hint">{t("每次移动画布的 1%，保存后生效")}</p>
+              {onPreview && <button type="button" className="poster-part-preview" onClick={() => void showPreview()}
+                disabled={previewing || preview?.edit === edit}>
+                {previewing ? t("预览中…") : t("预览")}
+              </button>}
+            </div>
             {parts.map((part) => {
               const own = style.parts?.[part];
               const label = t(PART_LABELS[part]);
+              const vertical = posterPartVertical(style, part, effective);
               return <div className="poster-part-row" key={part}>
                 <span className="poster-part-name">{label}</span>
                 <label className={`poster-part-color${own?.color ? "" : " auto"}`} title={t("文字颜色")}>
@@ -168,6 +203,13 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onClose }: Props)
                 <span className="poster-part-offset" aria-live="polite">
                   {own?.dx || own?.dy ? `${own.dx ?? 0}, ${own.dy ?? 0}` : ""}
                 </span>
+                <button type="button" className="poster-part-nudge poster-part-turn" aria-pressed={vertical}
+                  aria-label={t("{0}反转", [label])} title={t(vertical ? "反转：改为横排" : "反转：改为竖排")}
+                  onClick={() => setPart(part, (current) => ({ ...current, vertical: !vertical }))}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5" />
+                  </svg>
+                </button>
                 <button type="button" className="poster-part-reset" disabled={!own} onClick={() => setPart(part, () => ({}))}>
                   {t("还原")}
                 </button>

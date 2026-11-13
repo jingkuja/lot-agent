@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptedTitleLines, editPosterLayout, emptyPosterFields, parsePosterLayout, parsePosterPlan, PosterPlanError, posterBackgroundPrompt,
-  posterTemplateFor, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
+  posterPartVertical, posterTemplateFor, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
 } from "./index.js";
 
 const request = "做一张火锅店开业海报，全场 8 折，套餐 199 元，11 月 20 日开业，地址人民路 88 号";
@@ -122,10 +122,20 @@ describe("layout helpers", () => {
     });
     expect(style.parts).toEqual({ title: { color: "#ff0000", dx: 3, dy: -50 }, footer: { dx: -2 } });
     expect(parsePosterStyle({ parts: { title: { dx: 0 } } })).toEqual(DEFAULT_POSTER_STYLE);
+    expect(parsePosterStyle({ parts: { title: { vertical: false }, subtitle: { vertical: "yes" } } }).parts).toEqual({ title: { vertical: false } });
+  });
+
+  it("writes side panels in columns unless the user turned a part", () => {
+    const style = parsePosterStyle({ parts: { title: { vertical: false }, price: { vertical: true } } });
+    expect(posterPartVertical(style, "title", "right_panel")).toBe(false);
+    expect(posterPartVertical(style, "subtitle", "side_panel")).toBe(true);
+    expect(posterPartVertical(style, "subtitle", "top_panel")).toBe(false);
+    expect(posterPartVertical(style, "price", "bottom_panel")).toBe(true);
   });
 
   it("fits the template to the canvas shape", () => {
-    expect(posterTemplateFor("side_panel", 1024, 1536)).toBe("bottom_panel");
+    expect(posterTemplateFor("side_panel", 1024, 1536)).toBe("side_panel");
+    expect(posterTemplateFor("right_panel", 1024, 1536)).toBe("right_panel");
     expect(posterTemplateFor("bottom_panel", 1536, 864)).toBe("side_panel");
     expect(posterTemplateFor("top_panel", 1024, 1024)).toBe("top_panel");
     expect(posterTemplateFor("overlay", 1536, 864)).toBe("overlay");
