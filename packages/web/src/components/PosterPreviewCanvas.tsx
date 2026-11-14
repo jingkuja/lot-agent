@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { POSTER_FONT_SCALE, POSTER_NUDGE_LIMIT, type PosterPart, type PosterPreviewScene, type PosterStyle } from "@lot-agent/core/poster";
+import {
+  POSTER_FONT_SCALE, POSTER_NUDGE_LIMIT, posterRotateTilt, posterRotateTurned, type PosterPart, type PosterPreviewScene, type PosterStyle,
+} from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_PART_LABELS: Record<PosterPart, string> = {
@@ -138,6 +140,8 @@ function offsetAt(drag: Drag, event: PointerEvent): Offset {
 
 interface Props {
   scene: PosterPreviewScene;
+  /** The style `scene` was rendered with; defaults to `style`. */
+  sceneStyle?: PosterStyle;
   style: PosterStyle;
   interactive: boolean;
   onMove: (part: PosterPart, offset: Offset) => void;
@@ -145,7 +149,7 @@ interface Props {
   onRotate?: (part: PosterPart, rotate: number) => void;
 }
 
-export function PosterPreviewCanvas({ scene, style, interactive, onMove, onResize, onRotate }: Props) {
+export function PosterPreviewCanvas({ scene, style, sceneStyle = style, interactive, onMove, onResize, onRotate }: Props) {
   const { t } = useI18n();
   const canvas = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -282,7 +286,8 @@ export function PosterPreviewCanvas({ scene, style, interactive, onMove, onResiz
       const live = motion && motion.part === part ? motion.offset : undefined;
       const liveScale = scaleMotion && scaleMotion.part === part ? scaleMotion.fontScale : undefined;
       const liveRotate = rotateMotion && rotateMotion.part === part ? rotateMotion.rotate : undefined;
-      const angle = liveRotate ?? baseRotate;
+      // The text image is set upright for the scene's quarter turns, so only the remaining tilt is drawn.
+      const angle = part ? posterRotateTilt(liveRotate ?? baseRotate, posterRotateTurned(sceneStyle.parts?.[part]?.rotate)) : 0;
       const x = live ? live.dx * width / 100 : Math.round(offset.dx * width / 100);
       const y = live ? live.dy * height / 100 : Math.round(offset.dy * height / 100);
       const transforms: string[] = [];

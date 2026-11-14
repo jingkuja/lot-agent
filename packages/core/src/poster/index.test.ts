@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   acceptedTitleLines, editPosterLayout, emptyPosterFields, MAX_POSTER_HISTORY, parseAccentRuns, parseManualTitleInput,
   parsePosterExportRatio, parsePosterExportScale, parsePosterLayout, parsePosterPlan, PosterPlanError, posterBackgroundPrompt,
-  posterPartVertical, posterTemplateFor, recordPosterVersion, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields,
+  posterPartVertical, posterRotateTilt, posterRotateTurned, posterTemplateFor, recordPosterVersion, sanitizePosterFields, storedPosters,
+  titleLineOptions, verifyPosterFields,
   parsePosterStyle, DEFAULT_POSTER_STYLE,
 } from "./index.js";
 
@@ -222,6 +223,21 @@ describe("layout helpers", () => {
     expect(storedPosters([null])).toBeUndefined();
     expect(storedPosters("x")).toBeUndefined();
     expect(sanitizePosterFields({ points: ["a", "", 3, "b", "c", "d", "e"] }).points).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("keeps glyphs upright by turning whole quarter rotations into a row/column swap", () => {
+    expect([0, 30, 44, 45, 90, 120, 135, 180, -45, -46, -90, -180].map((angle) => posterRotateTurned(angle)))
+      .toEqual([false, false, false, true, true, true, false, false, false, true, true, false]);
+    expect([0, 30, 45, 90, 120, 180, -46, -90, -180].map((angle) => posterRotateTilt(angle)))
+      .toEqual([0, 30, -45, 0, 30, 0, 44, 0, 0]);
+    // A scene still set for the other direction keeps the line direction continuous until it is rendered again.
+    expect(posterRotateTilt(40, true)).toBe(-50);
+    expect(posterRotateTilt(89, false)).toBe(89);
+    expect(posterRotateTilt(91, false)).toBe(-89);
+    expect(posterRotateTilt(-91, false)).toBe(89);
+    expect(posterPartVertical({ parts: { title: { vertical: true, rotate: 90 } } } as never, "title", "overlay")).toBe(false);
+    expect(posterPartVertical({ parts: { title: { rotate: -90 } } } as never, "title", "overlay")).toBe(true);
+    expect(posterPartVertical({ parts: { title: { rotate: 180 } } } as never, "title", "side_panel")).toBe(true);
   });
 
   it("supports per-part fonts, rotation, version history recording/capping, background meta and export options", () => {

@@ -360,6 +360,25 @@ describe("renderPoster", () => {
     expect(previewRes.layers.some((layer) => layer.kind === "text" && layer.part === "title")).toBe(true);
     expect(posterRenderKey("bg.png", rotated)).not.toBe(posterRenderKey("bg.png", base));
   });
+
+  it("sets a part turned a quarter in the other direction with upright glyphs instead of rotating it", async () => {
+    const picture = await background(512, 768, "#e9dcc3");
+    const style = (rotate: number) => ({
+      font: "sans" as const, titleWeight: "bold" as const, scrim: "transparent" as const, parts: { title: { vertical: true, rotate } },
+    });
+    const title = async (rotate: number) => {
+      const scene = await renderPosterPreview(picture, { ...layout("overlay"), style: style(rotate) });
+      return scene.layers.find((layer) => layer.kind === "text" && layer.part === "title")!;
+    };
+    const [column, turned] = await Promise.all([title(0), title(90)]);
+    expect(column.height).toBeGreaterThan(column.width);
+    expect(turned.width).toBeGreaterThan(turned.height);
+    const [straight, quarter] = await Promise.all([
+      renderPoster(picture, { ...layout("overlay"), style: { ...style(0), parts: { title: { vertical: false } } } }),
+      renderPoster(picture, { ...layout("overlay"), style: style(90) }),
+    ]);
+    expect(quarter.body.equals(straight.body)).toBe(true);
+  });
 });
 
 describe("poster helpers", () => {

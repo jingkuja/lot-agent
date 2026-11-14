@@ -142,9 +142,29 @@ export function posterSideTemplate(template: PosterTemplate): boolean {
   return template === "side_panel" || template === "right_panel";
 }
 
-/** Whether a part is written in columns: the user's own choice, else vertical in the side panels only. */
+/**
+ * Glyphs stay upright however a part is rotated: each whole quarter turn of `rotate` swaps rows and columns, and only
+ * the rest is drawn as tilt. Odd quarter turns mean the part is set in the other direction.
+ */
+export function posterRotateTurned(rotate = 0): boolean {
+  return Math.abs(Math.round(rotate / 90)) % 2 === 1;
+}
+
+/**
+ * The angle a part set for `turned` is drawn at so its line runs along `rotate`: within ±45° when `turned` matches
+ * {@link posterRotateTurned}, otherwise the nearest angle that keeps the line direction (used while a re-render is due).
+ */
+export function posterRotateTilt(rotate = 0, turned = posterRotateTurned(rotate)): number {
+  let quarters = Math.round(rotate / 90);
+  if ((Math.abs(quarters) % 2 === 1) !== turned) quarters += rotate >= quarters * 90 ? 1 : -1;
+  return rotate - quarters * 90 || 0;
+}
+
+/** Whether a part is written in columns: the user's own choice, else vertical in the side panels only; a quarter turn swaps it. */
 export function posterPartVertical(style: PosterStyle | undefined, part: PosterPart, template: PosterTemplate): boolean {
-  return style?.parts?.[part]?.vertical ?? posterSideTemplate(template);
+  const own = style?.parts?.[part];
+  const vertical = own?.vertical ?? posterSideTemplate(template);
+  return posterRotateTurned(own?.rotate) ? !vertical : vertical;
 }
 
 export interface PosterFields {

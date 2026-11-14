@@ -5183,6 +5183,11 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-part-color input { width: 24px; height: 24px; padding: 0; border: none; border-radius: 6px; background: none; cursor: pointer; }
 .poster-part-color.auto input { opacity: 0.35; }
 .poster-part-color:focus-within { border-color: var(--accent); }
+.poster-part-color--swatch { position: relative; min-width: 0; padding: 1px; }
+.poster-part-color--swatch.auto::after {
+  content: ""; position: absolute; inset: 50% 4px auto; height: 1.5px; background: var(--text-muted);
+  transform: rotate(-45deg); pointer-events: none;
+}
 .poster-part-position, .poster-part-actions { display: flex; align-items: center; gap: 8px; }
 .poster-part-actions { margin-inline-start: auto; }
 .poster-part-nudges, .poster-part-size { display: inline-flex; align-items: center; gap: 2px; }

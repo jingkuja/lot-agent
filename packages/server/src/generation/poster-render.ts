@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { parseAccentRuns, parsePosterStyle, POSTER_FONT_SCALE, POSTER_LINE_SPACING, POSTER_PARTS, posterHasText, posterPartVertical,
-  posterTemplateFor, titleLineOptions, type PosterExportRatio, type PosterFont, type PosterLayerPlacement, type PosterLayout,
+  posterRotateTilt, posterTemplateFor, titleLineOptions, type PosterExportRatio, type PosterFont, type PosterLayerPlacement, type PosterLayout,
   type PosterPart, type PosterPartStyle, type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
@@ -1012,7 +1012,8 @@ export async function renderPoster(background: Buffer, layout: PosterLayout, opt
   const placed = await Promise.all(layers.map(async (layer) => {
     const { input, left, top } = layer;
     const shift = layer.kind === "scrim" ? { x: 0, y: 0 } : partShift(layout, layer.part, width, height);
-    const angle = layer.kind === "scrim" ? 0 : (partsStyle?.[layer.part]?.rotate ?? 0);
+    // Whole quarter turns already swapped the part between rows and columns; only the tilt is left to draw.
+    const angle = layer.kind === "scrim" ? 0 : posterRotateTilt(partsStyle?.[layer.part]?.rotate);
     if (!angle) return { input, left: left + shift.x, top: top + shift.y };
     const rotated = await sharp(input).ensureAlpha()
       .rotate(angle, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -1044,9 +1045,9 @@ export async function renderPosterPreview(background: Buffer, layout: PosterLayo
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  // Render revision 6 adds per-part rotation around layer center.
+  // Render revision 7 keeps glyphs upright: quarter turns swap rows and columns, only the tilt rotates.
   const values = [
-    6, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
+    7, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
     layout.manualTitleLines ?? false, parsePosterStyle(layout.style),
   ];
   const content = JSON.stringify(values);

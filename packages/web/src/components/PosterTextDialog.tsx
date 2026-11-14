@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
   POSTER_EXPORT_RATIOS, POSTER_FONTS, POSTER_FONT_SCALE, POSTER_LETTER_SPACING, POSTER_LIMITS, POSTER_LINE_SPACING,
   POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_ROTATE, POSTER_STROKES, POSTER_TEMPLATES, parseManualTitleInput, parsePosterStyle,
-  posterPartVertical, posterTemplateFor,
+  posterPartVertical, posterRotateTurned, posterTemplateFor,
   type PosterExportRatio, type PosterFieldName, type PosterFields, type PosterFont, type PosterLayout,
   type PosterPart, type PosterPartStyle, type PosterPreviewScene, type PosterStroke, type PosterStyle, type PosterTemplate,
 } from "@lot-agent/core/poster";
@@ -66,7 +66,8 @@ interface Props {
   onClose: () => void;
 }
 
-type Preview = { key: string } & ({ scene: PosterPreviewScene; url?: never } | { url: string; scene?: never });
+/** A scene keeps the style it was rendered with: quarter turns change its text images, plain tilt does not. */
+type Preview = { key: string } & ({ scene: PosterPreviewScene; sceneStyle: PosterStyle; url?: never } | { url: string; scene?: never });
 
 /** Moving a part doesn't change its image, so only layout and styling changes require a new render. */
 function previewLayoutKey(
@@ -74,10 +75,11 @@ function previewLayoutKey(
 ): string {
   const parts = POSTER_PARTS.flatMap((part) => {
     const own = style.parts?.[part];
-    const hasVisual = own?.font || own?.color || own?.vertical !== undefined || own?.fontScale !== undefined
-      || own?.letterSpacing !== undefined || own?.lineSpacing !== undefined || own?.stroke || own?.strokeColor;
+    const turned = posterRotateTurned(own?.rotate);
+    const hasVisual = own && (own.font || own.color || own.vertical !== undefined || own.fontScale !== undefined
+      || own.letterSpacing !== undefined || own.lineSpacing !== undefined || own.stroke || own.strokeColor || turned);
     return hasVisual
-      ? [[part, own.font, own.color, own.vertical, own.fontScale, own.letterSpacing, own.lineSpacing, own.stroke, own.strokeColor]]
+      ? [[part, own.font, own.color, own.vertical, own.fontScale, own.letterSpacing, own.lineSpacing, own.stroke, own.strokeColor, turned]]
       : [];
   });
   return JSON.stringify([fields, template, style.font, style.titleWeight, style.scrim, style.accentColor, parts, titleLines ?? null, !!manualTitleLines]);
@@ -141,7 +143,7 @@ export function PosterTextDialog({
         setPreview({ url: URL.createObjectURL(result), key: JSON.stringify([layoutKey, style]) });
       } else {
         setDimensions({ width: result.width, height: result.height });
-        setPreview({ scene: result, key: layoutKey });
+        setPreview({ scene: result, sceneStyle: style, key: layoutKey });
       }
     } catch (e) {
       if (!signal.aborted) setPreviewError(e instanceof ApiClientError && e.message ? e.message : "预览失败，请稍后重试");
@@ -267,7 +269,8 @@ export function PosterTextDialog({
       </header>
       <form className="poster-text-body" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="image-edit-preview poster-text-preview">
-          {preview?.scene ? <PosterPreviewCanvas scene={preview.scene} style={style} interactive={!dialogBusy && previewCurrent}
+          {preview?.scene ? <PosterPreviewCanvas scene={preview.scene} sceneStyle={preview.sceneStyle} style={style}
+            interactive={!dialogBusy && previewCurrent}
             onMove={(part, offset) => setPart(part, (current) => ({ ...current, ...offset }))}
             onResize={(part, fontScale) => setPart(part, (current) => ({ ...current, fontScale }))}
             onRotate={(part, rotate) => setPart(part, (current) => ({ ...current, rotate }))} />
@@ -359,10 +362,10 @@ export function PosterTextDialog({
               return <div className="poster-part-item" key={part}>
                 <div className="poster-part-row">
                   <span className="poster-part-name" title={label}>{label}</span>
-                  <label className={`poster-part-color${own?.color ? "" : " auto"}`} title={t("文字颜色")}>
+                  <label className={`poster-part-color poster-part-color--swatch${own?.color ? "" : " auto"}`}
+                    title={`${t("文字颜色")}: ${own?.color ? own.color.toUpperCase() : t("自动")}`}>
                     <input type="color" value={own?.color ?? "#ffffff"} aria-label={t("{0}文字颜色", [label])}
                       onChange={(event) => setPart(part, (current) => ({ ...current, color: event.target.value }))} />
-                    <span>{own?.color ? own.color.toUpperCase() : t("自动")}</span>
                   </label>
                   <div className="poster-part-position">
                     <div className="poster-part-nudges" role="group" aria-label={t("{0}位置", [label])}>
@@ -391,7 +394,7 @@ export function PosterTextDialog({
                     </div>
                     <button type="button" className="poster-part-nudge poster-part-turn" aria-pressed={vertical}
                       aria-label={t("{0}反转", [label])} title={t(vertical ? "反转：改为横排" : "反转：改为竖排")}
-                      onClick={() => setPart(part, (current) => ({ ...current, vertical: !vertical }))}>
+                      onClick={() => setPart(part, (current) => ({ ...current, vertical: posterRotateTurned(current.rotate) === vertical }))}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5" />
                       </svg>
