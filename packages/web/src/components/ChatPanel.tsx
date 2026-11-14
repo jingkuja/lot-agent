@@ -57,7 +57,10 @@ interface ChatPanelProps {
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. */
-  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  onEditPoster?: (
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+    titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
+  ) => Promise<string | undefined>;
   onPreviewPoster?: PreviewPosterHandler;
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */

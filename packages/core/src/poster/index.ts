@@ -10,12 +10,16 @@ export const POSTER_VERSION = 2;
 export const POSTER_FONTS = ["sans", "serif"] as const;
 export const POSTER_TITLE_WEIGHTS = ["regular", "bold"] as const;
 export const POSTER_SCRIMS = ["auto", "transparent", "soft", "strong"] as const;
-/** Text blocks a user can recolor and nudge one by one; `footer` is the date and address together. */
-export const POSTER_PARTS = ["title", "subtitle", "points", "price", "footer"] as const;
+export const POSTER_STROKES = ["none", "thin", "medium"] as const;
+export type PosterStroke = typeof POSTER_STROKES[number];
+/** Text blocks a user can recolor, style and nudge one by one. */
+export const POSTER_PARTS = ["title", "subtitle", "points", "price", "date", "address"] as const;
 export type PosterPart = typeof POSTER_PARTS[number];
 /** Furthest nudge, in percent of the canvas width (dx) or height (dy). */
 export const POSTER_NUDGE_LIMIT = 100;
 export const POSTER_FONT_SCALE = { default: 100, min: 50, max: 300, step: 10 } as const;
+export const POSTER_LETTER_SPACING = { default: 0, min: -10, max: 50, step: 5 } as const;
+export const POSTER_LINE_SPACING = { default: 100, min: 80, max: 200, step: 10 } as const;
 
 export interface PosterPartStyle {
   /** `#rrggbb`; absent means the color picked from the picture. */
@@ -26,38 +30,75 @@ export interface PosterPartStyle {
   fontScale?: number;
   /** Written top to bottom in columns; absent means the template's own default (vertical in side panels). */
   vertical?: boolean;
+  /** Extra spacing between characters, in percent of font size. */
+  letterSpacing?: number;
+  /** Line spacing percentage relative to the automatic default (100). */
+  lineSpacing?: number;
+  /** Text outline thickness. */
+  stroke?: PosterStroke;
+  /** `#rrggbb`; absent picks high-contrast black or white against the text color. */
+  strokeColor?: string;
 }
 
 export interface PosterStyle {
   font: typeof POSTER_FONTS[number];
   titleWeight: typeof POSTER_TITLE_WEIGHTS[number];
   scrim: typeof POSTER_SCRIMS[number];
+  /** `#rrggbb`; overrides the automatic accent color used for discount badges, highlights and bullets. */
+  accentColor?: string;
   parts?: Partial<Record<PosterPart, PosterPartStyle>>;
 }
 export const DEFAULT_POSTER_STYLE: PosterStyle = { font: "sans", titleWeight: "bold", scrim: "auto" };
+
+function hexColor(value: unknown): string | undefined {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : undefined;
+}
+
+function clampedOption(value: unknown, limits: { default: number; min: number; max: number }): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const clamped = Math.max(limits.min, Math.min(limits.max, Math.round(value)));
+  return clamped !== limits.default ? clamped : undefined;
+}
 
 function nudge(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(-POSTER_NUDGE_LIMIT, Math.min(POSTER_NUDGE_LIMIT, Math.round(value)));
 }
 
+function parsePartStyle(raw: unknown): PosterPartStyle | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { color, dx, dy, vertical, fontScale, letterSpacing, lineSpacing, stroke, strokeColor } = raw as Record<string, unknown>;
+  const part: PosterPartStyle = {};
+  const validColor = hexColor(color);
+  if (validColor) part.color = validColor;
+  if (nudge(dx)) part.dx = nudge(dx);
+  if (nudge(dy)) part.dy = nudge(dy);
+  if (typeof vertical === "boolean") part.vertical = vertical;
+  const size = clampedOption(fontScale, POSTER_FONT_SCALE);
+  if (size !== undefined) part.fontScale = size;
+  const tracking = clampedOption(letterSpacing, POSTER_LETTER_SPACING);
+  if (tracking !== undefined) part.letterSpacing = tracking;
+  const leading = clampedOption(lineSpacing, POSTER_LINE_SPACING);
+  if (leading !== undefined) part.lineSpacing = leading;
+  if (POSTER_STROKES.includes(stroke as PosterStroke) && stroke !== "none") {
+    part.stroke = stroke as PosterStroke;
+    const outline = hexColor(strokeColor);
+    if (outline) part.strokeColor = outline;
+  }
+  return Object.keys(part).length ? part : undefined;
+}
+
 function partStyles(value: unknown): PosterStyle["parts"] {
   if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
   const parts: NonNullable<PosterStyle["parts"]> = {};
+  const legacyFooter = parsePartStyle(record.footer);
   for (const name of POSTER_PARTS) {
-    const raw = (value as Record<string, unknown>)[name];
-    if (!raw || typeof raw !== "object") continue;
-    const { color, dx, dy, vertical, fontScale } = raw as Record<string, unknown>;
-    const part: PosterPartStyle = {};
-    if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) part.color = color.toLowerCase();
-    if (nudge(dx)) part.dx = nudge(dx);
-    if (nudge(dy)) part.dy = nudge(dy);
-    if (typeof vertical === "boolean") part.vertical = vertical;
-    if (typeof fontScale === "number" && Number.isFinite(fontScale)) {
-      const size = Math.max(POSTER_FONT_SCALE.min, Math.min(POSTER_FONT_SCALE.max, Math.round(fontScale)));
-      if (size !== POSTER_FONT_SCALE.default) part.fontScale = size;
-    }
-    if (Object.keys(part).length) parts[name] = part;
+    const parsed = parsePartStyle(record[name]);
+    const merged = (name === "date" || name === "address") && legacyFooter
+      ? { ...legacyFooter, ...parsed }
+      : parsed;
+    if (merged && Object.keys(merged).length) parts[name] = merged;
   }
   return Object.keys(parts).length ? parts : undefined;
 }
@@ -66,10 +107,12 @@ function partStyles(value: unknown): PosterStyle["parts"] {
 export function parsePosterStyle(value: unknown): PosterStyle {
   const style = (value && typeof value === "object" ? value : {}) as Partial<PosterStyle>;
   const parts = partStyles(style.parts);
+  const accentColor = hexColor(style.accentColor);
   return {
     font: POSTER_FONTS.includes(style.font!) ? style.font! : "sans",
     titleWeight: POSTER_TITLE_WEIGHTS.includes(style.titleWeight!) ? style.titleWeight! : "bold",
     scrim: POSTER_SCRIMS.includes(style.scrim!) ? style.scrim! : "auto",
+    ...(accentColor ? { accentColor } : {}),
     ...(parts ? { parts } : {}),
   };
 }
@@ -114,8 +157,10 @@ export interface PosterLayout {
   template: PosterTemplate;
   fields: PosterFields;
   style?: PosterStyle;
-  /** Title line breaks suggested by the planner; used only while they still spell the title exactly. */
+  /** Title line breaks suggested by the planner or set manually by the user. */
   titleLines?: string[];
+  /** When true, `titleLines` are explicit user breaks and must not be overridden by auto-balancing. */
+  manualTitleLines?: boolean;
   /** Fields the planner filled with a number the user never wrote. They were emptied; the card asks the user to fill them. */
   cleared?: PosterFieldName[];
   /** The stored text-free picture this poster is rendered on. */
@@ -247,34 +292,106 @@ export function verifyPosterFields(fields: PosterFields, source: string): { fiel
   return { fields: next, cleared };
 }
 
-/** The planner's line breaks for a title, when joined they are the title itself and no line is a single character. */
-export function acceptedTitleLines(title: string, suggested: unknown): string[] | undefined {
-  if (!Array.isArray(suggested) || suggested.length < 2 || suggested.length > 3) return undefined;
+/** Split text by `【keyword】` accent markers; unmatched brackets stay literal. */
+export function parseAccentRuns(text: string): { text: string; accent: boolean }[] {
+  if (!text) return [];
+  const runs: { text: string; accent: boolean }[] = [];
+  let last = 0;
+  for (const match of text.matchAll(/【([^【】]+)】/g)) {
+    const start = match.index ?? 0;
+    if (start > last) runs.push({ text: text.slice(last, start), accent: false });
+    runs.push({ text: match[1], accent: true });
+    last = start + match[0].length;
+  }
+  if (last < text.length) runs.push({ text: text.slice(last), accent: false });
+  return runs.length ? runs : [{ text, accent: false }];
+}
+
+/** Join title lines back into a single title string without fusing adjacent Latin words. */
+function joinTitleLines(lines: string[]): string {
+  return lines.reduce((acc, part) => {
+    if (!acc) return part;
+    const needsSpace = /[A-Za-z0-9]$/.test(acc) && /^[A-Za-z0-9]/.test(part);
+    return acc + (needsSpace ? " " : "") + part;
+  }, "");
+}
+
+/** Parse a user's title box value supporting explicit line breaks via newline or `|`. */
+export function parseManualTitleInput(raw: unknown): { title: string; titleLines?: string[]; manualTitleLines?: boolean } {
+  if (typeof raw !== "string") return { title: "" };
+  if (!/[\r\n|]/.test(raw)) return { title: line(raw, POSTER_LIMITS.title) };
+  const parts = raw
+    .split(/[\r\n|]+/)
+    .map((item) => line(item, POSTER_LIMITS.title))
+    .filter(Boolean)
+    .slice(0, 4);
+  if (!parts.length) return { title: "" };
+  const kept: string[] = [];
+  let length = 0;
+  for (const part of parts) {
+    const count = Array.from(part).length;
+    if (kept.length > 0 && length + count > POSTER_LIMITS.title) break;
+    kept.push(Array.from(part).slice(0, POSTER_LIMITS.title - length).join("").trim());
+    length += Array.from(kept[kept.length - 1]).length;
+  }
+  const title = line(joinTitleLines(kept), POSTER_LIMITS.title);
+  if (kept.length < 2) return { title };
+  return { title, titleLines: kept, manualTitleLines: true };
+}
+
+/** The line breaks for a title, when joined they match the title itself. */
+export function acceptedTitleLines(title: string, suggested: unknown, manual = false): string[] | undefined {
+  const maxLines = manual ? 4 : 3;
+  const minChars = manual ? 1 : 2;
+  if (!Array.isArray(suggested) || suggested.length < 2 || suggested.length > maxLines) return undefined;
   const lines = suggested.map((item) => (typeof item === "string" ? item.trim() : ""));
-  if (lines.some((item) => Array.from(item).length < 2)) return undefined;
+  if (lines.some((item) => Array.from(item).length < minChars)) return undefined;
   return comparable(lines.join("")) === comparable(title) ? lines : undefined;
 }
 
 const BREAK_AFTER = /[，。！？、；：,.!?;:\s]/;
 
+/** Character indices inside `【...】` spans where an auto-break must not cut. */
+function protectedBreaks(chars: string[]): boolean[] {
+  const blocked = new Array<boolean>(chars.length + 1).fill(false);
+  const text = chars.join("");
+  for (const match of text.matchAll(/【[^【】]+】/g)) {
+    const charStart = Array.from(text.slice(0, match.index ?? 0)).length;
+    const charEnd = charStart + Array.from(match[0]).length;
+    for (let i = charStart + 1; i < charEnd; i++) blocked[i] = true;
+  }
+  return blocked;
+}
+
 /** Split `text` into `count` lines of similar length, breaking after punctuation or a space when one is near. */
 function balancedLines(text: string, count: number): string[] | undefined {
   const chars = Array.from(text);
   if (chars.length < count * 2) return undefined;
+  const blocked = protectedBreaks(chars);
   const lines: string[] = [];
   let start = 0;
   for (let part = 1; part < count; part++) {
     const ideal = Math.round(chars.length * part / count);
     const reach = Math.max(1, Math.floor(chars.length / count / 2));
     let cut = ideal;
+    let found = false;
     for (let offset = 0; offset <= reach; offset++) {
-      const after = [ideal + offset, ideal - offset].find((index) => index - start >= 2 && chars.length - index >= 2 && BREAK_AFTER.test(chars[index - 1]));
+      const after = [ideal + offset, ideal - offset].find(
+        (index) => index - start >= 2 && chars.length - index >= 2 && !blocked[index] && BREAK_AFTER.test(chars[index - 1])
+      );
       if (after !== undefined) {
         cut = after;
+        found = true;
         break;
       }
     }
-    if (cut - start < 2 || chars.length - cut < 2) return undefined;
+    if (!found && blocked[cut]) {
+      const open = [1, -1].flatMap((dir) => Array.from({ length: chars.length }, (_, k) => ideal + dir * (k + 1)))
+        .find((index) => index - start >= 2 && chars.length - index >= 2 && !blocked[index]);
+      if (open === undefined) return undefined;
+      cut = open;
+    }
+    if (cut - start < 2 || chars.length - cut < 2 || blocked[cut]) return undefined;
     lines.push(chars.slice(start, cut).join("").trim());
     start = cut;
   }
@@ -284,11 +401,12 @@ function balancedLines(text: string, count: number): string[] | undefined {
 
 /**
  * Ways to set a title, best first for a tie: on one line, as the planner suggested, or in two or three balanced
- * lines. The renderer picks whichever lets the type be largest. No option leaves a single character on a line.
+ * lines. When `manual` is true, returns only the user's explicit line breaks.
  */
-export function titleLineOptions(title: string, suggested?: unknown): string[][] {
+export function titleLineOptions(title: string, suggested?: unknown, manual = false): string[][] {
+  const accepted = acceptedTitleLines(title, suggested, manual);
+  if (manual && accepted) return [accepted];
   const options: string[][] = [[title]];
-  const accepted = acceptedTitleLines(title, suggested);
   if (accepted) options.push(accepted);
   for (const count of [2, 3]) {
     const lines = balancedLines(title, count);
@@ -439,7 +557,8 @@ export function parsePosterLayout(raw: unknown): PosterLayout | null {
   const template = parsePosterTemplate(value.template);
   if (!template || !value.fields || typeof value.fields !== "object") return null;
   const fields = sanitizePosterFields(value.fields);
-  const titleLines = fields.title ? acceptedTitleLines(fields.title, value.titleLines) : undefined;
+  const manual = value.manualTitleLines === true;
+  const titleLines = fields.title ? acceptedTitleLines(fields.title, value.titleLines, manual) : undefined;
   const cleared = Array.isArray(value.cleared) ? value.cleared.filter((name): name is PosterFieldName => FIELD_NAMES.includes(name)) : [];
   const url = (value.background as { url?: unknown } | undefined)?.url;
   return {
@@ -447,7 +566,7 @@ export function parsePosterLayout(raw: unknown): PosterLayout | null {
     template,
     fields,
     ...(value.style ? { style: parsePosterStyle(value.style) } : {}),
-    ...(titleLines ? { titleLines } : {}),
+    ...(titleLines ? { titleLines, ...(manual ? { manualTitleLines: true } : {}) } : {}),
     ...(cleared.length ? { cleared } : {}),
     ...(typeof url === "string" && url ? { background: { url } } : {}),
     ...(value.overflow === true ? { overflow: true } : {}),
@@ -461,21 +580,45 @@ export function storedPosters(raw: unknown): (PosterLayout | null)[] | undefined
   return posters.some(Boolean) ? posters : undefined;
 }
 
+export interface PosterLayoutEdit {
+  fields?: unknown;
+  template?: unknown;
+  style?: unknown;
+  titleLines?: unknown;
+  manualTitleLines?: unknown;
+}
+
 /**
  * A user's edit applied to a stored poster. The user's own text is trusted (they typed it), so nothing is checked
  * against the request again; fields they filled are no longer marked as cleared, and the planner's title lines are
- * dropped once the title changes.
+ * dropped once the title changes unless explicit manual breaks are provided.
  */
-export function editPosterLayout(layout: PosterLayout, edit: { fields?: unknown; template?: unknown; style?: unknown }): PosterLayout {
-  const fields = edit.fields === undefined ? layout.fields : sanitizePosterFields(edit.fields);
+export function editPosterLayout(layout: PosterLayout, edit: PosterLayoutEdit): PosterLayout {
+  const rawTitle = edit.fields && typeof edit.fields === "object" ? (edit.fields as Record<string, unknown>).title : undefined;
+  const inlineManual = edit.titleLines === undefined ? parseManualTitleInput(rawTitle) : undefined;
+  const fields = edit.fields === undefined
+    ? layout.fields
+    : sanitizePosterFields(inlineManual?.manualTitleLines ? { ...(edit.fields as Record<string, unknown>), title: inlineManual.title } : edit.fields);
   const template = parsePosterTemplate(edit.template) ?? layout.template;
-  const titleLines = fields.title === layout.fields.title ? layout.titleLines : undefined;
+  let titleLines: string[] | undefined;
+  let manualTitleLines = false;
+  if (inlineManual?.manualTitleLines && inlineManual.titleLines) {
+    titleLines = acceptedTitleLines(fields.title, inlineManual.titleLines, true);
+    manualTitleLines = !!titleLines;
+  } else if (edit.titleLines !== undefined) {
+    const manual = edit.manualTitleLines === true;
+    titleLines = fields.title ? acceptedTitleLines(fields.title, edit.titleLines, manual) : undefined;
+    manualTitleLines = manual && !!titleLines;
+  } else if (fields.title === layout.fields.title) {
+    titleLines = layout.titleLines;
+    manualTitleLines = layout.manualTitleLines === true && !!titleLines;
+  }
   return {
     version: POSTER_VERSION,
     template,
     fields,
     ...(edit.style !== undefined || layout.style ? { style: parsePosterStyle(edit.style ?? layout.style) } : {}),
-    ...(titleLines ? { titleLines } : {}),
+    ...(titleLines ? { titleLines, ...(manualTitleLines ? { manualTitleLines: true } : {}) } : {}),
     ...(layout.background ? { background: layout.background } : {}),
   };
 }

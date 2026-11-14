@@ -133,7 +133,7 @@ describe("renderPoster", () => {
     expect(await inkShare(saved.body, movedTitle, [88, 117, 140])).toBeGreaterThan(0.1);
   });
 
-  it.each(["subtitle", "points", "price", "footer"] as const)("shrinks the %s without changing other parts", async (part) => {
+  it.each(["subtitle", "points", "price", "date", "address"] as const)("shrinks the %s without changing other parts", async (part) => {
     const picture = await background(800, 900, "#58758c");
     const style = { font: "sans", titleWeight: "bold", scrim: "transparent" } as const;
     const draft = { ...layout("overlay"), style };
@@ -247,6 +247,57 @@ describe("renderPoster", () => {
     const picture = await background(256, 256, "#336699");
     const rendered = await renderPoster(picture, { version: 1, template: "bottom_panel", fields: emptyPosterFields() });
     expect(await inkShare(rendered.body, { left: 0, top: 0, width: 256, height: 256 }, [51, 102, 153])).toBe(0);
+  });
+
+  it("splits date and address into independent layers and supports legacy footer style", async () => {
+    const picture = await background(800, 900, "#58758c");
+    const draft = layout("overlay", { date: "11月20日", address: "望京SOHO T1" });
+    const scene = await renderPosterPreview(picture, draft);
+    const parts = scene.layers.filter((l) => l.kind === "text").map((l) => l.part);
+    expect(parts).toContain("date");
+    expect(parts).toContain("address");
+    const legacyStyle = { font: "sans" as const, titleWeight: "bold" as const, scrim: "transparent" as const, parts: { footer: { dy: -20 } } };
+    const migrated = await renderPoster(picture, { ...draft, style: legacyStyle as PosterLayout["style"] });
+    const explicit = await renderPoster(picture, {
+      ...draft, style: { font: "sans", titleWeight: "bold", scrim: "transparent", parts: { date: { dy: -20 }, address: { dy: -20 } } },
+    });
+    expect(migrated.body.equals(explicit.body)).toBe(true);
+  });
+
+  it("highlights bracketed keywords with custom accentColor and supports badge color override", async () => {
+    const picture = await background(800, 1000, "#f5efe6");
+    const draft = layout("bottom_panel", {
+      title: "夏日【冰爽】特调", subtitle: "", points: [], price: "", originalPrice: "", discount: "限时立减", date: "", address: "",
+    });
+    const out = await renderPoster(picture, {
+      ...draft, style: { font: "sans", titleWeight: "bold", scrim: "strong", accentColor: "#00aa44" },
+    });
+    const { data } = await sharp(out.body).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let greenPixels = 0;
+    for (let i = 0; i < data.length; i += 3) if (data[i + 1] > 140 && data[i] < 40 && data[i + 2] < 90) greenPixels++;
+    expect(greenPixels).toBeGreaterThan(200);
+  });
+
+  it("applies letterSpacing, lineSpacing, stroke, manualTitleLines, and vertical Latin/number layout", async () => {
+    const picture = await background(800, 1000, "#334455");
+    const base = layout("overlay", { title: "Coffee 2025 新品上线", subtitle: "Latte 1280g 礼盒" });
+    const styled = {
+      ...base,
+      titleLines: ["Coffee 2025", "新品上线"],
+      manualTitleLines: true,
+      style: {
+        font: "sans" as const, titleWeight: "bold" as const, scrim: "transparent" as const,
+        parts: {
+          title: { vertical: true, letterSpacing: 20, lineSpacing: 140, stroke: "thin" as const, strokeColor: "#111111" },
+          subtitle: { vertical: true },
+        },
+      },
+    };
+    const scene = await renderPosterPreview(picture, styled);
+    expect(scene.layers.some((l) => l.kind === "text" && l.part === "title")).toBe(true);
+    expect(scene.layers.some((l) => l.kind === "text" && l.part === "subtitle")).toBe(true);
+    expect(posterRenderKey("bg.png", { ...base, titleLines: ["Coffee 2025", "新品上线"], manualTitleLines: true }))
+      .not.toBe(posterRenderKey("bg.png", { ...base, titleLines: ["Coffee 2025", "新品上线"], manualTitleLines: false }));
   });
 
   it("is the same picture for the same layout", async () => {

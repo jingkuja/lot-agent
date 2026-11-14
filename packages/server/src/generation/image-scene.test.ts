@@ -65,3 +65,17 @@ describe("product_scene", () => {
     expect(prompt).toContain("Write exactly 1 prompt.");
   });
 });
+
+describe("posterRemixBackgroundPrompt", () => {
+  it("keeps the reference composition while removing original text for Pango typesetting", async () => {
+    const { posterRemixBackgroundPrompt } = await import("./image-scene.js");
+    const withProduct = posterRemixBackgroundPrompt("Warm wooden desk with soft morning light", 1, "bottom_panel");
+    expect(withProduct).toContain("Image 1 is the design reference");
+    expect(withProduct).toContain("Images 2 onward show the user's product");
+    expect(withProduct).toContain("remove all of its text");
+    expect(withProduct).toContain("Absolutely no text, letters, numbers");
+    expect(withProduct).toContain("Warm wooden desk with soft morning light");
+    const noProduct = posterRemixBackgroundPrompt("Minimalist studio shot", 0, "overlay");
+    expect(noProduct).toContain("Depict the user's product");
+  });
+});

@@ -3,7 +3,7 @@ import { POSTER_NUDGE_LIMIT, type PosterPart, type PosterPreviewScene, type Post
 import { useI18n } from "../i18n/index.js";
 
 export const POSTER_PART_LABELS: Record<PosterPart, string> = {
-  title: "标题", subtitle: "副标题", points: "卖点", price: "价格", footer: "时间地址",
+  title: "标题", subtitle: "副标题", points: "卖点", price: "价格", date: "时间", address: "地址",
 };
 
 type Offset = { dx: number; dy: number };

@@ -96,14 +96,17 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
       )}
       {retexting && poster && onRetext && (
         <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
-          onSubmit={(fields, template, style) => onRetext(index, fields, template, style)}
+          onSubmit={(fields, template, style, titleOptions) => onRetext(index, fields, template, style, titleOptions)}
           onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(index, edit, signal))} />
       )}
     </div>
   );
 }
 
-type RetextHandler = (index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+type RetextHandler = (
+  index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+  titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
+) => Promise<string | undefined>;
 type ImagePosterPreview = (index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
 
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
@@ -526,7 +529,10 @@ export function GenerationCard({
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   messageId?: string;
   /** 真实字体: change the wording of one typeset image; resolves to an error text. Undefined hides 改字. */
-  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  onEditPoster?: (
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+    titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
+  ) => Promise<string | undefined>;
   /** 改字预览: render a draft for editing without saving it. */
   onPreviewPoster?: PreviewPosterHandler;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
@@ -571,11 +577,11 @@ export function GenerationCard({
   };
 
   const retext: RetextHandler | undefined = messageId && onEditPoster
-    ? async (index, fields, template, style) => {
+    ? async (index, fields, template, style, titleOptions) => {
       setPosterBusy(true);
       setPosterError(undefined);
       try {
-        const failure = await onEditPoster(messageId, index, fields, template, style);
+        const failure = await onEditPoster(messageId, index, fields, template, style, titleOptions);
         if (failure) setPosterError(failure);
         return failure;
       } catch {

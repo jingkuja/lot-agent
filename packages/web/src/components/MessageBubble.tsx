@@ -53,7 +53,10 @@ interface MessageBubbleProps {
   onRedoGeneration?: (messageId: string, request: RedoRequest) => Promise<string | undefined>;
   /** 打包下载（原图或按平台尺寸）；返回错误文案。 */
   onExportGeneration?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
-  onEditPoster?: (messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle) => Promise<string | undefined>;
+  onEditPoster?: (
+    messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+    titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
+  ) => Promise<string | undefined>;
   onPreviewPoster?: PreviewPosterHandler;
 }
 

@@ -8,7 +8,13 @@ export type { CatalogModel };
 
 export interface VideoPublication { copy: string; tags: string; }
 
-export interface PosterPreviewEdit { fields: PosterFields; template: PosterTemplate; style: PosterStyle }
+export interface PosterPreviewEdit {
+  fields: PosterFields;
+  template: PosterTemplate;
+  style: PosterStyle;
+  titleLines?: string[];
+  manualTitleLines?: boolean;
+}
 export type PosterPreviewResult = PosterPreviewScene | Blob;
 export type PreviewPosterHandler = (messageId: string, index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
 
@@ -674,7 +680,18 @@ export const api = {
     ),
 
   /** 真实字体: change one typeset image's wording or template; rendered again on the server, free. */
-  editPoster: (conversationId: string, messageId: string, body: { index: number; fields: PosterFields; template: PosterTemplate; style?: PosterStyle }) =>
+  editPoster: (
+    conversationId: string,
+    messageId: string,
+    body: {
+      index: number;
+      fields: PosterFields;
+      template: PosterTemplate;
+      style?: PosterStyle;
+      titleLines?: string[];
+      manualTitleLines?: boolean;
+    },
+  ) =>
     request<{ index: number; asset: { url: string; mime: string }; poster: PosterLayout }>(
       `/conversations/${conversationId}/generations/${messageId}/poster`,
       { method: "POST", body: JSON.stringify(body) }

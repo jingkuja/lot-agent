@@ -165,8 +165,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [poster, setPoster] = useState<PosterSelection | null>(null);
   const [realText, setRealTextState] = useState(() => lastRealText);
   const setRealText = (on: boolean) => { lastRealText = on; setRealTextState(on); };
-  // 真实字体 typesets a poster's wording; the e-commerce types have their own image roles and stay as they are.
-  const realTextAvailable = sceneTabs && imageScene === DEFAULT_IMAGE_SCENE;
+  // 真实字体 typesets a poster's wording in both free creation and poster remix.
+  const realTextAvailable = sceneTabs && (imageScene === DEFAULT_IMAGE_SCENE || imageScene === "poster_remix");
   const activeScene = sceneTabs ? IMAGE_SCENES.find((scene) => scene.value === imageScene) : undefined;
   const [folded, setFolded] = useState(true);
   const collapsed = sceneTabs && imageCollapsible && folded;
@@ -288,7 +288,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     const current = settingsRef.current as ImageSettings | undefined;
     if (mode !== "image" || !current) return current;
     const posterReference = posterRemix && poster ? { category: poster.category, filename: poster.filename } : undefined;
-    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE ? { ...current, scene: imageScene, posterReference }
+    const withScene = sceneTabs && imageScene !== DEFAULT_IMAGE_SCENE
+      ? { ...current, scene: imageScene, posterReference, ...(realTextAvailable && realText ? { realText: true } : {}) }
       : realTextAvailable && realText ? { ...current, realText: true } : current;
     if (current.ratio !== IMAGE_AUTO_RATIO) return withScene;
     if (posterRemix && poster) return { ...withScene, ratio: poster.ratio };

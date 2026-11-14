@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  acceptedTitleLines, editPosterLayout, emptyPosterFields, parsePosterLayout, parsePosterPlan, PosterPlanError, posterBackgroundPrompt,
-  posterPartVertical, posterTemplateFor, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
+  acceptedTitleLines, editPosterLayout, emptyPosterFields, parseAccentRuns, parseManualTitleInput, parsePosterLayout,
+  parsePosterPlan, PosterPlanError, posterBackgroundPrompt, posterPartVertical, posterTemplateFor, sanitizePosterFields,
+  storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
 } from "./index.js";
 
 const request = "做一张火锅店开业海报，全场 8 折，套餐 199 元，11 月 20 日开业，地址人民路 88 号";
@@ -113,16 +114,51 @@ describe("layout helpers", () => {
     expect(editPosterLayout(edited, { style: { font: '<span font_desc="evil">', titleWeight: 999, scrim: "invisible" } }).style)
       .toEqual(DEFAULT_POSTER_STYLE);
   });
-  it("keeps valid per-part colors and nudges, clamps them, and drops anything else", () => {
+  it("keeps valid per-part colors and nudges, clamps them, and migrates legacy footer", () => {
     const style = parsePosterStyle({
+      accentColor: "#FF5500",
       parts: {
-        title: { color: "#FF0000", dx: 3.4, dy: -180 }, subtitle: { color: "red", dx: 0, dy: 76.4 }, points: { dy: "5" },
-        price: { color: '#000000" font_desc="x' }, footer: { dx: 200 }, nope: { dx: 4 },
+        title: { color: "#FF0000", dx: 3.4, dy: -180, letterSpacing: 15, lineSpacing: 140, stroke: "medium", strokeColor: "#112233" },
+        subtitle: { color: "red", dx: 0, dy: 76.4, letterSpacing: -50, lineSpacing: 500, stroke: "thick", strokeColor: "#112233" },
+        points: { dy: "5", stroke: "none", strokeColor: "#112233" },
+        price: { color: '#000000" font_desc="x' },
+        footer: { dx: 200, color: "#00ff00" },
+        date: { dx: 12 },
+        nope: { dx: 4 },
       },
     });
-    expect(style.parts).toEqual({ title: { color: "#ff0000", dx: 3, dy: -100 }, subtitle: { dy: 76 }, footer: { dx: 100 } });
-    expect(parsePosterStyle({ parts: { title: { dx: 0 } } })).toEqual(DEFAULT_POSTER_STYLE);
-    expect(parsePosterStyle({ parts: { title: { vertical: false }, subtitle: { vertical: "yes" } } }).parts).toEqual({ title: { vertical: false } });
+    expect(style.accentColor).toBe("#ff5500");
+    expect(style.parts).toEqual({
+      title: { color: "#ff0000", dx: 3, dy: -100, letterSpacing: 15, lineSpacing: 140, stroke: "medium", strokeColor: "#112233" },
+      subtitle: { dy: 76, letterSpacing: -10, lineSpacing: 200 },
+      date: { color: "#00ff00", dx: 12 },
+      address: { color: "#00ff00", dx: 100 },
+    });
+    expect(parsePosterStyle({ accentColor: "orange", parts: { title: { dx: 0, letterSpacing: 0, lineSpacing: 100 } } }))
+      .toEqual(DEFAULT_POSTER_STYLE);
+    expect(parsePosterStyle({ parts: { title: { vertical: false }, subtitle: { vertical: "yes" } } }).parts)
+      .toEqual({ title: { vertical: false } });
+  });
+
+  it("parses accent keyword spans, manual title breaks and avoids splitting inside brackets", () => {
+    expect(parseAccentRuns("火锅店【盛大开业】全场【8折】")).toEqual([
+      { text: "火锅店", accent: false }, { text: "盛大开业", accent: true },
+      { text: "全场", accent: false }, { text: "8折", accent: true },
+    ]);
+    expect(parseAccentRuns("未闭合【括号")).toEqual([{ text: "未闭合【括号", accent: false }]);
+    expect(parseManualTitleInput("夏日冰饮|第二杯半价")).toEqual({
+      title: "夏日冰饮第二杯半价", titleLines: ["夏日冰饮", "第二杯半价"], manualTitleLines: true,
+    });
+    expect(parseManualTitleInput("Summer\nSale")).toEqual({
+      title: "Summer Sale", titleLines: ["Summer", "Sale"], manualTitleLines: true,
+    });
+    expect(titleLineOptions("夏日冰饮第二杯半价", ["夏日冰饮", "第二杯半价"], true)).toEqual([["夏日冰饮", "第二杯半价"]]);
+    const options = titleLineOptions("火锅店【盛大开业】");
+    for (const lines of options) {
+      for (const item of lines) {
+        expect((item.match(/【/g) ?? []).length).toBe((item.match(/】/g) ?? []).length);
+      }
+    }
   });
 
   it("writes side panels in columns unless the user turned a part", () => {
@@ -173,6 +209,11 @@ describe("layout helpers", () => {
       version: 2, template: "overlay", fields: { ...stored.fields, price: "¥99" }, titleLines: ["火锅店", "盛大开业"], background: { url: "/static/assets/bg.png" },
     });
     expect(editPosterLayout(stored, { fields: { ...stored.fields, title: "新店开业" } }).titleLines).toBeUndefined();
+    const manual = editPosterLayout(stored, { fields: { ...stored.fields, title: "火锅店|盛大|开业" } });
+    expect(manual).toMatchObject({
+      fields: { title: "火锅店盛大开业" }, titleLines: ["火锅店", "盛大", "开业"], manualTitleLines: true,
+    });
+    expect(parsePosterLayout(manual)).toMatchObject({ titleLines: ["火锅店", "盛大", "开业"], manualTitleLines: true });
   });
 
   it("reads stored posters and ignores anything malformed", () => {

@@ -13,7 +13,8 @@ import type { StoredMessage } from "../db/database.js";
 import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
 import {
-  ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixPrompt,
+  ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixBackgroundPrompt,
+  posterRemixPrompt,
 } from "../generation/image-scene.js";
 import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE, type PosterLibrary } from "../generation/poster-library.js";
 import { parseFileUrl, resolveImageReferenceUrl } from "../generation/private-materials.js";
@@ -725,7 +726,8 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       if (!frozen && body.posterReference !== undefined && scene !== "poster_remix") {
         return c.json({ error: "posterReference is only accepted in poster_remix" }, 400);
       }
-      const realText = mediaType === "image" && scene === "free" && (frozen ? !!parsePosterLayout(frozen.poster) : body.realText === true);
+      const realText = mediaType === "image" && (scene === "free" || scene === "poster_remix")
+        && (frozen ? !!parsePosterLayout(frozen.poster) : body.realText === true);
       const model = frozen ? frozen.modelId : body.model;
       // Client settings pass a per-media whitelist so identity fields
       // (conversationId/assistantMessageId/userId) can never ride along.
@@ -836,7 +838,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       if (imageSceneNeedsReference(scene) && !media?.some((item) => item?.type === "reference_image")) {
         return c.json({ error: "请先上传产品图，再描述想换的场景", code: "IMAGE_SCENE_NEEDS_PRODUCT" }, 422);
       }
-      if (!frozen && scene === "poster_remix") {
+      if (!frozen && scene === "poster_remix" && !realText) {
         modelPrompts = [posterRemixPrompt(prompt, media?.length ?? 0)];
       } else if (!frozen && scene !== "free" && scene !== "poster_remix") {
         let plan;
@@ -872,7 +874,9 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           // The picture leaves room for the template that will really be used on this canvas shape.
           const template = width > 0 && height > 0 ? posterTemplateFor(plan.layout.template, width, height) : plan.layout.template;
           poster = { ...plan.layout, template };
-          modelPrompts = [posterBackgroundPrompt(plan.background, template)];
+          modelPrompts = [scene === "poster_remix"
+            ? posterRemixBackgroundPrompt(plan.background, media?.length ?? 0, template)
+            : posterBackgroundPrompt(plan.background, template)];
         } catch (error) {
           console.warn("[image.poster] plan failed", error instanceof PosterPlanError
             ? { errorType: "invalid_plan", reason: error.reason, replyLength: error.replyLength }
@@ -1177,6 +1181,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     const preview = c.req.path.endsWith("/poster/preview");
     const body = await c.req.json().catch(() => null) as {
       index?: unknown; fields?: unknown; template?: unknown; style?: unknown; format?: unknown;
+      titleLines?: unknown; manualTitleLines?: unknown;
     } | null;
     const index = body?.index;
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !body?.fields || typeof body.fields !== "object") {
@@ -1197,7 +1202,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     if (!backgroundKey || !owned || owned.user_id !== userId || !await deps.assets.exists(backgroundKey)) {
       return c.json({ error: "背景图已不存在，无法改字" }, 409);
     }
-    let layout = editPosterLayout(stored, { fields: body.fields, template: body.template, style: body.style });
+    let layout = editPosterLayout(stored, {
+      fields: body.fields, template: body.template, style: body.style,
+      titleLines: body.titleLines, manualTitleLines: body.manualTitleLines,
+    });
     if (preview) {
       try {
         const background = await deps.assets.get(backgroundKey);

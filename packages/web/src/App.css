@@ -5151,6 +5151,9 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-text-notice { margin: 0; color: var(--accent); font-size: 13px; line-height: 1.6; }
 .poster-text-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .poster-text-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.poster-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.poster-field-hint { color: var(--text-muted); font-size: 11px; }
+.poster-accent-row { display: flex; align-items: center; gap: 6px; min-height: 36px; }
 .poster-text-field--wide { grid-column: 1 / -1; }
 .poster-text-field input, .poster-text-field textarea, .poster-text-field select {
   width: 100%; padding: 8px 10px; border: 1.5px solid var(--border-input); border-radius: var(--radius-md);
@@ -5170,6 +5173,7 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-part-preview:hover:not(:disabled) { background: var(--accent); color: var(--text-on-accent); }
 .poster-part-preview:disabled { opacity: 0.45; cursor: default; }
 .poster-part-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.poster-part-item { display: flex; flex-direction: column; gap: 6px; }
 .poster-part-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 13px; }
 .poster-part-name { flex: 0 0 4.5em; color: var(--text); }
 .poster-part-color {
@@ -5194,7 +5198,19 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-part-nudge svg { width: 14px; height: 14px; }
 .poster-part-reset { flex: none; min-width: 48px; padding: 0 10px; font-size: 12px; white-space: nowrap; }
 .poster-part-turn { flex: 0 0 auto; }
-.poster-part-turn[aria-pressed="true"] { border-color: var(--accent); background: var(--bg-active); color: var(--accent); }
+.poster-part-turn[aria-pressed="true"], .poster-part-style-toggle.active, .poster-part-style-toggle[aria-expanded="true"] {
+  border-color: var(--accent); background: var(--bg-active); color: var(--accent);
+}
+.poster-part-extra {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); font-size: 12px;
+}
+.poster-part-metric { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); white-space: nowrap; }
+.poster-part-stroke-field select {
+  height: 28px; padding: 0 8px; border: 1px solid var(--border-input); border-radius: var(--radius-md);
+  background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; outline: none;
+}
+.poster-part-stroke-field select:focus { border-color: var(--accent); }
 .poster-part-nudge:hover:not(:disabled), .poster-part-reset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .poster-part-nudge:disabled, .poster-part-reset:disabled { opacity: 0.4; cursor: default; }
 .poster-part-nudge:focus-visible, .poster-part-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

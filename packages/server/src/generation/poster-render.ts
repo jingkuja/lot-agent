@@ -9,8 +9,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { parsePosterStyle, POSTER_FONT_SCALE, POSTER_PARTS, posterHasText, posterPartVertical, posterTemplateFor, titleLineOptions,
-  type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
+import { parseAccentRuns, parsePosterStyle, POSTER_FONT_SCALE, POSTER_LINE_SPACING, POSTER_PARTS, posterHasText, posterPartVertical,
+  posterTemplateFor, titleLineOptions, type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPartStyle,
+  type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
@@ -135,10 +136,22 @@ export function escapeMarkup(text: string): string {
   return escapeXml(text);
 }
 
+/** Convert `#rrggbb` to an RGB tuple. */
+function hexToRgb(color: string): Rgb {
+  return [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)) as Rgb;
+}
+
+/** Apply the user's accent colour override when set, keeping contrast on the discount badge readable. */
+function effectivePalette(palette: Palette, style: PosterStyle): Palette {
+  if (!style.accentColor) return palette;
+  const accent = hexToRgb(style.accentColor);
+  return { ...palette, accent, onAccent: contrastRatio(WHITE, accent) >= 3 ? WHITE : [20, 20, 20] };
+}
+
 /** The user's own color for a text block, if they picked one. */
 function partColor(layout: PosterLayout, part: PosterPart): Rgb | undefined {
   const color = parsePosterStyle(layout.style).parts?.[part]?.color;
-  return color ? [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)) as Rgb : undefined;
+  return color ? hexToRgb(color) : undefined;
 }
 
 /** A block's nudge in pixels on a W×H canvas. */
@@ -147,12 +160,54 @@ function partShift(layout: PosterLayout, part: PosterPart, W: number, H: number)
   return { x: Math.round((style?.dx ?? 0) * W / 100), y: Math.round((style?.dy ?? 0) * H / 100) };
 }
 
-function posterSpan(layout: PosterLayout) {
+function lineSpacingPx(size: number, baseRatio: number, lineSpacingPct?: number): number {
+  if (!lineSpacingPct || lineSpacingPct === POSTER_LINE_SPACING.default) return Math.round(size * baseRatio);
+  return Math.round(size * (baseRatio + ((lineSpacingPct - POSTER_LINE_SPACING.default) / 100) * 0.6));
+}
+
+function posterSpan(layout: PosterLayout, accentColor?: Rgb) {
   const family = parsePosterStyle(layout.style).font === "serif" ? "Noto Serif SC" : POSTER_FONT_FAMILY;
-  return (text: string, size: number, color: Rgb, bold = false, extra = ""): string => {
-    const font = `${family}${bold ? " Bold" : ""} ${Math.max(8, Math.round(size))}`;
-    return `<span font_desc="${font}" foreground="${hex(color)}"${extra}>${escapeMarkup(text)}</span>`;
+  return (
+    text: string,
+    size: number,
+    color: Rgb,
+    bold = false,
+    extra = "",
+    options?: { letterSpacing?: number; runs?: boolean },
+  ): string => {
+    const px = Math.max(8, Math.round(size));
+    const font = `${family}${bold ? " Bold" : ""} ${px}`;
+    const tracking = options?.letterSpacing ? ` letter_spacing="${Math.round(px * (options.letterSpacing / 100) * 1024)}"` : "";
+    const makeSpan = (segment: string, fill: Rgb) =>
+      `<span font_desc="${font}" foreground="${hex(fill)}"${extra}${tracking}>${escapeMarkup(segment)}</span>`;
+    if (!options?.runs || !accentColor) return makeSpan(text, color);
+    return text.split("\n")
+      .map((lineText) => parseAccentRuns(lineText).map((run) => makeSpan(run.text, run.accent ? accentColor : color)).join(""))
+      .join("\n");
   };
+}
+
+/** Add an anti-aliased text outline behind a rendered text picture when configured on a part. */
+async function applyPartStroke(
+  picture: Picture, partStyle: PosterPartStyle | undefined, textColor: Rgb, fontSize: number,
+): Promise<Picture> {
+  if (!partStyle?.stroke || partStyle.stroke === "none") return picture;
+  const thickness = Math.max(2, Math.round(fontSize * (partStyle.stroke === "medium" ? 0.08 : 0.045)));
+  const pad = thickness + 2;
+  const strokeRgb = partStyle.strokeColor ? hexToRgb(partStyle.strokeColor) : (luminance(textColor) < 0.4 ? WHITE : [24, 24, 24] as Rgb);
+  const mask = await sharp(picture.data).extractChannel("alpha").png().toBuffer();
+  const dilated = await sharp(mask)
+    .extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 0, b: 0 } })
+    .blur(Math.max(0.8, thickness * 0.6))
+    .linear(6, -30)
+    .toColourspace("b-w")
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  const fill = { r: strokeRgb[0], g: strokeRgb[1], b: strokeRgb[2] };
+  const outline = await sharp({ create: { width: dilated.info.width, height: dilated.info.height, channels: 3, background: fill } })
+    .joinChannel(dilated.data).png().toBuffer();
+  const data = await sharp(outline).composite([{ input: picture.data, left: pad, top: pad }]).png().toBuffer();
+  return { data, width: dilated.info.width, height: dilated.info.height };
 }
 
 /** Render Pango markup to a transparent picture. `width` wraps the text; without it the text keeps its own lines. */
@@ -230,45 +285,105 @@ const VERTICAL_FORMS: Record<string, string> = {
 /** Distance from one character to the next in a column, in font sizes. */
 const COLUMN_PITCH = 1.04;
 
-/** A column's lines: one character each, a number of one or two digits kept upright together, a space as an empty line. */
-function columnCells(text: string): string[] {
-  const cells: string[] = [];
-  for (const token of text.trim().replace(/\s+/g, " ").match(/\d+|./gu) ?? []) {
-    if (token === " ") cells.push("");
-    else if (/^\d{1,2}$/.test(token)) cells.push(token);
-    else cells.push(...Array.from(token).map((char) => VERTICAL_FORMS[char] ?? char));
-  }
-  return cells;
+interface VerticalToken {
+  kind: "cell" | "tcy" | "rotated" | "space";
+  text: string;
+  accent: boolean;
 }
 
-/** `text` as columns of at most `max` lines, without a blank line at either end of a column. */
-function columnChunks(text: string, max: number): string[][] {
-  const cells = columnCells(text);
-  const columns: string[][] = [];
-  for (let start = 0; start < cells.length; start += max) {
-    const column = cells.slice(start, start + max);
-    while (column[0] === "") column.shift();
-    while (column.at(-1) === "") column.pop();
+/** Break text into vertical-column tokens: rotated Latin words & 5+ digit numbers, upright 3–4 digit tate-chu-yoko, and single CJK cells. */
+function columnTokens(text: string): VerticalToken[] {
+  const tokens: VerticalToken[] = [];
+  const normalized = text.trim().replace(/\s+/g, " ");
+  for (const run of parseAccentRuns(normalized)) {
+    const parts = run.text.match(/[A-Za-z][A-Za-z0-9.&'+\-/]*|\d+|./gu) ?? [];
+    for (const part of parts) {
+      if (/^\s+$/.test(part)) tokens.push({ kind: "space", text: "", accent: run.accent });
+      else if (/^\d{1,2}$/.test(part)) tokens.push({ kind: "cell", text: part, accent: run.accent });
+      else if (/^\d{3,4}$/.test(part)) tokens.push({ kind: "tcy", text: part, accent: run.accent });
+      else if (/^\d{5,}$/.test(part) || /^[A-Za-z]/.test(part)) tokens.push({ kind: "rotated", text: part, accent: run.accent });
+      else tokens.push({ kind: "cell", text: VERTICAL_FORMS[part] ?? part, accent: run.accent });
+    }
+  }
+  return tokens;
+}
+
+/** `text` as columns of at most `max` slots, without blank slots at either end of a column. */
+function columnChunks(text: string, max: number): VerticalToken[][] {
+  const tokens = columnTokens(text);
+  const columns: VerticalToken[][] = [];
+  for (let start = 0; start < tokens.length; start += max) {
+    const column = tokens.slice(start, start + max);
+    while (column[0]?.kind === "space") column.shift();
+    while (column.at(-1)?.kind === "space") column.pop();
     if (column.length) columns.push(column);
   }
   return columns;
 }
 
+/** Render a single vertical column, combining pure cell segments cleanly while rotating Latin words / long numbers 90° clockwise. */
+async function renderVerticalColumn(
+  tokens: VerticalToken[], size: number, color: Rgb, accentColor: Rgb, layout: PosterLayout,
+  bold: boolean, letterSpacing?: number,
+): Promise<Picture | null> {
+  if (!tokens.length) return null;
+  const span = posterSpan(layout, accentColor);
+  const pitch = Math.max(0.85, COLUMN_PITCH + ((letterSpacing ?? 0) / 100) * 0.45);
+  // Pango spaces CJK lines about 1.4 sizes apart; a negative spacing brings stacked cells to `pitch`.
+  const stackSpacing = -Math.round(size * (1.41 - pitch));
+  const cellGap = Math.max(1, Math.round(size * Math.max(0.04, pitch - 0.98)));
+  const pieces: Picture[] = [];
+  let batch: VerticalToken[] = [];
+  const flushBatch = async () => {
+    if (!batch.some((t) => t.kind === "cell")) {
+      batch = [];
+      return;
+    }
+    const markup = batch.map((t) => span(t.text, size, t.accent ? accentColor : color, bold)).join("\n");
+    pieces.push(await textPicture(markup, { align: "centre", spacing: stackSpacing }));
+    batch = [];
+  };
+  for (const token of tokens) {
+    if (token.kind === "cell" || token.kind === "space") {
+      batch.push(token);
+      continue;
+    }
+    await flushBatch();
+    const fill = token.accent ? accentColor : color;
+    if (token.kind === "tcy") {
+      const tcySize = size * (token.text.length === 3 ? 0.68 : 0.56);
+      pieces.push(await textPicture(span(token.text, tcySize, fill, bold), { align: "centre" }));
+    } else {
+      const horiz = await textPicture(span(token.text, size * 0.86, fill, bold, "", { letterSpacing }), { align: "left" });
+      const { data, info } = await sharp(horiz.data).rotate(90).png().toBuffer({ resolveWithObject: true });
+      pieces.push({ data, width: info.width, height: info.height });
+    }
+  }
+  await flushBatch();
+  return pieces.length ? stackPicture(pieces, cellGap) : null;
+}
+
 /** Columns written top to bottom, the first on the right, tops aligned. */
-async function columnsPicture(columns: string[][], size: number, color: Rgb, layout: PosterLayout, bold = false): Promise<Picture | null> {
+async function columnsPicture(
+  columns: VerticalToken[][], size: number, color: Rgb, accentColor: Rgb, layout: PosterLayout,
+  bold = false, partStyle?: PosterPartStyle,
+): Promise<Picture | null> {
   if (!columns.length) return null;
-  const span = posterSpan(layout);
   const pictures: Picture[] = [];
-  // Pango spaces CJK lines about 1.4 sizes apart; a negative spacing brings a column to its usual pitch.
-  const spacing = -Math.round(size * (1.41 - COLUMN_PITCH));
-  for (const cells of columns) pictures.push(await textPicture(span(cells.join("\n"), size, color, bold), { align: "centre", spacing }));
-  return rowPicture(pictures.reverse(), Math.round(size * 0.35), "top");
+  for (const tokens of columns) {
+    const pic = await renderVerticalColumn(tokens, size, color, accentColor, layout, bold, partStyle?.letterSpacing);
+    if (pic) pictures.push(pic);
+  }
+  const colGap = lineSpacingPx(size, 0.35, partStyle?.lineSpacing);
+  return rowPicture(pictures.reverse(), colGap, "top");
 }
 
 /** Text on a rounded block of the accent color (the discount badge). */
-async function badgePicture(text: string, size: number, palette: Palette, layout: PosterLayout): Promise<Picture> {
+async function badgePicture(
+  text: string, size: number, palette: Palette, layout: PosterLayout, letterSpacing?: number,
+): Promise<Picture> {
   const span = posterSpan(layout);
-  const label = await textPicture(span(text, size, palette.onAccent, true));
+  const label = await textPicture(span(text, size, palette.onAccent, true, "", { letterSpacing }));
   const padX = Math.round(size * 0.55);
   const padY = Math.round(size * 0.28);
   const width = label.width + padX * 2;
@@ -285,6 +400,7 @@ async function priceRow(
 ): Promise<Picture | null> {
   const { fields } = layout;
   const span = posterSpan(layout);
+  const tracking = parsePosterStyle(layout.style).parts?.price?.letterSpacing;
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
   const cjk = CJK.test(`${fields.title}${fields.subtitle}${fields.points.join("")}${fields.address}`);
   const sizedUnit = unit * factor;
@@ -295,16 +411,21 @@ async function priceRow(
       const { before, number, after } = pricePieces(fields.price, cjk);
       const small = big * 0.5;
       items.push(await textPicture(
-        (before ? span(before, small, color, true) : "") + span(number, big, color, true)
-        + (after ? span(` ${after}`, small, color, true) : "")
+        (before ? span(before, small, color, true, "", { letterSpacing: tracking }) : "")
+        + span(number, big, color, true, "", { letterSpacing: tracking })
+        + (after ? span(` ${after}`, small, color, true, "", { letterSpacing: tracking }) : "")
       ));
     }
     if (fields.originalPrice) {
       const { before, number, after } = pricePieces(fields.originalPrice, cjk);
       const text = `${before}${number}${after ? ` ${after}` : ""}`;
-      items.push(await textPicture(span(text, sizedUnit * 0.36 * scale, palette.muted, false, ' strikethrough="true"')));
+      items.push(await textPicture(
+        span(text, sizedUnit * 0.36 * scale, palette.muted, false, ' strikethrough="true"', { letterSpacing: tracking })
+      ));
     }
-    if (fields.discount) items.push(await badgePicture(fields.discount, sizedUnit * (fields.price ? 0.34 : 0.5) * scale, palette, layout));
+    if (fields.discount) {
+      items.push(await badgePicture(fields.discount, sizedUnit * (fields.price ? 0.34 : 0.5) * scale, palette, layout, tracking));
+    }
     return vertical ? stackPicture(items, Math.round(sizedUnit * 0.12 * scale)) : rowPicture(items, Math.round(sizedUnit * 0.22 * scale));
   };
   const row = await build(1);
@@ -312,14 +433,19 @@ async function priceRow(
 }
 
 /** The title at the largest size (up to `max`) at which its widest line fits `width`, over the allowed line breaks. */
-async function titlePicture(layout: PosterLayout, max: number, width: number, color: Rgb, align: Align, factor: number): Promise<Picture | null> {
-  const span = posterSpan(layout);
-  const bold = parsePosterStyle(layout.style).titleWeight === "bold";
+async function titlePicture(
+  layout: PosterLayout, max: number, width: number, color: Rgb, accentColor: Rgb, align: Align, factor: number,
+): Promise<Picture | null> {
+  const span = posterSpan(layout, accentColor);
+  const style = parsePosterStyle(layout.style);
+  const titleStyle = style.parts?.title;
+  const bold = style.titleWeight === "bold";
   const title = layout.fields.title;
   if (!title) return null;
   let best: { lines: string[]; size: number } | undefined;
-  for (const lines of titleLineOptions(title, layout.titleLines)) {
-    const probe = await textPicture(span(lines.join("\n"), 100, color, bold));
+  const spanOpts = { letterSpacing: titleStyle?.letterSpacing, runs: true };
+  for (const lines of titleLineOptions(title, layout.titleLines, layout.manualTitleLines)) {
+    const probe = await textPicture(span(lines.join("\n"), 100, color, bold, "", spanOpts));
     const size = Math.min(max, Math.floor(100 * width / probe.width));
     // More lines must buy clearly larger type to be worth the height.
     const score = size * 0.92 ** (lines.length - 1);
@@ -327,15 +453,22 @@ async function titlePicture(layout: PosterLayout, max: number, width: number, co
   }
   if (!best) return null;
   const size = best.size * factor;
-  return textPicture(span(best.lines.join("\n"), size, color, bold), { align, spacing: Math.round(size * 0.12) });
+  return textPicture(span(best.lines.join("\n"), size, color, bold, "", spanOpts), {
+    align, spacing: lineSpacingPx(size, 0.12, titleStyle?.lineSpacing),
+  });
 }
 
 /** A vertical title runs in one column, even when the planner suggested breaks for the horizontal title. */
-async function titleColumn(layout: PosterLayout, max: number, width: number, height: number, color: Rgb, factor: number): Promise<Picture | null> {
-  const cells = columnCells(layout.fields.title);
-  if (!cells.length) return null;
-  const size = Math.floor(Math.min(max, width, height / (cells.length * COLUMN_PITCH))) * factor;
-  const picture = await columnsPicture([cells], size, color, layout, parsePosterStyle(layout.style).titleWeight === "bold");
+async function titleColumn(
+  layout: PosterLayout, max: number, width: number, height: number, color: Rgb, accentColor: Rgb, factor: number,
+): Promise<Picture | null> {
+  const tokens = columnTokens(layout.fields.title);
+  if (!tokens.length) return null;
+  const style = parsePosterStyle(layout.style);
+  const titleStyle = style.parts?.title;
+  const pitch = Math.max(0.85, COLUMN_PITCH + ((titleStyle?.letterSpacing ?? 0) / 100) * 0.45);
+  const size = Math.floor(Math.min(max, width, height / (tokens.length * pitch))) * factor;
+  const picture = await columnsPicture([tokens], size, color, accentColor, layout, style.titleWeight === "bold", titleStyle);
   const limitWidth = Math.max(1, Math.floor(width * factor));
   const limitHeight = Math.max(1, Math.floor(height * factor));
   if (!picture || (picture.width <= limitWidth && picture.height <= limitHeight)) return picture;
@@ -353,48 +486,73 @@ interface Frame { template: PosterTemplate; width: number; height: number; unit:
  */
 async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): Promise<Block[]> {
   const { width, height, palette, align } = frame;
-  const span = posterSpan(layout);
+  const span = posterSpan(layout, palette.accent);
   const style = parsePosterStyle(layout.style);
   const fields = layout.fields;
   const u = frame.unit * scale;
   const blocks: Block[] = [];
   const vertical = (part: PosterPart) => posterPartVertical(style, part, frame.template);
-  const add = async (part: PosterPart, gap: number, render: Block["render"]) => {
+  const color = (part: PosterPart, fallback: Rgb) => partColor(layout, part) ?? fallback;
+  const add = async (part: PosterPart, gap: number, strokeColor: Rgb, baseSize: number, rawRender: Block["render"]) => {
+    const partStyle = style.parts?.[part];
+    const render: Block["render"] = async (factor) => {
+      const pic = await rawRender(factor);
+      return pic ? applyPartStroke(pic, partStyle, strokeColor, baseSize * factor) : null;
+    };
     const picture = await render(1);
     if (picture) blocks.push({ picture, gapBefore: blocks.length ? Math.round(u * gap) : 0, part, vertical: vertical(part), render });
   };
-  const color = (part: PosterPart, fallback: Rgb) => partColor(layout, part) ?? fallback;
-  const columns = (texts: string[], size: number, fill: Rgb, factor: number) => {
+  const columns = (texts: string[], size: number, fill: Rgb, factor: number, partStyle?: PosterPartStyle) => {
     const max = Math.max(1, Math.floor(height / (size * COLUMN_PITCH)));
-    return columnsPicture(texts.flatMap((text) => columnChunks(text, max)), size * factor, fill, layout);
+    return columnsPicture(texts.flatMap((text) => columnChunks(text, max)), size * factor, fill, palette.accent, layout, false, partStyle);
   };
   const titleColor = color("title", palette.text);
-  await add("title", 0, (factor) => vertical("title")
-    ? titleColumn(layout, u, width, height * scale, titleColor, factor)
-    : titlePicture(layout, u, width, titleColor, align, factor));
+  await add("title", 0, titleColor, u, (factor) => vertical("title")
+    ? titleColumn(layout, u, width, height * scale, titleColor, palette.accent, factor)
+    : titlePicture(layout, u, width, titleColor, palette.accent, align, factor));
   if (fields.subtitle) {
     const fill = color("subtitle", palette.text);
-    await add("subtitle", 0.2, (factor) => vertical("subtitle") ? columns([fields.subtitle], u * 0.4, fill, factor)
-      : textPicture(span(fields.subtitle, u * 0.4 * factor, fill), { width: width * factor, align, spacing: Math.round(u * 0.08 * factor) }));
+    const subStyle = style.parts?.subtitle;
+    await add("subtitle", 0.2, fill, u * 0.4, (factor) => {
+      const size = u * 0.4 * factor;
+      return vertical("subtitle") ? columns([fields.subtitle], u * 0.4, fill, factor, subStyle)
+        : textPicture(span(fields.subtitle, size, fill, false, "", { letterSpacing: subStyle?.letterSpacing, runs: true }), {
+          width: width * factor, align, spacing: lineSpacingPx(size, 0.2, subStyle?.lineSpacing),
+        });
+    });
   }
   if (fields.points.length) {
     const text = color("points", palette.text);
-    await add("points", 0.3, (factor) => {
-      if (vertical("points")) return columns(fields.points, u * 0.34, text, factor);
+    const ptsStyle = style.parts?.points;
+    await add("points", 0.3, text, u * 0.34, (factor) => {
+      if (vertical("points")) return columns(fields.points, u * 0.34, text, factor, ptsStyle);
       const size = u * 0.34 * factor;
+      const opts = { letterSpacing: ptsStyle?.letterSpacing, runs: true };
       // Centered posters run the points on one flowing line; a left-aligned column lists them.
       const markup = align === "centre"
-        ? fields.points.map((point) => span(point, size, text)).join(span("  ·  ", size, palette.accent, true))
-        : fields.points.map((point) => span("• ", size, palette.accent, true) + span(point, size, text)).join("\n");
-      return textPicture(markup, { width: width * factor, align, spacing: Math.round(u * 0.14 * factor) });
+        ? fields.points.map((point) => span(point, size, text, false, "", opts))
+          .join(span("  ·  ", size, palette.accent, true, "", { letterSpacing: ptsStyle?.letterSpacing }))
+        : fields.points.map((point) => span("• ", size, palette.accent, true) + span(point, size, text, false, "", opts)).join("\n");
+      return textPicture(markup, { width: width * factor, align, spacing: lineSpacingPx(size, 0.4, ptsStyle?.lineSpacing) });
     });
   }
-  await add("price", 0.3, (factor) => priceRow(layout, u, width, palette, color("price", palette.accent), vertical("price"), factor));
-  const footer = [fields.date, fields.address].filter(Boolean);
-  if (footer.length) {
-    const fill = color("footer", palette.muted);
-    await add("footer", 0.34, (factor) => vertical("footer") ? columns(footer, u * 0.27, fill, factor)
-      : textPicture(span(footer.join("\n"), u * 0.27 * factor, fill), { width: width * factor, align, spacing: Math.round(u * 0.1 * factor) }));
+  const priceFill = color("price", palette.accent);
+  await add("price", 0.3, priceFill, u * 0.92, (factor) => priceRow(layout, u, width, palette, priceFill, vertical("price"), factor));
+  let footerGap = 0.34;
+  for (const part of ["date", "address"] as const) {
+    const value = fields[part];
+    if (!value) continue;
+    const fill = color(part, palette.muted);
+    const partStyle = style.parts?.[part];
+    const gap = footerGap;
+    footerGap = 0.14;
+    await add(part, gap, fill, u * 0.27, (factor) => {
+      const size = u * 0.27 * factor;
+      return vertical(part) ? columns([value], u * 0.27, fill, factor, partStyle)
+        : textPicture(span(value, size, fill, false, "", { letterSpacing: partStyle?.letterSpacing, runs: true }), {
+          width: width * factor, align, spacing: lineSpacingPx(size, 0.35, partStyle?.lineSpacing),
+        });
+    });
   }
   return blocks;
 }
@@ -579,7 +737,7 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
     : side === "bottom" ? { left: 0, top: H - maxSize, width: W, height: maxSize }
     : side === "left" ? { left: 0, top: 0, width: maxSize, height: H }
     : { left: W - maxSize, top: 0, width: maxSize, height: H };
-  const palette = posterPalette((await areaStats(background, clampRect(under, W, H))).mean);
+  const palette = effectivePalette(posterPalette((await areaStats(background, clampRect(under, W, H))).mean), style);
   const align: Align = across ? "centre" : "left";
   const maxHeight = (across ? maxSize : H) - pad * 2;
   const fitted = await fitBlocks(layout, { template, width: columnWidth, height: maxHeight, unit, palette, align });
@@ -605,7 +763,8 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
   const pad = Math.round(Math.min(W, H) * 0.07);
   const columnWidth = W - pad * 2;
   const unit = Math.min(columnWidth * 0.13, Math.min(W, H) * 0.105);
-  const { scrim: strength, parts } = parsePosterStyle(layout.style);
+  const style = parsePosterStyle(layout.style);
+  const { scrim: strength, parts } = style;
   const { fields } = layout;
   const head: PosterLayout = { ...layout, fields: { ...fields, points: [], price: "", originalPrice: "", discount: "", date: "", address: "" } };
   const foot: PosterLayout = { ...layout, fields: { ...fields, title: "", subtitle: "" }, titleLines: undefined };
@@ -617,9 +776,9 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
     const { mean, spread } = await areaStats(background, area);
     const lightText = luminance(mean) < 0.4;
     const text: Rgb = lightText ? WHITE : [24, 24, 24];
-    const palette: Palette = {
+    const palette = effectivePalette({
       panel: mean, text, muted: mix(text, mean, 0.18), accent: lightText ? [255, 214, 102] : [196, 44, 8], onAccent: lightText ? [24, 24, 24] : WHITE,
-    };
+    }, style);
     const fitted = await fitBlocks(part, { template: "overlay", width: columnWidth, height: maxHeight, unit, palette, align: "centre" });
     if (!fitted.rows.length) continue;
     overflow ||= fitted.overflow;
@@ -681,8 +840,11 @@ export async function renderPosterPreview(background: Buffer, layout: PosterLayo
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  // Render revision 3 uses one column for vertical titles and removes shadows in transparent mode.
-  const values = [3, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null, parsePosterStyle(layout.style)];
+  // Render revision 4 adds date/address split, keyword highlights, manual line breaks, spacing, stroke and vertical token fixes.
+  const values = [
+    4, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
+    layout.manualTitleLines ?? false, parsePosterStyle(layout.style),
+  ];
   const content = JSON.stringify(values);
   return createHash("sha256").update(content).digest("hex").slice(0, 32);
 }

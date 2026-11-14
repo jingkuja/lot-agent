@@ -4,6 +4,8 @@
  * 自由创作 sends the user's text as is, and 爆款复刻 sends an image-edit brief with a design reference.
  */
 
+import { posterBackgroundPrompt, type PosterTemplate } from "@lot-agent/core/poster";
+
 export const IMAGE_SCENES = ["free", "white_background", "main_images", "product_set", "product_scene", "poster_remix"] as const;
 export type ImageScene = typeof IMAGE_SCENES[number];
 export type GuidedImageScene = Exclude<ImageScene, "free" | "poster_remix">;
@@ -36,6 +38,19 @@ export function posterRemixPrompt(brief: string, productImages: number): string 
     "",
     "User brief:",
     brief,
+  ].join("\n");
+}
+
+/** Remix background prompt for real-text typesetting: keeps the reference composition without rendering text. */
+export function posterRemixBackgroundPrompt(backgroundBrief: string, productImages: number, template: PosterTemplate): string {
+  return [
+    "Create a clean poster background adapted from Image 1's design reference for the user's product.",
+    "Image 1 is the design reference. Adapt its composition, lighting, colour mood and framing while keeping text regions empty.",
+    productImages > 0
+      ? "Images 2 onward show the user's product or brand assets. Keep their appearance and details faithful."
+      : "Depict the user's product using the scene details below.",
+    "Replace the design reference's product and remove all of its text, typography, badges, price tags, logos and watermarks.",
+    posterBackgroundPrompt(backgroundBrief, template),
   ].join("\n");
 }
 

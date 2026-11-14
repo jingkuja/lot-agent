@@ -796,11 +796,12 @@ export function useChat(
   // 真实字体: new wording for one typeset image. Rendered again on the server, free; resolves to an error text to show.
   const editPoster = useCallback(async (
     messageId: string, index: number, fields: PosterFields, template: PosterTemplate, style?: PosterStyle,
+    titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
   ): Promise<string | undefined> => {
     const cid = cidRef.current;
     if (!cid) return "改字失败，请稍后重试";
     try {
-      const result = await api.editPoster(cid, messageId, { index, fields, template, style });
+      const result = await api.editPoster(cid, messageId, { index, fields, template, style, ...titleOptions });
       // Keep the old poster covered until the replacement is ready to paint.
       await preloadImage(result.asset.url);
       if (cidRef.current === cid) dispatch({ type: "generation_poster_edited", messageId, index, asset: result.asset, poster: result.poster });

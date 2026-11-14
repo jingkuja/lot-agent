@@ -1204,6 +1204,42 @@ describe("真实字体 posters", () => {
     expect(saved()).not.toHaveProperty("composites");
   });
 
+  it("supports realText in poster_remix using the reference design and a text-free prompt", async () => {
+    const category = "家居日用";
+    const posterReference = { category, filename: "tea.png" };
+    const library = new PosterLibrary(async () => `品类,商品名,图片本地路径\n${category},茶壶,/workspace/posters/${category}/tea.png`);
+    await library.refresh();
+    const service = fakeService();
+    service.imageSceneText = vi.fn(async () => plan);
+    const res = await app(service, library).request("/conversations/c1/generations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mediaType: "image", scene: "poster_remix", posterReference,
+        prompt: "火锅店开业海报，全场 8 折", realText: true, settings: { size: "1024x1536", n: 1 },
+      }),
+    });
+    expect(res.status).toBe(202);
+    expect(service.imageSceneText).toHaveBeenCalledTimes(1);
+    const [, input] = service.jobQueue.enqueue.mock.calls[0];
+    expect(input.scene).toBe("poster_remix");
+    expect(input.prompt).toContain("Image 1 is the design reference");
+    expect(input.prompt).toContain("remove all of its text");
+    expect(input.poster).toMatchObject({ template: "side_panel", fields: { title: "火锅店盛大开业", discount: "8 折" } });
+    expect(input.posterReference).toMatchObject(posterReference);
+  });
+
+  it("saves manual title line breaks when editing poster layout", async () => {
+    const { edit, fields } = await setup();
+    const res = await edit({
+      index: 0, fields: { ...fields, title: "火锅店盛大开业" },
+      template: "bottom_panel", titleLines: ["火锅店", "盛大开业"], manualTitleLines: true,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { poster: { titleLines?: string[]; manualTitleLines?: boolean } };
+    expect(body.poster.titleLines).toEqual(["火锅店", "盛大开业"]);
+    expect(body.poster.manualTitleLines).toBe(true);
+  });
+
   it("refuses images without a poster, other users' pictures and unfinished messages", async () => {
     const fields = { title: "开业" };
     expect((await (await setup()).edit({ index: 1, fields })).status).toBe(409);
