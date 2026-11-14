@@ -1152,9 +1152,8 @@ describe("真实字体 posters", () => {
   async function setup(metadata: Record<string, unknown> = {}) {
     const { default: sharp } = await import("sharp");
     const service = fakeService();
-    const files = new Map<string, Buffer>([
-      ["bg.png", await sharp({ create: { width: 256, height: 384, channels: 3, background: "#e9dcc3" } }).png().toBuffer()],
-    ]);
+    const bgPng = await sharp({ create: { width: 256, height: 384, channels: 3, background: "#e9dcc3" } }).png().toBuffer();
+    const files = new Map<string, Buffer>([["bg.png", bgPng], ["old.png", bgPng]]);
     const fields = { title: "火锅店盛大开业", subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" };
     const meta: Record<string, unknown> = {
       kind: "generation", mediaType: "image", status: "completed", taskId: "task-1",
@@ -1166,11 +1165,14 @@ describe("真实字体 posters", () => {
     let saved: Record<string, unknown> | null = null;
     service.db.getGenerationMessage = vi.fn(async () => ({ status: "completed", metadata: meta }));
     service.db.getGeneratedByStorageKey = vi.fn(async (key: string) => (
-      key.startsWith("poster-") ? null : { user_id: key === "other.png" ? "u2" : "u1", storage_key: key, url: `/static/assets/${key}` }
+      key.startsWith("poster-") && !files.has(key)
+        ? null
+        : { user_id: key === "other.png" ? "u2" : "u1", storage_key: key, url: `/static/assets/${key}` }
     ));
     service.db.createAsset = vi.fn(async () => {});
     service.db.updateGenerationMetadata = vi.fn(async (_id: string, _owner: unknown, update: (current: any) => any) => {
       saved = update(meta);
+      if (saved) Object.assign(meta, saved);
       return !!saved;
     });
     const assets = {
@@ -1184,7 +1186,13 @@ describe("真实字体 posters", () => {
     const edit = (body: unknown) => a.request("/conversations/c1/generations/m1/poster", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    return { service, assets, edit, fields, saved: () => saved };
+    const restore = (body: unknown) => a.request("/conversations/c1/generations/m1/poster/restore", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const exportPoster = (body: unknown) => a.request("/conversations/c1/generations/m1/poster/export", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { service, assets, edit, restore, exportPoster, fields, saved: () => saved };
   }
 
   it("renders new wording on the stored picture without a model request", async () => {
@@ -1254,5 +1262,84 @@ describe("真实字体 posters", () => {
     const gone = await setup();
     gone.service.db.getGenerationMessage = vi.fn(async () => null);
     expect((await gone.edit({ index: 0, fields })).status).toBe(404);
+  });
+
+  it("records version history on save and restores a previous version for free", async () => {
+    const { service, edit, restore, fields } = await setup();
+    const res1 = await edit({ index: 0, fields: { ...fields, subtitle: "全场八折" }, template: "overlay" });
+    expect(res1.status).toBe(200);
+    const body1 = await res1.json() as { asset: { url: string }; poster: { template: string; history?: Array<{ template: string; asset: { url: string } }> } };
+    expect(body1.poster.history).toHaveLength(1);
+    expect(body1.poster.history![0]).toMatchObject({ template: "bottom_panel", asset: { url: "/static/assets/old.png" } });
+
+    const res2 = await restore({ index: 0, versionIndex: 0 });
+    expect(res2.status).toBe(200);
+    const body2 = await res2.json() as {
+      asset: { url: string }; poster: { template: string; fields: { subtitle: string }; history?: Array<{ asset: { url: string } }> };
+    };
+    expect(body2.asset.url).toBe("/static/assets/old.png");
+    expect(body2.poster.template).toBe("bottom_panel");
+    expect(body2.poster.fields.subtitle).toBe("");
+    expect(body2.poster.history?.[0].asset.url).toBe(body1.asset.url);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+
+  it("exports 2x HD PNG in a requested aspect ratio without mutating stored metadata", async () => {
+    const { default: sharp } = await import("sharp");
+    const { service, assets, exportPoster, fields } = await setup();
+    const res = await exportPoster({ index: 0, fields: { ...fields, subtitle: "高清导出" }, template: "overlay", scale: 2, ratio: "9:16" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+    const buf = Buffer.from(await res.arrayBuffer());
+    const meta = await sharp(buf).metadata();
+    expect(meta.width).toBe(470);
+    expect(meta.height).toBe(Math.round((470 * 16) / 9));
+    expect(assets.put).not.toHaveBeenCalled();
+    expect(service.usageMeter.checkQuota).not.toHaveBeenCalled();
+  });
+
+  it("regenerates a real-text background with a new template composition while preserving edits", async () => {
+    const service = fakeService();
+    const sourceId = "11111111-1111-4111-8111-111111111111";
+    const originalPoster = {
+      version: 2, template: "bottom_panel",
+      fields: { title: "火锅店盛大开业", subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "" },
+      backgroundPrompt: "Warm spicy hotpot tabletop photography.",
+    };
+    service.db.getImageSubmission = vi.fn(async () => null);
+    service.db.getGenerationMessage = vi.fn(async () => ({
+      id: sourceId, status: "completed",
+      metadata: {
+        kind: "generation", mediaType: "image", status: "completed",
+        prompt: "火锅店开业", assets: [{ url: "/static/assets/old.png", mime: "image/png" }],
+        taskId: "orig-task",
+      },
+    }));
+    service.db.getTask = vi.fn(async () => ({
+      id: "orig-task", type: "image.generate", user_id: "u1",
+      input: {
+        conversationId: "c1", assistantMessageId: sourceId,
+        prompt: "Warm spicy hotpot tabletop photography.\n\nComposition: bottom...",
+        scene: "free", size: "1024x1536", poster: originalPoster,
+      },
+    }));
+    const res = await app(service).request("/conversations/c1/generations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mediaType: "image",
+        regenerateFrom: sourceId,
+        requestId: "req-regen-template-1",
+        poster: { template: "top_panel", fields: { ...originalPoster.fields, subtitle: "全新底图" } },
+      }),
+    });
+    expect(res.status).toBe(202);
+    const [, input] = service.jobQueue.enqueue.mock.calls[0];
+    expect(input.poster).toMatchObject({
+      template: "top_panel",
+      fields: { title: "火锅店盛大开业", subtitle: "全新底图" },
+      backgroundPrompt: "Warm spicy hotpot tabletop photography.",
+    });
+    expect(input.prompt).toContain("leave natural space in the top 40%");
   });
 });

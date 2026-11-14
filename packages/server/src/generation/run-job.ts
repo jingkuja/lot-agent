@@ -7,7 +7,7 @@ import { billedVideoSeconds, resolveVideoGenerateAudio } from "./input.js";
 import { publicStaticUrl } from "../util/public-base.js";
 import { referenceDataUrl } from "./compose.js";
 import { whitenBackground, type WhiteBackgroundCheck } from "./white-background.js";
-import { renderPoster } from "./poster-render.js";
+import { inspectPosterBackground, renderPoster } from "./poster-render.js";
 import { parsePosterLayout, type PosterLayout } from "@lot-agent/core/poster";
 import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE } from "./poster-library.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
@@ -311,9 +311,14 @@ async function downloadAndFinalize(
         const background = await storeGeneratedAsset(deps, job, mediaType, { body, mime }, undefined, "dependency");
         const layout: PosterLayout = { ...poster, background: { url: background.asset.url } };
         try {
+          const check = await inspectPosterBackground(body, layout.template).catch(() => ({ suspect: false }));
           const rendered = await renderPoster(body, layout);
           ({ body, mime } = rendered);
-          posters.push({ ...layout, template: rendered.template, ...(rendered.overflow ? { overflow: true } : {}) });
+          posters.push({
+            ...layout, template: rendered.template,
+            ...(rendered.overflow ? { overflow: true } : {}),
+            ...(check.suspect ? { backgroundSuspect: true } : {}),
+          });
         } catch (err) {
           // Best effort: the picture is kept without text and the card can typeset it again.
           console.warn("[image.poster] render failed", { taskId: job.id, errorType: (err as Error)?.name });

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { emptyPosterFields, POSTER_PARTS, POSTER_TEMPLATES, type PosterLayout } from "@lot-agent/core/poster";
-import { contrastRatio, escapeMarkup, initializePosterFonts, posterFontsAvailable, posterPalette, posterRenderKey, pricePieces,
-  renderPoster, renderPosterPreview } from "./poster-render.js";
+import {
+  contrastRatio, escapeMarkup, initializePosterFonts, inspectPosterBackground, posterFontsAvailable, posterPalette,
+  posterRenderKey, pricePieces, renderPoster, renderPosterPreview,
+} from "./poster-render.js";
 
 initializePosterFonts();
 
@@ -298,6 +300,41 @@ describe("renderPoster", () => {
     expect(scene.layers.some((l) => l.kind === "text" && l.part === "subtitle")).toBe(true);
     expect(posterRenderKey("bg.png", { ...base, titleLines: ["Coffee 2025", "新品上线"], manualTitleLines: true }))
       .not.toBe(posterRenderKey("bg.png", { ...base, titleLines: ["Coffee 2025", "新品上线"], manualTitleLines: false }));
+  });
+
+  it("supports per-part fonts, smart quiet-band overlay placement, background noise detection and 2x/ratio export", async () => {
+    const cleanBg = await background(800, 800, "#58758c");
+    const serifTitle = layout("bottom_panel", { title: "风味茶饮", subtitle: "手作鲜果" });
+    const a = await renderPoster(cleanBg, { ...serifTitle, style: { font: "sans", titleWeight: "bold", scrim: "transparent" } });
+    const b = await renderPoster(cleanBg, {
+      ...serifTitle, style: { font: "sans", titleWeight: "bold", scrim: "transparent", parts: { title: { font: "serif" } } },
+    });
+    expect(a.body.equals(b.body)).toBe(false);
+
+    // High-contrast vertical stripes in top 120px vs clear solid band below: quiet band shifts title down.
+    const stripeWidth = 800;
+    const stripeHeight = 140;
+    const stripePixels = Buffer.alloc(stripeWidth * stripeHeight * 3);
+    for (let y = 0; y < stripeHeight; y++) {
+      for (let x = 0; x < stripeWidth; x++) {
+        const val = x % 12 < 6 ? 255 : 10;
+        const off = (y * stripeWidth + x) * 3;
+        stripePixels[off] = val; stripePixels[off + 1] = val; stripePixels[off + 2] = val;
+      }
+    }
+    const stripes = await sharp(stripePixels, { raw: { width: stripeWidth, height: stripeHeight, channels: 3 } }).png().toBuffer();
+    const mixedBg = await sharp(cleanBg).composite([{ input: stripes, left: 0, top: 0 }]).png().toBuffer();
+    const quietScene = await renderPosterPreview(mixedBg, layout("overlay", {
+      title: "精选茶叶", subtitle: "", points: [], price: "", originalPrice: "", discount: "", date: "", address: "",
+    }));
+    const titleLayer = quietScene.layers.find((l) => l.kind === "text" && l.part === "title")!;
+    expect(titleLayer.top).toBeGreaterThan(100);
+    expect((await inspectPosterBackground(cleanBg, "overlay")).suspect).toBe(false);
+    expect((await inspectPosterBackground(mixedBg, "overlay")).suspect).toBe(true);
+
+    const exported = await renderPoster(cleanBg, serifTitle, { scale: 2, ratio: "9:16" });
+    expect(exported.width).toBeGreaterThanOrEqual(1100);
+    expect(exported.height).toBeGreaterThan(exported.width * 1.7);
   });
 
   it("is the same picture for the same layout", async () => {

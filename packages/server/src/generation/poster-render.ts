@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { parseAccentRuns, parsePosterStyle, POSTER_FONT_SCALE, POSTER_LINE_SPACING, POSTER_PARTS, posterHasText, posterPartVertical,
-  posterTemplateFor, titleLineOptions, type PosterLayerPlacement, type PosterLayout, type PosterPart, type PosterPartStyle,
-  type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
+  posterTemplateFor, titleLineOptions, type PosterExportRatio, type PosterFont, type PosterLayerPlacement, type PosterLayout,
+  type PosterPart, type PosterPartStyle, type PosterPreviewScene, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 
 /** Both families and weights ship on the server, never as browser fonts. */
 export const POSTER_FONT_FAMILY = "Noto Sans SC";
@@ -38,6 +38,7 @@ function escapeXml(text: string): string {
  */
 export function initializePosterFonts(): string | null {
   const fonts = findFontDirectory();
+  if (fonts && process.platform === "darwin" && !process.env.PANGOCAIRO_BACKEND) process.env.PANGOCAIRO_BACKEND = "fc";
   if (!fonts || process.env.FONTCONFIG_FILE) return fonts;
   try {
     const dir = join(tmpdir(), `lot-agent-fonts-${createHash("sha256").update(fonts).digest("hex").slice(0, 12)}`);
@@ -165,8 +166,8 @@ function lineSpacingPx(size: number, baseRatio: number, lineSpacingPct?: number)
   return Math.round(size * (baseRatio + ((lineSpacingPct - POSTER_LINE_SPACING.default) / 100) * 0.6));
 }
 
-function posterSpan(layout: PosterLayout, accentColor?: Rgb) {
-  const family = parsePosterStyle(layout.style).font === "serif" ? "Noto Serif SC" : POSTER_FONT_FAMILY;
+function posterSpan(layout: PosterLayout, accentColor?: Rgb, fontOverride?: PosterFont) {
+  const family = (fontOverride ?? parsePosterStyle(layout.style).font) === "serif" ? "Noto Serif SC" : POSTER_FONT_FAMILY;
   return (
     text: string,
     size: number,
@@ -324,10 +325,11 @@ function columnChunks(text: string, max: number): VerticalToken[][] {
 /** Render a single vertical column, combining pure cell segments cleanly while rotating Latin words / long numbers 90° clockwise. */
 async function renderVerticalColumn(
   tokens: VerticalToken[], size: number, color: Rgb, accentColor: Rgb, layout: PosterLayout,
-  bold: boolean, letterSpacing?: number,
+  bold: boolean, partStyle?: PosterPartStyle,
 ): Promise<Picture | null> {
   if (!tokens.length) return null;
-  const span = posterSpan(layout, accentColor);
+  const span = posterSpan(layout, accentColor, partStyle?.font);
+  const letterSpacing = partStyle?.letterSpacing;
   const pitch = Math.max(0.85, COLUMN_PITCH + ((letterSpacing ?? 0) / 100) * 0.45);
   // Pango spaces CJK lines about 1.4 sizes apart; a negative spacing brings stacked cells to `pitch`.
   const stackSpacing = -Math.round(size * (1.41 - pitch));
@@ -371,7 +373,7 @@ async function columnsPicture(
   if (!columns.length) return null;
   const pictures: Picture[] = [];
   for (const tokens of columns) {
-    const pic = await renderVerticalColumn(tokens, size, color, accentColor, layout, bold, partStyle?.letterSpacing);
+    const pic = await renderVerticalColumn(tokens, size, color, accentColor, layout, bold, partStyle);
     if (pic) pictures.push(pic);
   }
   const colGap = lineSpacingPx(size, 0.35, partStyle?.lineSpacing);
@@ -380,9 +382,9 @@ async function columnsPicture(
 
 /** Text on a rounded block of the accent color (the discount badge). */
 async function badgePicture(
-  text: string, size: number, palette: Palette, layout: PosterLayout, letterSpacing?: number,
+  text: string, size: number, palette: Palette, layout: PosterLayout, letterSpacing?: number, fontOverride?: PosterFont,
 ): Promise<Picture> {
-  const span = posterSpan(layout);
+  const span = posterSpan(layout, undefined, fontOverride);
   const label = await textPicture(span(text, size, palette.onAccent, true, "", { letterSpacing }));
   const padX = Math.round(size * 0.55);
   const padY = Math.round(size * 0.28);
@@ -399,8 +401,9 @@ async function priceRow(
   layout: PosterLayout, unit: number, width: number, palette: Palette, color: Rgb, vertical: boolean, factor: number,
 ): Promise<Picture | null> {
   const { fields } = layout;
-  const span = posterSpan(layout);
-  const tracking = parsePosterStyle(layout.style).parts?.price?.letterSpacing;
+  const priceStyle = parsePosterStyle(layout.style).parts?.price;
+  const span = posterSpan(layout, undefined, priceStyle?.font);
+  const tracking = priceStyle?.letterSpacing;
   if (!fields.price && !fields.originalPrice && !fields.discount) return null;
   const cjk = CJK.test(`${fields.title}${fields.subtitle}${fields.points.join("")}${fields.address}`);
   const sizedUnit = unit * factor;
@@ -424,7 +427,7 @@ async function priceRow(
       ));
     }
     if (fields.discount) {
-      items.push(await badgePicture(fields.discount, sizedUnit * (fields.price ? 0.34 : 0.5) * scale, palette, layout, tracking));
+      items.push(await badgePicture(fields.discount, sizedUnit * (fields.price ? 0.34 : 0.5) * scale, palette, layout, tracking, priceStyle?.font));
     }
     return vertical ? stackPicture(items, Math.round(sizedUnit * 0.12 * scale)) : rowPicture(items, Math.round(sizedUnit * 0.22 * scale));
   };
@@ -436,9 +439,9 @@ async function priceRow(
 async function titlePicture(
   layout: PosterLayout, max: number, width: number, color: Rgb, accentColor: Rgb, align: Align, factor: number,
 ): Promise<Picture | null> {
-  const span = posterSpan(layout, accentColor);
   const style = parsePosterStyle(layout.style);
   const titleStyle = style.parts?.title;
+  const span = posterSpan(layout, accentColor, titleStyle?.font);
   const bold = style.titleWeight === "bold";
   const title = layout.fields.title;
   if (!title) return null;
@@ -513,10 +516,11 @@ async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): P
   if (fields.subtitle) {
     const fill = color("subtitle", palette.text);
     const subStyle = style.parts?.subtitle;
+    const subSpan = posterSpan(layout, palette.accent, subStyle?.font);
     await add("subtitle", 0.2, fill, u * 0.4, (factor) => {
       const size = u * 0.4 * factor;
       return vertical("subtitle") ? columns([fields.subtitle], u * 0.4, fill, factor, subStyle)
-        : textPicture(span(fields.subtitle, size, fill, false, "", { letterSpacing: subStyle?.letterSpacing, runs: true }), {
+        : textPicture(subSpan(fields.subtitle, size, fill, false, "", { letterSpacing: subStyle?.letterSpacing, runs: true }), {
           width: width * factor, align, spacing: lineSpacingPx(size, 0.2, subStyle?.lineSpacing),
         });
     });
@@ -524,15 +528,16 @@ async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): P
   if (fields.points.length) {
     const text = color("points", palette.text);
     const ptsStyle = style.parts?.points;
+    const ptsSpan = posterSpan(layout, palette.accent, ptsStyle?.font);
     await add("points", 0.3, text, u * 0.34, (factor) => {
       if (vertical("points")) return columns(fields.points, u * 0.34, text, factor, ptsStyle);
       const size = u * 0.34 * factor;
       const opts = { letterSpacing: ptsStyle?.letterSpacing, runs: true };
       // Centered posters run the points on one flowing line; a left-aligned column lists them.
       const markup = align === "centre"
-        ? fields.points.map((point) => span(point, size, text, false, "", opts))
-          .join(span("  ·  ", size, palette.accent, true, "", { letterSpacing: ptsStyle?.letterSpacing }))
-        : fields.points.map((point) => span("• ", size, palette.accent, true) + span(point, size, text, false, "", opts)).join("\n");
+        ? fields.points.map((point) => ptsSpan(point, size, text, false, "", opts))
+          .join(ptsSpan("  ·  ", size, palette.accent, true, "", { letterSpacing: ptsStyle?.letterSpacing }))
+        : fields.points.map((point) => ptsSpan("• ", size, palette.accent, true) + ptsSpan(point, size, text, false, "", opts)).join("\n");
       return textPicture(markup, { width: width * factor, align, spacing: lineSpacingPx(size, 0.4, ptsStyle?.lineSpacing) });
     });
   }
@@ -544,16 +549,18 @@ async function buildBlocks(layout: PosterLayout, frame: Frame, scale: number): P
     if (!value) continue;
     const fill = color(part, palette.muted);
     const partStyle = style.parts?.[part];
+    const partSpan = posterSpan(layout, palette.accent, partStyle?.font);
     const gap = footerGap;
     footerGap = 0.14;
     await add(part, gap, fill, u * 0.27, (factor) => {
       const size = u * 0.27 * factor;
       return vertical(part) ? columns([value], u * 0.27, fill, factor, partStyle)
-        : textPicture(span(value, size, fill, false, "", { letterSpacing: partStyle?.letterSpacing, runs: true }), {
+        : textPicture(partSpan(value, size, fill, false, "", { letterSpacing: partStyle?.letterSpacing, runs: true }), {
           width: width * factor, align, spacing: lineSpacingPx(size, 0.35, partStyle?.lineSpacing),
         });
     });
   }
+  void span;
   return blocks;
 }
 
@@ -759,6 +766,117 @@ async function panelPoster(background: Buffer, layout: PosterLayout, template: P
 /** Area variation above which text written on the picture gets a scrim (0–255 standard deviation). */
 const BUSY_SPREAD = 34;
 
+/**
+ * Find the horizontal band of `bandHeight` inside `searchArea` with the lowest combined edge density and brightness
+ * variance. A small tie-breaker prefers the outer edge (`anchor`), so uniform scenes keep their classic margin while
+ * textured photos shift onto clearer background space.
+ */
+async function findQuietBand(
+  background: Buffer, W: number, H: number, searchArea: Rect, bandHeight: number, anchor: "top" | "bottom",
+): Promise<Rect> {
+  const area = clampRect(searchArea, W, H);
+  if (bandHeight >= area.height || area.height <= 4) return { left: area.left, top: area.top, width: area.width, height: area.height };
+  const sampleW = 96;
+  const sampleH = Math.max(8, Math.round(sampleW * area.height / Math.max(1, area.width)));
+  const { data, info } = await sharp(background)
+    .extract(area)
+    .resize(sampleW, sampleH, { fit: "fill" })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const cols = info.width;
+  const rows = info.height;
+  const rowEdge = new Float64Array(rows);
+  const rowMean = new Float64Array(rows);
+  const rowSq = new Float64Array(rows);
+  for (let y = 0; y < rows; y++) {
+    let edge = 0;
+    let sum = 0;
+    let sq = 0;
+    for (let x = 0; x < cols; x++) {
+      const idx = y * cols + x;
+      const val = data[idx]!;
+      sum += val;
+      sq += val * val;
+      if (x + 1 < cols) edge += Math.abs(val - data[idx + 1]!);
+      if (y + 1 < rows) edge += Math.abs(val - data[idx + cols]!);
+    }
+    rowEdge[y] = edge / Math.max(1, cols * 2);
+    rowMean[y] = sum / cols;
+    rowSq[y] = sq / cols;
+  }
+  const winRows = Math.max(1, Math.min(rows, Math.round(rows * bandHeight / area.height)));
+  const maxStart = Math.max(0, rows - winRows);
+  let bestStart = anchor === "top" ? 0 : maxStart;
+  let bestScore = Infinity;
+  for (let start = 0; start <= maxStart; start++) {
+    let edgeSum = 0;
+    let meanSum = 0;
+    let sqSum = 0;
+    for (let y = start; y < start + winRows; y++) {
+      edgeSum += rowEdge[y]!;
+      meanSum += rowMean[y]!;
+      sqSum += rowSq[y]!;
+    }
+    const mean = meanSum / winRows;
+    const variance = Math.max(0, sqSum / winRows - mean * mean);
+    const dist = maxStart > 0 ? (anchor === "top" ? start / maxStart : (maxStart - start) / maxStart) : 0;
+    const score = (edgeSum / winRows) * 0.7 + Math.sqrt(variance) * 0.3 + dist * 2.5;
+    if (score < bestScore) {
+      bestScore = score;
+      bestStart = start;
+    }
+  }
+  const topOffset = Math.round(bestStart * area.height / rows);
+  const clampedTop = Math.max(area.top, Math.min(area.top + area.height - bandHeight, area.top + topOffset));
+  return { left: area.left, top: clampedTop, width: area.width, height: Math.min(bandHeight, area.height) };
+}
+
+/** Check whether reserved poster text strips contain dense text-like stroke clusters on the generated background. */
+export async function inspectPosterBackground(background: Buffer, template: PosterTemplate): Promise<{ suspect: boolean }> {
+  const { width: W = 0, height: H = 0 } = await sharp(background).rotate().metadata();
+  if (!W || !H) return { suspect: false };
+  const resolved = posterTemplateFor(template, W, H);
+  const strips: Rect[] = resolved === "bottom_panel" ? [{ left: 0, top: Math.round(H * 0.6), width: W, height: Math.round(H * 0.4) }]
+    : resolved === "top_panel" ? [{ left: 0, top: 0, width: W, height: Math.round(H * 0.4) }]
+    : resolved === "side_panel" ? [{ left: 0, top: 0, width: Math.round(W * 0.44), height: H }]
+    : resolved === "right_panel" ? [{ left: Math.round(W * 0.56), top: 0, width: Math.round(W * 0.44), height: H }]
+    : [
+      { left: 0, top: 0, width: W, height: Math.round(H * 0.34) },
+      { left: 0, top: Math.round(H * 0.68), width: W, height: Math.round(H * 0.32) },
+    ];
+  for (const strip of strips) {
+    const area = clampRect(strip, W, H);
+    const { data, info } = await sharp(background)
+      .rotate()
+      .extract(area)
+      .resize(192, undefined, { fit: "inside" })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const cols = info.width;
+    const rows = info.height;
+    if (cols < 8 || rows < 8) continue;
+    let strongGrad = 0;
+    let strokeRows = 0;
+    for (let y = 0; y < rows; y++) {
+      let rowTransitions = 0;
+      for (let x = 0; x + 1 < cols; x++) {
+        const idx = y * cols + x;
+        const dx = Math.abs(data[idx]! - data[idx + 1]!);
+        const dy = y + 1 < rows ? Math.abs(data[idx]! - data[idx + cols]!) : 0;
+        if (dx >= 34 || dy >= 34) strongGrad++;
+        if (dx >= 36) rowTransitions++;
+      }
+      if (rowTransitions >= 6) strokeRows++;
+    }
+    const gradShare = strongGrad / Math.max(1, (cols - 1) * rows);
+    const strokeRowShare = strokeRows / rows;
+    if (gradShare >= 0.09 && strokeRowShare >= 0.16) return { suspect: true };
+  }
+  return { suspect: false };
+}
+
 async function overlayPoster(background: Buffer, layout: PosterLayout, W: number, H: number) {
   const pad = Math.round(Math.min(W, H) * 0.07);
   const columnWidth = W - pad * 2;
@@ -770,26 +888,40 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
   const foot: PosterLayout = { ...layout, fields: { ...fields, title: "", subtitle: "" }, titleLines: undefined };
   const layers: PosterLayer[] = [];
   let overflow = false;
-  for (const [part, side, share] of [[head, "top", 0.36], [foot, "bottom", 0.3]] as const) {
-    const maxHeight = Math.round(H * share) - pad;
-    const area = clampRect({ left: 0, top: side === "top" ? 0 : H * (1 - share), width: W, height: H * share }, W, H);
-    const { mean, spread } = await areaStats(background, area);
+  const makeOverlayPalette = (mean: Rgb) => {
     const lightText = luminance(mean) < 0.4;
     const text: Rgb = lightText ? WHITE : [24, 24, 24];
     const palette = effectivePalette({
-      panel: mean, text, muted: mix(text, mean, 0.18), accent: lightText ? [255, 214, 102] : [196, 44, 8], onAccent: lightText ? [24, 24, 24] : WHITE,
+      panel: mean, text, muted: mix(text, mean, 0.18), accent: lightText ? [255, 214, 102] : [196, 44, 8],
+      onAccent: lightText ? [24, 24, 24] : WHITE,
     }, style);
-    const fitted = await fitBlocks(part, { template: "overlay", width: columnWidth, height: maxHeight, unit, palette, align: "centre" });
+    return { lightText, text, palette };
+  };
+  for (const [part, side, share] of [[head, "top", 0.4], [foot, "bottom", 0.34]] as const) {
+    const maxHeight = Math.round(H * share) - pad;
+    const searchRect: Rect = side === "top"
+      ? { left: pad, top: pad, width: columnWidth, height: maxHeight }
+      : { left: pad, top: H - pad - maxHeight, width: columnWidth, height: maxHeight };
+    const area = clampRect({ left: 0, top: side === "top" ? 0 : H * (1 - share), width: W, height: H * share }, W, H);
+    const initialStats = await areaStats(background, area);
+    let { lightText, text, palette } = makeOverlayPalette(initialStats.mean);
+    let fitted = await fitBlocks(part, { template: "overlay", width: columnWidth, height: maxHeight, unit, palette, align: "centre" });
     if (!fitted.rows.length) continue;
-    overflow ||= fitted.overflow;
     const height = Math.min(fitted.height, maxHeight);
-    const region: Rect = side === "top" ? { left: pad, top: pad, width: columnWidth, height: maxHeight }
-      : { left: pad, top: H - pad - height, width: columnWidth, height };
+    const quiet = await findQuietBand(background, W, H, searchRect, height, side);
+    const { mean, spread } = await areaStats(background, clampRect(quiet, W, H));
+    if ((luminance(mean) < 0.4) !== lightText) {
+      ({ lightText, text, palette } = makeOverlayPalette(mean));
+      fitted = await fitBlocks(part, { template: "overlay", width: columnWidth, height: maxHeight, unit, palette, align: "centre" });
+    }
+    overflow ||= fitted.overflow;
+    const region: Rect = { left: pad, top: quiet.top, width: columnWidth, height };
     // Not enough open space or contrast: put a scrim under the text rather than paying for another picture.
     if (strength !== "transparent" && (strength !== "auto" || spread > BUSY_SPREAD || contrastRatio(text, mean) < 4.5)) {
       const scrim = lightText ? BLACK : WHITE;
       const opacity = strength === "soft" ? 0.35 : strength === "strong" ? 0.8 : 0.58;
-      layers.push(panelLayer(W, H, side, Math.round(height + pad * 1.2), Math.round(H * 0.12), scrim, opacity));
+      const edgeExtent = side === "top" ? quiet.top + height + pad * 0.2 : (H - quiet.top) + pad * 0.2;
+      layers.push(panelLayer(W, H, side, Math.round(edgeExtent), Math.round(H * 0.12), scrim, opacity));
     }
     const placed = await placeBlocks(fitted.rows, region, "centre", 0, parts, { width: W, height: H });
     if (strength !== "transparent") {
@@ -804,19 +936,78 @@ async function overlayPoster(background: Buffer, layout: PosterLayout, W: number
   return { layers, overflow };
 }
 
-async function buildPoster(background: Buffer, layout: PosterLayout) {
-  const base = await sharp(background).rotate().flatten({ background: "#ffffff" }).png().toBuffer({ resolveWithObject: true });
-  const { width: W, height: H } = base.info;
-  if (!W || !H) throw new Error("background size is missing");
-  const template = posterTemplateFor(layout.template, W, H);
-  const { layers, overflow } = !posterHasText(layout.fields) ? { layers: [], overflow: false } : template === "overlay"
-    ? await overlayPoster(base.data, layout, W, H) : await panelPoster(base.data, layout, template, W, H);
-  return { base: base.data, layers, width: W, height: H, template, overflow };
+export interface PosterRenderOptions {
+  scale?: 1 | 2;
+  ratio?: PosterExportRatio;
 }
 
-/** Render `layout` onto `background`. The picture keeps the background's own size. */
-export async function renderPoster(background: Buffer, layout: PosterLayout): Promise<RenderedPoster> {
-  const { base, layers, width, height, template, overflow } = await buildPoster(background, layout);
+const MAX_RENDER_EDGE = 4096;
+
+function targetDimensions(W: number, H: number, ratio?: PosterExportRatio, scale: 1 | 2 = 1): { width: number; height: number } {
+  let targetW = W;
+  let targetH = H;
+  if (ratio && ratio !== "original") {
+    const [rw, rh] = ratio.split(":").map(Number);
+    if (rw > 0 && rh > 0) {
+      const aspect = rw / rh;
+      const area = W * H;
+      targetW = Math.max(64, Math.round(Math.sqrt(area * aspect)));
+      targetH = Math.max(64, Math.round(targetW / aspect));
+    }
+  }
+  let outW = Math.round(targetW * scale);
+  let outH = Math.round(targetH * scale);
+  const largest = Math.max(outW, outH);
+  if (largest > MAX_RENDER_EDGE) {
+    const factor = MAX_RENDER_EDGE / largest;
+    outW = Math.round(outW * factor);
+    outH = Math.round(outH * factor);
+  }
+  return { width: outW, height: outH };
+}
+
+async function prepareCanvas(background: Buffer, options?: PosterRenderOptions): Promise<{ data: Buffer; width: number; height: number }> {
+  const oriented = await sharp(background).rotate().flatten({ background: "#ffffff" }).png().toBuffer({ resolveWithObject: true });
+  const W = oriented.info.width;
+  const H = oriented.info.height;
+  if (!W || !H) throw new Error("background size is missing");
+  const scale = options?.scale === 2 ? 2 : 1;
+  const { width: outW, height: outH } = targetDimensions(W, H, options?.ratio, scale);
+  if (outW === W && outH === H) return { data: oriented.data, width: W, height: H };
+  const sameAspect = Math.abs(W / H - outW / outH) < 0.015;
+  if (sameAspect) {
+    const resized = await sharp(oriented.data).resize(outW, outH, { fit: "fill", kernel: "lanczos3" }).png().toBuffer();
+    return { data: resized, width: outW, height: outH };
+  }
+  // Aspect changed: build a soft blurred backdrop of the image itself and center the sharp original inside it.
+  const backdrop = await sharp(oriented.data)
+    .resize(outW, outH, { fit: "cover" })
+    .blur(Math.max(12, Math.round(Math.min(outW, outH) * 0.03)))
+    .modulate({ brightness: 0.92 })
+    .png()
+    .toBuffer();
+  const fg = await sharp(oriented.data)
+    .resize(outW, outH, { fit: "inside", kernel: "lanczos3" })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  const left = Math.round((outW - fg.info.width) / 2);
+  const top = Math.round((outH - fg.info.height) / 2);
+  const merged = await sharp(backdrop).composite([{ input: fg.data, left, top }]).png().toBuffer();
+  return { data: merged, width: outW, height: outH };
+}
+
+async function buildPoster(background: Buffer, layout: PosterLayout, options?: PosterRenderOptions) {
+  const canvas = await prepareCanvas(background, options);
+  const { width: W, height: H, data } = canvas;
+  const template = posterTemplateFor(layout.template, W, H);
+  const { layers, overflow } = !posterHasText(layout.fields) ? { layers: [], overflow: false } : template === "overlay"
+    ? await overlayPoster(data, layout, W, H) : await panelPoster(data, layout, template, W, H);
+  return { base: data, layers, width: W, height: H, template, overflow };
+}
+
+/** Render `layout` onto `background`. Supports optional `scale` (1 or 2) and aspect `ratio` re-typesetting. */
+export async function renderPoster(background: Buffer, layout: PosterLayout, options?: PosterRenderOptions): Promise<RenderedPoster> {
+  const { base, layers, width, height, template, overflow } = await buildPoster(background, layout, options);
   const placed = layers.map((layer) => {
     const { input, left, top } = layer;
     const shift = layer.kind === "scrim" ? { x: 0, y: 0 } : partShift(layout, layer.part, width, height);
@@ -840,9 +1031,9 @@ export async function renderPosterPreview(background: Buffer, layout: PosterLayo
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  // Render revision 4 adds date/address split, keyword highlights, manual line breaks, spacing, stroke and vertical token fixes.
+  // Render revision 5 adds per-part fonts and quiet-band overlay placement.
   const values = [
-    4, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
+    5, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
     layout.manualTitleLines ?? false, parsePosterStyle(layout.style),
   ];
   const content = JSON.stringify(values);

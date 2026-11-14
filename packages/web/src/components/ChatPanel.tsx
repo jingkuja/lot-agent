@@ -15,7 +15,9 @@ import { TypingDots } from "./TypingDots.js";
 import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
-import type { Agent, CatalogModel, KnowledgeBaseRef, PreviewPosterHandler } from "../api/client.js";
+import type {
+  Agent, CatalogModel, ExportPosterHandler, KnowledgeBaseRef, PreviewPosterHandler, RestorePosterHandler,
+} from "../api/client.js";
 import { INTERACTIVE_TOOL_NAMES, failedInteractiveNames } from "../lib/interactive-tools.js";
 
 const miniProgramCode = new URL("../assets/mini-program-code.jpg", import.meta.url).href;
@@ -62,6 +64,8 @@ interface ChatPanelProps {
     titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
   ) => Promise<string | undefined>;
   onPreviewPoster?: PreviewPosterHandler;
+  onRestorePoster?: RestorePosterHandler;
+  onExportPoster?: ExportPosterHandler;
   onWhiteBackground?: (messageId: string, index: number, restore: boolean) => Promise<string | undefined>;
   /** Image-to-image from a generated image with its own settings (the composer's for older messages). */
   onEditImage?: (prompt: string, imageUrl: string, settings?: ImageSettings) => void;
@@ -179,6 +183,8 @@ export function ChatPanel({
   onExportGeneration,
   onEditPoster,
   onPreviewPoster,
+  onRestorePoster,
+  onExportPoster,
   onWhiteBackground,
   onEditImage,
   knowledgeBases,
@@ -368,6 +374,8 @@ export function ChatPanel({
               onExportGeneration={onExportGeneration}
               onEditPoster={readOnly ? undefined : onEditPoster}
               onPreviewPoster={readOnly ? undefined : onPreviewPoster}
+              onRestorePoster={readOnly ? undefined : onRestorePoster}
+              onExportPoster={onExportPoster}
               onWhiteBackground={readOnly ? undefined : onWhiteBackground}
               onEditImage={editImage}
               onCancelGeneration={onStop}

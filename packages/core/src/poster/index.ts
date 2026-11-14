@@ -8,10 +8,14 @@
 export const POSTER_VERSION = 2;
 
 export const POSTER_FONTS = ["sans", "serif"] as const;
+export type PosterFont = typeof POSTER_FONTS[number];
 export const POSTER_TITLE_WEIGHTS = ["regular", "bold"] as const;
 export const POSTER_SCRIMS = ["auto", "transparent", "soft", "strong"] as const;
 export const POSTER_STROKES = ["none", "thin", "medium"] as const;
 export type PosterStroke = typeof POSTER_STROKES[number];
+export const POSTER_EXPORT_RATIOS = ["original", "1:1", "3:4", "4:3", "9:16", "16:9"] as const;
+export type PosterExportRatio = typeof POSTER_EXPORT_RATIOS[number];
+export const MAX_POSTER_HISTORY = 8;
 /** Text blocks a user can recolor, style and nudge one by one. */
 export const POSTER_PARTS = ["title", "subtitle", "points", "price", "date", "address"] as const;
 export type PosterPart = typeof POSTER_PARTS[number];
@@ -22,6 +26,8 @@ export const POSTER_LETTER_SPACING = { default: 0, min: -10, max: 50, step: 5 } 
 export const POSTER_LINE_SPACING = { default: 100, min: 80, max: 200, step: 10 } as const;
 
 export interface PosterPartStyle {
+  /** Overrides global font for this text block (`sans` | `serif`). */
+  font?: PosterFont;
   /** `#rrggbb`; absent means the color picked from the picture. */
   color?: string;
   dx?: number;
@@ -67,8 +73,9 @@ function nudge(value: unknown): number {
 
 function parsePartStyle(raw: unknown): PosterPartStyle | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const { color, dx, dy, vertical, fontScale, letterSpacing, lineSpacing, stroke, strokeColor } = raw as Record<string, unknown>;
+  const { font, color, dx, dy, vertical, fontScale, letterSpacing, lineSpacing, stroke, strokeColor } = raw as Record<string, unknown>;
   const part: PosterPartStyle = {};
+  if (POSTER_FONTS.includes(font as PosterFont)) part.font = font as PosterFont;
   const validColor = hexColor(color);
   if (validColor) part.color = validColor;
   if (nudge(dx)) part.dx = nudge(dx);
@@ -152,6 +159,16 @@ export const POSTER_LIMITS = {
   title: 40, subtitle: 60, point: 30, points: 4, price: 20, originalPrice: 20, discount: 16, date: 40, address: 60,
 } as const;
 
+export interface PosterVersionSnapshot {
+  template: PosterTemplate;
+  fields: PosterFields;
+  style?: PosterStyle;
+  titleLines?: string[];
+  manualTitleLines?: boolean;
+  asset: { url: string; mime: string };
+  savedAt: string;
+}
+
 export interface PosterLayout {
   version: number;
   template: PosterTemplate;
@@ -165,6 +182,12 @@ export interface PosterLayout {
   cleared?: PosterFieldName[];
   /** The stored text-free picture this poster is rendered on. */
   background?: { url: string };
+  /** The clean scene prompt used to generate the background (without template composition instructions). */
+  backgroundPrompt?: string;
+  /** Local pixel check flagged textured/text-like patterns inside the reserved text region. */
+  backgroundSuspect?: boolean;
+  /** Previous saved poster edits (newest first), allowing instant free rollback. */
+  history?: PosterVersionSnapshot[];
   /** The text did not fit even at the smallest size; the card suggests shortening it. */
   overflow?: boolean;
 }
@@ -183,6 +206,15 @@ export interface PosterPreviewScene {
 
 export function parsePosterTemplate(value: unknown): PosterTemplate | null {
   return POSTER_TEMPLATES.includes(value as PosterTemplate) ? value as PosterTemplate : null;
+}
+
+export function parsePosterExportRatio(value: unknown): PosterExportRatio | null {
+  if (value === undefined || value === null || value === "") return "original";
+  return POSTER_EXPORT_RATIOS.includes(value as PosterExportRatio) ? value as PosterExportRatio : null;
+}
+
+export function parsePosterExportScale(value: unknown): 1 | 2 {
+  return value === 2 || value === "2" ? 2 : 1;
 }
 
 export function emptyPosterFields(): PosterFields {
@@ -550,6 +582,49 @@ export async function planPoster(
 
 const FIELD_NAMES: readonly PosterFieldName[] = ["title", "subtitle", "points", "price", "originalPrice", "discount", "date", "address"];
 
+function parsePosterVersion(raw: unknown): PosterVersionSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const template = parsePosterTemplate(value.template);
+  const assetRaw = value.asset as { url?: unknown; mime?: unknown } | undefined;
+  if (!template || !value.fields || typeof value.fields !== "object" || typeof assetRaw?.url !== "string" || !assetRaw.url) return null;
+  const fields = sanitizePosterFields(value.fields);
+  const manual = value.manualTitleLines === true;
+  const titleLines = fields.title ? acceptedTitleLines(fields.title, value.titleLines, manual) : undefined;
+  return {
+    template,
+    fields,
+    ...(value.style ? { style: parsePosterStyle(value.style) } : {}),
+    ...(titleLines ? { titleLines, ...(manual ? { manualTitleLines: true } : {}) } : {}),
+    asset: { url: assetRaw.url, mime: typeof assetRaw.mime === "string" && assetRaw.mime ? assetRaw.mime : "image/png" },
+    savedAt: typeof value.savedAt === "string" && value.savedAt ? value.savedAt : "",
+  };
+}
+
+function parsePosterHistory(raw: unknown): PosterVersionSnapshot[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw.map(parsePosterVersion).filter((item): item is PosterVersionSnapshot => !!item).slice(0, MAX_POSTER_HISTORY);
+  return list.length ? list : undefined;
+}
+
+/** Prepend the current saved poster state to history (deduped by asset URL, capped at `MAX_POSTER_HISTORY`). */
+export function recordPosterVersion(
+  current: PosterLayout,
+  asset: { url: string; mime: string },
+  savedAt = new Date().toISOString(),
+): PosterVersionSnapshot[] {
+  const entry: PosterVersionSnapshot = {
+    template: current.template,
+    fields: current.fields,
+    ...(current.style ? { style: parsePosterStyle(current.style) } : {}),
+    ...(current.titleLines ? { titleLines: current.titleLines, ...(current.manualTitleLines ? { manualTitleLines: true } : {}) } : {}),
+    asset: { url: asset.url, mime: asset.mime || "image/png" },
+    savedAt,
+  };
+  const prev = (current.history ?? []).filter((item) => item.asset.url !== asset.url);
+  return [entry, ...prev].slice(0, MAX_POSTER_HISTORY);
+}
+
 /** A layout read back from message metadata or a job input; null for anything that is not one. */
 export function parsePosterLayout(raw: unknown): PosterLayout | null {
   if (!raw || typeof raw !== "object") return null;
@@ -561,6 +636,8 @@ export function parsePosterLayout(raw: unknown): PosterLayout | null {
   const titleLines = fields.title ? acceptedTitleLines(fields.title, value.titleLines, manual) : undefined;
   const cleared = Array.isArray(value.cleared) ? value.cleared.filter((name): name is PosterFieldName => FIELD_NAMES.includes(name)) : [];
   const url = (value.background as { url?: unknown } | undefined)?.url;
+  const bgPrompt = typeof value.backgroundPrompt === "string" && value.backgroundPrompt.trim() ? value.backgroundPrompt.trim().slice(0, 1500) : undefined;
+  const history = parsePosterHistory(value.history);
   return {
     version: POSTER_VERSION,
     template,
@@ -569,6 +646,9 @@ export function parsePosterLayout(raw: unknown): PosterLayout | null {
     ...(titleLines ? { titleLines, ...(manual ? { manualTitleLines: true } : {}) } : {}),
     ...(cleared.length ? { cleared } : {}),
     ...(typeof url === "string" && url ? { background: { url } } : {}),
+    ...(bgPrompt ? { backgroundPrompt: bgPrompt } : {}),
+    ...(value.backgroundSuspect === true ? { backgroundSuspect: true } : {}),
+    ...(history ? { history } : {}),
     ...(value.overflow === true ? { overflow: true } : {}),
   };
 }
@@ -620,5 +700,8 @@ export function editPosterLayout(layout: PosterLayout, edit: PosterLayoutEdit): 
     ...(edit.style !== undefined || layout.style ? { style: parsePosterStyle(edit.style ?? layout.style) } : {}),
     ...(titleLines ? { titleLines, ...(manualTitleLines ? { manualTitleLines: true } : {}) } : {}),
     ...(layout.background ? { background: layout.background } : {}),
+    ...(layout.backgroundPrompt ? { backgroundPrompt: layout.backgroundPrompt } : {}),
+    ...(layout.backgroundSuspect ? { backgroundSuspect: true } : {}),
+    ...(layout.history?.length ? { history: layout.history } : {}),
   };
 }

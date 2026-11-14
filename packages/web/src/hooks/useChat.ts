@@ -1,7 +1,10 @@
 import { storedPosters, type PosterFields, type PosterStyle, type PosterTemplate } from "@lot-agent/core/poster";
 import { useI18n } from "../i18n/index.js";
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
-import { api, ApiClientError, type KnowledgeBaseRef, type UploadedAttachment, type PickedFile, type PreviewPosterHandler } from "../api/client.js";
+import {
+  api, ApiClientError, type ExportPosterHandler, type KnowledgeBaseRef, type PickedFile, type PosterPreviewEdit,
+  type PreviewPosterHandler, type RestorePosterHandler, type UploadedAttachment,
+} from "../api/client.js";
 import { randomId } from "../lib/uuid.js";
 import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
@@ -32,6 +35,17 @@ function preloadImage(url: string): Promise<void> {
     image.onload = image.onerror = () => { clearTimeout(timer); resolve(); };
     image.src = url;
   });
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Translated by the card, which formats the `{0}` template. */
@@ -537,6 +551,7 @@ export function useChat(
     async (
       prompt: string, mediaType: "image" | "video", settings?: unknown, files: PickedFile[] = [],
       modelId?: string, references: string[] = [], requestId?: string, regenerateFrom?: string,
+      posterOverride?: PosterPreviewEdit,
     ): Promise<"accepted" | "rejected" | "unknown"> => {
       const cid = cidRef.current;
       if (!cid || !prompt.trim() || state.isStreaming) return "rejected";
@@ -618,6 +633,7 @@ export function useChat(
           scene, requestId, regenerateFrom,
           ...(scene === "poster_remix" ? { posterReference } : {}),
           ...(realText === true ? { realText: true } : {}),
+          ...(posterOverride ? { poster: posterOverride } : {}),
         }, token.submission?.signal);
         token.taskId = res.taskId;
         if (token.stopRequested) {
@@ -757,7 +773,7 @@ export function useChat(
     if ("regenerate" in request) {
       if (state.isStreaming) return "当前有任务正在进行，请完成后再重新生成";
       const label = translateRef.current("重新生成图片");
-      const result = await generateMedia(label, "image", undefined, [], undefined, [], request.requestId, messageId);
+      const result = await generateMedia(label, "image", undefined, [], undefined, [], request.requestId, messageId, request.poster);
       if (result === "accepted") return undefined;
       return result === "unknown" ? "图片提交结果待确认，请稍后核对" : "重新生成失败，请查看对话中的提示";
     }
@@ -779,14 +795,7 @@ export function useChat(
     if (!cid) return "打包失败，请稍后重试";
     try {
       const blob = await api.exportGeneration(cid, messageId, { preset, names, compositeNames });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${names[0]?.replace(/_\d+$/, "") || "images"}_${preset}.zip`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      downloadBlob(blob, `${names[0]?.replace(/_\d+$/, "") || "images"}_${preset}.zip`);
       return undefined;
     } catch (e) {
       return e instanceof ApiClientError && e.message ? e.message : "打包失败，请稍后重试";
@@ -811,11 +820,40 @@ export function useChat(
     }
   }, []);
 
-  // 改字预览: render the draft without saving it.
+  // 改字预览: movable layers, or flat image fallback.
   const previewPoster = useCallback<PreviewPosterHandler>(async (messageId, index, edit, signal) => {
     const cid = cidRef.current;
     if (!cid) throw new Error("预览失败，请稍后重试");
     return api.previewPoster(cid, messageId, { index, ...edit }, signal);
+  }, []);
+
+  // 真实字体版本回退: restore a saved snapshot on the server without billing.
+  const restorePoster = useCallback<RestorePosterHandler>(async (messageId, index, versionIndex) => {
+    const cid = cidRef.current;
+    if (!cid) return "恢复版本失败，请稍后重试";
+    try {
+      const result = await api.restorePoster(cid, messageId, { index, versionIndex });
+      await preloadImage(result.asset.url);
+      if (cidRef.current === cid) dispatch({ type: "generation_poster_edited", messageId, index, asset: result.asset, poster: result.poster });
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "恢复版本失败，请稍后重试";
+    }
+  }, []);
+
+  // 真实字体高清/换比例导出: downloads PNG directly without mutating saved state.
+  const exportPoster = useCallback<ExportPosterHandler>(async (messageId, index, options) => {
+    const cid = cidRef.current;
+    if (!cid) return "导出失败，请稍后重试";
+    try {
+      const blob = await api.exportPoster(cid, messageId, { index, ...options });
+      const ratioSuffix = options.ratio && options.ratio !== "original" ? `_${options.ratio.replace(":", "x")}` : "";
+      const scaleSuffix = options.scale === 2 ? "_2x" : "";
+      downloadBlob(blob, `poster${ratioSuffix}${scaleSuffix}.png`);
+      return undefined;
+    } catch (e) {
+      return e instanceof ApiClientError && e.message ? e.message : "导出失败，请稍后重试";
+    }
   }, []);
 
   // Join a finished generation's images into one picture. Server-side and free; resolves to an error text to show.
@@ -922,6 +960,8 @@ export function useChat(
     composeImages,
     editPoster,
     previewPoster,
+    restorePoster,
+    exportPoster,
     whiteBackground,
     redoGenerationImages,
     exportGeneration,

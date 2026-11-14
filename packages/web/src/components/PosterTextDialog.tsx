@@ -1,11 +1,14 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
-  POSTER_FONT_SCALE, POSTER_LETTER_SPACING, POSTER_LIMITS, POSTER_LINE_SPACING, POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_STROKES,
-  POSTER_TEMPLATES, parseManualTitleInput, parsePosterStyle, posterPartVertical, posterTemplateFor,
-  type PosterFieldName, type PosterFields, type PosterLayout, type PosterPart, type PosterPartStyle, type PosterPreviewScene,
-  type PosterStroke, type PosterStyle, type PosterTemplate,
+  POSTER_EXPORT_RATIOS, POSTER_FONTS, POSTER_FONT_SCALE, POSTER_LETTER_SPACING, POSTER_LIMITS, POSTER_LINE_SPACING,
+  POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_STROKES, POSTER_TEMPLATES, parseManualTitleInput, parsePosterStyle,
+  posterPartVertical, posterTemplateFor,
+  type PosterExportRatio, type PosterFieldName, type PosterFields, type PosterFont, type PosterLayout,
+  type PosterPart, type PosterPartStyle, type PosterPreviewScene, type PosterStroke, type PosterStyle, type PosterTemplate,
 } from "@lot-agent/core/poster";
-import { ApiClientError, type PosterPreviewEdit, type PosterPreviewResult } from "../api/client.js";
+import { ApiClientError, type ExportPosterOptions, type PosterPreviewEdit, type PosterPreviewResult } from "../api/client.js";
+import type { PosterRedoOverride } from "../lib/image-settings.js";
+import { useConfirm } from "../modules/marketing-video/ConfirmDialog.js";
 import { useI18n } from "../i18n/index.js";
 import { POSTER_PART_LABELS, PosterPreviewCanvas } from "./PosterPreviewCanvas.js";
 
@@ -31,6 +34,10 @@ function partHasText(part: PosterPart, fields: PosterFields, points: string): bo
 }
 
 const STROKE_LABELS: Record<PosterStroke, string> = { none: "无", thin: "细描边", medium: "中描边" };
+const FONT_LABELS: Record<PosterFont, string> = { sans: "黑体", serif: "宋体" };
+const EXPORT_RATIO_LABELS: Record<PosterExportRatio, string> = {
+  original: "原图比例", "1:1": "1:1 方图", "3:4": "3:4 竖版", "4:3": "4:3 横版", "9:16": "9:16 海报", "16:9": "16:9 横屏",
+};
 
 const SHORT_FIELDS: { name: Exclude<PosterFieldName, "title" | "subtitle" | "points">; placeholder: string }[] = [
   { name: "price", placeholder: "如：¥199" },
@@ -50,6 +57,12 @@ interface Props {
   ) => Promise<string | undefined>;
   /** Renders the unsaved edit without storing it. */
   onPreview?: (edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
+  /** Free instant rollback to a saved snapshot. */
+  onRestore?: (versionIndex: number) => Promise<string | undefined>;
+  /** Export 1x/2x PNG at the original or target aspect ratio without billing. */
+  onExport?: (options: ExportPosterOptions) => Promise<string | undefined>;
+  /** Regenerates the background image to match the new template while preserving copy and styles. */
+  onRegenerateTemplate?: (override: PosterRedoOverride) => Promise<string | undefined>;
   onClose: () => void;
 }
 
@@ -61,18 +74,21 @@ function previewLayoutKey(
 ): string {
   const parts = POSTER_PARTS.flatMap((part) => {
     const own = style.parts?.[part];
-    const hasVisual = own?.color || own?.vertical !== undefined || own?.fontScale !== undefined
+    const hasVisual = own?.font || own?.color || own?.vertical !== undefined || own?.fontScale !== undefined
       || own?.letterSpacing !== undefined || own?.lineSpacing !== undefined || own?.stroke || own?.strokeColor;
     return hasVisual
-      ? [[part, own.color, own.vertical, own.fontScale, own.letterSpacing, own.lineSpacing, own.stroke, own.strokeColor]]
+      ? [[part, own.font, own.color, own.vertical, own.fontScale, own.letterSpacing, own.lineSpacing, own.stroke, own.strokeColor]]
       : [];
   });
   return JSON.stringify([fields, template, style.font, style.titleWeight, style.scrim, style.accentColor, parts, titleLines ?? null, !!manualTitleLines]);
 }
 
 /** 改字: edit the wording typeset on a 真实字体 image. The server renders it again on the stored picture; no model, no charge. */
-export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClose }: Props) {
+export function PosterTextDialog({
+  imageUrl, poster, onSubmit, onPreview, onRestore, onExport, onRegenerateTemplate, onClose,
+}: Props) {
   const { t } = useI18n();
+  const [confirmDialog, confirm] = useConfirm();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [fields, setFields] = useState<PosterFields>(poster.fields);
@@ -87,6 +103,12 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
   const fit = (value: PosterTemplate) => dimensions ? posterTemplateFor(value, dimensions.width, dimensions.height) : value;
   const effective = fit(template);
   const [busy, setBusy] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [restoringIndex, setRestoringIndex] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportRatio, setExportRatio] = useState<PosterExportRatio>("original");
+  const [exportScale, setExportScale] = useState<1 | 2>(1);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [preview, setPreview] = useState<Preview>();
   const [previewing, setPreviewing] = useState(false);
@@ -162,6 +184,58 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
     setBusy(false);
     if (failure) setError(failure);
   };
+  const restoreVersion = async (versionIndex: number) => {
+    const snap = poster.history?.[versionIndex];
+    if (!onRestore || !snap || restoringIndex !== null || busy) return;
+    setRestoringIndex(versionIndex);
+    setError(undefined);
+    try {
+      const failure = await onRestore(versionIndex);
+      if (failure) { setError(failure); return; }
+      setFields(snap.fields);
+      setTitleText(snap.manualTitleLines && snap.titleLines?.length ? snap.titleLines.join("\n") : snap.fields.title);
+      setPoints(snap.fields.points.join("\n"));
+      setTemplate(snap.template);
+      setStyle(parsePosterStyle(snap.style));
+      setRefresh((cur) => cur + 1);
+    } finally {
+      if (dialog.current?.isConnected) setRestoringIndex(null);
+    }
+  };
+  const triggerExport = async () => {
+    if (!onExport || exporting || busy) return;
+    setExporting(true);
+    setError(undefined);
+    try {
+      const failure = await onExport({
+        fields: draftFields, template: effective, style, titleLines, manualTitleLines, scale: exportScale, ratio: exportRatio,
+      });
+      if (failure) setError(failure);
+    } finally {
+      if (dialog.current?.isConnected) setExporting(false);
+    }
+  };
+  const regenerateTemplate = async () => {
+    if (!onRegenerateTemplate || regenerating || busy) return;
+    const ok = await confirm({
+      title: "按新模板重出底图",
+      message: "按新选择的「{0}」版式重新生成无字底图并自动排字，保留当前文案与样式，按 1 张图片计费。",
+      values: [t(POSTER_TEMPLATE_LABELS[effective])],
+      confirm: "重新出图",
+    });
+    if (!ok) return;
+    setRegenerating(true);
+    setError(undefined);
+    try {
+      const failure = await onRegenerateTemplate({
+        fields: draftFields, template: effective, style, titleLines, manualTitleLines,
+      });
+      if (failure) { setError(failure); return; }
+      onClose();
+    } finally {
+      if (dialog.current?.isConnected) setRegenerating(false);
+    }
+  };
   const cleared = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name]));
   const setPart = (part: PosterPart, change: (current: PosterPartStyle) => PosterPartStyle) => {
     setStyle((current) => parsePosterStyle({ ...current, parts: { ...current.parts, [part]: change(current.parts?.[part] ?? {}) } }));
@@ -176,22 +250,24 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
     setPart(part, (current) => ({ ...current, [key]: (current[key] ?? fallback) + step }))
   );
   const parts = POSTER_PARTS.filter((part) => partHasText(part, draftFields, points));
-  const hint = preview?.scene && !previewError ? "拖动图片上的文字调整位置，方向键可微调"
+  const hint = preview?.scene && !previewError ? "拖动文字移动位置，拖边角可缩放字号，方向键可微调"
     : canPreview && !preview && !previewError ? "正在加载可拖动预览…" : "每次移动画布的 1%，保存后生效";
+  const dialogBusy = busy || regenerating || exporting || restoringIndex !== null;
 
   return (
     <dialog ref={dialog} className="image-edit-dialog poster-text-dialog" aria-labelledby={titleId}
-      onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
+      onCancel={(event) => { event.preventDefault(); if (!dialogBusy) onClose(); }}>
       <header className="image-edit-head">
         <h2 id={titleId}>{t("改字")}</h2>
-        <button type="button" className="image-edit-close" onClick={onClose} disabled={busy} aria-label={t("关闭")}>
+        <button type="button" className="image-edit-close" onClick={onClose} disabled={dialogBusy} aria-label={t("关闭")}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </header>
       <form className="poster-text-body" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="image-edit-preview poster-text-preview">
-          {preview?.scene ? <PosterPreviewCanvas scene={preview.scene} style={style} interactive={!busy && previewCurrent}
-            onMove={(part, offset) => setPart(part, (current) => ({ ...current, ...offset }))} />
+          {preview?.scene ? <PosterPreviewCanvas scene={preview.scene} style={style} interactive={!dialogBusy && previewCurrent}
+            onMove={(part, offset) => setPart(part, (current) => ({ ...current, ...offset }))}
+            onResize={(part, fontScale) => setPart(part, (current) => ({ ...current, fontScale }))} />
             : <img className="poster-preview-flat" src={previewUrl ?? imageUrl} draggable={false}
               alt={t(preview ? "预览效果" : "当前生成图")} onLoad={({ currentTarget }) => {
                 setDimensions({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight });
@@ -204,6 +280,9 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
           {cleared.length > 0 && (
             <p className="poster-text-notice" role="status">{t("这些内容没在你的描述里找到，已留空，可以在这里填写：{0}", [cleared.join(t("、"))])}</p>
           )}
+          {poster.backgroundSuspect && (
+            <p className="poster-text-notice" role="status">{t("文字区域底图纹理较复杂，可开启轻柔/加强遮罩提升清晰度。")}</p>
+          )}
           <div className="gen-compose-layouts" role="radiogroup" aria-label={t("文字位置")}>
             {POSTER_TEMPLATES.filter((item) => fit(item) === item).map((item) => (
               <button key={item} type="button" role="radio" aria-checked={item === effective}
@@ -213,7 +292,14 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
             ))}
           </div>
           {effective !== fit(poster.template) && (
-            <p className="poster-text-notice" role="status">{t("改变文字位置后，文字可能遮挡图片主体。")}</p>
+            <div className="poster-template-warn">
+              <p className="poster-text-notice" role="status">{t("改变文字位置后，文字可能遮挡图片主体。")}</p>
+              {onRegenerateTemplate && (
+                <button type="button" className="poster-regen-btn" disabled={dialogBusy} onClick={() => void regenerateTemplate()}>
+                  {t(regenerating ? "正在重出底图…" : "按新模板重出底图")}
+                </button>
+              )}
+            </div>
           )}
           <div className="poster-text-grid">
             {([
@@ -264,7 +350,8 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
               const lineSpacing = own?.lineSpacing ?? POSTER_LINE_SPACING.default;
               const stroke = own?.stroke ?? "none";
               const expanded = !!expandedParts[part];
-              const hasExtraStyle = letterSpacing !== POSTER_LETTER_SPACING.default || lineSpacing !== POSTER_LINE_SPACING.default || stroke !== "none";
+              const hasExtraStyle = !!own?.font || letterSpacing !== POSTER_LETTER_SPACING.default
+                || lineSpacing !== POSTER_LINE_SPACING.default || stroke !== "none";
               return <div className="poster-part-item" key={part}>
                 <div className="poster-part-row">
                   <span className="poster-part-name" title={label}>{label}</span>
@@ -316,6 +403,16 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
                 </div>
                 {expanded && (
                   <div className="poster-part-extra">
+                    <label className="poster-part-metric poster-part-stroke-field">
+                      <span>{t("字体")}</span>
+                      <select value={own?.font ?? ""} aria-label={t("{0}字体", [label])} onChange={(event) => {
+                        const value = event.target.value as PosterFont | "";
+                        setPart(part, (current) => ({ ...current, font: value || undefined }));
+                      }}>
+                        <option value="">{t("跟随全局")}</option>
+                        {POSTER_FONTS.map((item) => <option key={item} value={item}>{t(FONT_LABELS[item])}</option>)}
+                      </select>
+                    </label>
                     <div className="poster-part-metric">
                       <span>{t("字间距")}</span>
                       <div className="poster-part-size" role="group" aria-label={t("字间距")}>
@@ -388,12 +485,58 @@ export function PosterTextDialog({ imageUrl, poster, onSubmit, onPreview, onClos
             ))}
           </div>
           <div className="gen-compose-actions">
-            <button type="submit" className="gen-compose-submit" disabled={busy}>{busy ? t("排版中…") : t("保存并重新排版")}</button>
+            <button type="submit" className="gen-compose-submit" disabled={dialogBusy}>{busy ? t("排版中…") : t("保存并重新排版")}</button>
             <span className="gen-compose-free">{t("改字不扣积分，画面不变")}</span>
           </div>
+          {onExport && (
+            <div className="poster-export-bar">
+              <span className="poster-export-label">{t("高清导出")}</span>
+              <select value={exportRatio} aria-label={t("导出比例")} disabled={dialogBusy}
+                onChange={(event) => setExportRatio(event.target.value as PosterExportRatio)}>
+                {POSTER_EXPORT_RATIOS.map((item) => <option key={item} value={item}>{t(EXPORT_RATIO_LABELS[item])}</option>)}
+              </select>
+              <div className="poster-part-size" role="group" aria-label={t("导出分辨率")}>
+                {([1, 2] as const).map((s) => (
+                  <button key={s} type="button" className={`poster-part-reset${exportScale === s ? " active" : ""}`}
+                    disabled={dialogBusy} onClick={() => setExportScale(s)}>
+                    {s === 2 ? t("2x 高清") : t("1x 原尺")}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="poster-part-preview" disabled={dialogBusy} onClick={() => void triggerExport()}>
+                {exporting ? t("导出中…") : t("导出 PNG")}
+              </button>
+            </div>
+          )}
+          {poster.history && poster.history.length > 0 && onRestore && (
+            <div className="poster-history">
+              <button type="button" className="poster-history-toggle" aria-expanded={historyOpen}
+                onClick={() => setHistoryOpen((cur) => !cur)}>
+                <span>{t("历史版本（{0}）", [poster.history.length])}</span>
+                <span>{t(historyOpen ? "收起" : "展开")}</span>
+              </button>
+              {historyOpen && (
+                <ul className="poster-history-list">
+                  {poster.history.map((snap, idx) => (
+                    <li key={`${snap.asset.url}-${idx}`} className="poster-history-item">
+                      <span className="poster-history-meta">
+                        <strong>{t(POSTER_TEMPLATE_LABELS[snap.template])}</strong>
+                        <span className="poster-history-title">{snap.fields.title || t("无标题")}</span>
+                      </span>
+                      <button type="button" className="poster-part-reset" disabled={dialogBusy}
+                        onClick={() => void restoreVersion(idx)}>
+                        {restoringIndex === idx ? t("恢复中…") : t("恢复此版")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {error && <p className="image-edit-error" role="alert">{t(error)}</p>}
         </div>
       </form>
+      {confirmDialog}
     </dialog>
   );
 }

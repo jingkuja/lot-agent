@@ -196,8 +196,8 @@ export function Workspace({
 
   const {
     channel, messages, conversationModel, conversationKnowledgeBases, setConversationKnowledgeBases, send, stop, isStreaming, loadMessages, clear,
-    regenerate, generateMedia, redownloadGeneration, composeGeneration, composeImages, redoGenerationImages, exportGeneration, editPoster, previewPoster,
-    whiteBackground,
+    regenerate, generateMedia, redownloadGeneration, composeGeneration, composeImages, redoGenerationImages, exportGeneration,
+    editPoster, previewPoster, restorePoster, exportPoster, whiteBackground,
   } =
     useChat(activeId, handleStreamEnd, activeIdRef, handleTitle);
 
@@ -582,6 +582,8 @@ export function Workspace({
             onExportGeneration={exportGeneration}
             onEditPoster={editPoster}
             onPreviewPoster={previewPoster}
+            onRestorePoster={restorePoster}
+            onExportPoster={exportPoster}
             onWhiteBackground={whiteBackground}
             onEditImage={handleEditImage}
             // 预览仅对「文案制作」Agent 开放；通用 / 图片 / 视频不需要。

@@ -26,7 +26,8 @@ import { IMAGE_REDO_TASK } from "../generation/run-job.js";
 import { posterRenderKey, renderPoster, renderPosterPreview } from "../generation/poster-render.js";
 import { whitenBackground } from "../generation/white-background.js";
 import {
-  editPosterLayout, parsePosterLayout, planPoster, posterBackgroundPrompt, PosterPlanError, posterTemplateFor, type PosterLayout,
+  editPosterLayout, parsePosterExportRatio, parsePosterExportScale, parsePosterLayout, planPoster, posterBackgroundPrompt,
+  PosterPlanError, posterTemplateFor, recordPosterVersion, type PosterLayout,
 } from "@lot-agent/core/poster";
 import { buildExportZip, parseExportPreset, safeExportName, type ExportSource } from "../generation/image-export.js";
 import {
@@ -644,8 +645,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       /** Image scene: 自由创作 by default; the e-commerce scenes are checked and rewritten first. */
       scene?: unknown;
       posterReference?: unknown;
-      /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 only. */
+      /** 真实字体: the model paints a text-free picture and the wording is typeset on it. 自由创作 / 爆款复刻. */
       realText?: unknown;
+      /** Optional poster layout/template override when regenerating from an existing real-text image. */
+      poster?: unknown;
       requestId?: unknown;
       regenerateFrom?: unknown;
     };
@@ -863,6 +866,26 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       // 真实字体: a text model extracts the wording and describes the picture; prices, rates and dates it did not copy
       // from the request are emptied in code. Like a scene check, a failed plan sends no image request.
       let poster: PosterLayout | undefined = frozen ? parsePosterLayout(frozen.poster) ?? undefined : undefined;
+      if (frozen && poster && body.poster && typeof body.poster === "object") {
+        const override = body.poster as Record<string, unknown>;
+        const [width, height] = String(settings.size ?? "").split("x").map(Number);
+        const edited = editPosterLayout(poster, {
+          fields: override.fields ?? poster.fields,
+          template: override.template ?? poster.template,
+          style: override.style ?? poster.style,
+          ...(override.fields !== undefined
+            ? { titleLines: override.titleLines, manualTitleLines: override.manualTitleLines }
+            : { titleLines: override.titleLines ?? poster.titleLines, manualTitleLines: override.manualTitleLines ?? poster.manualTitleLines }),
+        });
+        const template = width > 0 && height > 0 ? posterTemplateFor(edited.template, width, height) : edited.template;
+        const { background: _bg, history: _hist, backgroundSuspect: _suspect, ...cleanPoster } = edited;
+        poster = { ...cleanPoster, template };
+        const bgScene = poster.backgroundPrompt
+          || (scene === "poster_remix" ? prompt : String(frozen.prompt ?? prompt).split("\n\nComposition:")[0]);
+        modelPrompts = [scene === "poster_remix"
+          ? posterRemixBackgroundPrompt(bgScene, media?.length ?? 0, template)
+          : posterBackgroundPrompt(bgScene, template)];
+      }
       if (realText && !frozen) {
         try {
           const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]);
@@ -873,7 +896,7 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
           const [width, height] = String(settings.size ?? "").split("x").map(Number);
           // The picture leaves room for the template that will really be used on this canvas shape.
           const template = width > 0 && height > 0 ? posterTemplateFor(plan.layout.template, width, height) : plan.layout.template;
-          poster = { ...plan.layout, template };
+          poster = { ...plan.layout, template, backgroundPrompt: plan.background };
           modelPrompts = [scene === "poster_remix"
             ? posterRemixBackgroundPrompt(plan.background, media?.length ?? 0, template)
             : posterBackgroundPrompt(plan.background, template)];
@@ -1246,7 +1269,16 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       console.warn("[image.poster] render failed", { messageId, errorType: (error as Error)?.name });
       return c.json({ error: "改字失败，请稍后重试" }, 500);
     }
-    const poster: PosterLayout = overflow ? { ...layout, overflow: true } : layout;
+    const prevRaw = Array.isArray(meta.assets) ? meta.assets[index] as { url?: unknown; mime?: unknown } | undefined : undefined;
+    const prevAsset = prevRaw && typeof prevRaw.url === "string"
+      ? { url: prevRaw.url, mime: typeof prevRaw.mime === "string" ? prevRaw.mime : "image/png" }
+      : undefined;
+    const history = prevAsset && prevAsset.url !== asset.url ? recordPosterVersion(stored, prevAsset) : stored.history;
+    const poster: PosterLayout = {
+      ...layout,
+      ...(overflow ? { overflow: true } : {}),
+      ...(history?.length ? { history } : {}),
+    };
     // Row lock: the edit depends on what is on the message now. Composites were joined from the old picture.
     const saved = await service.db.updateGenerationMetadata(messageId, { conversationId, userId }, (current) => {
       const assets = Array.isArray(current.assets) ? [...current.assets] : [];
@@ -1260,6 +1292,132 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     });
     if (!saved) return c.json({ error: "这张图已变化，请刷新后再改字" }, 409);
     return c.json({ index, asset, poster });
+  });
+
+  // POST /:id/generations/:messageId/poster/restore — free instant rollback to a previous saved poster snapshot.
+  app.post("/:id/generations/:messageId/poster/restore", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as { index?: unknown; versionIndex?: unknown } | null;
+    const index = body?.index;
+    const versionIndex = body?.versionIndex;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0
+      || typeof versionIndex !== "number" || !Number.isInteger(versionIndex) || versionIndex < 0) {
+      return c.json({ error: "index and versionIndex are required" }, 400);
+    }
+    if (!deps.assets) return c.json({ error: "改字暂不可用" }, 503);
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const stored = parsePosterLayout(Array.isArray(meta.posters) ? meta.posters[index] : undefined);
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || !stored?.background?.url) {
+      return c.json({ error: "这张图不能恢复历史版本" }, 409);
+    }
+    const target = stored.history?.[versionIndex];
+    if (!target) return c.json({ error: "该历史版本不存在" }, 404);
+    const targetKey = outputStorageKey(target.asset.url);
+    const owned = targetKey ? await service.db.getGeneratedByStorageKey(targetKey) : null;
+    if (!targetKey || !owned || owned.user_id !== userId || !await deps.assets.exists(targetKey)) {
+      return c.json({ error: "历史版本图片已不存在，无法恢复" }, 409);
+    }
+    const remaining = (stored.history ?? []).filter((_, idx) => idx !== versionIndex);
+    const prevRaw = Array.isArray(meta.assets) ? meta.assets[index] as { url?: unknown; mime?: unknown } | undefined : undefined;
+    const prevAsset = prevRaw && typeof prevRaw.url === "string"
+      ? { url: prevRaw.url, mime: typeof prevRaw.mime === "string" ? prevRaw.mime : "image/png" }
+      : undefined;
+    const history = prevAsset && prevAsset.url !== target.asset.url
+      ? recordPosterVersion({ ...stored, history: remaining }, prevAsset)
+      : remaining;
+    const poster: PosterLayout = {
+      version: stored.version,
+      template: target.template,
+      fields: target.fields,
+      ...(target.style ? { style: target.style } : {}),
+      ...(target.titleLines ? { titleLines: target.titleLines, ...(target.manualTitleLines ? { manualTitleLines: true } : {}) } : {}),
+      ...(stored.cleared?.length ? { cleared: stored.cleared } : {}),
+      background: stored.background,
+      ...(stored.backgroundPrompt ? { backgroundPrompt: stored.backgroundPrompt } : {}),
+      ...(stored.backgroundSuspect ? { backgroundSuspect: true } : {}),
+      ...(history.length ? { history } : {}),
+    };
+    const asset = { url: target.asset.url, mime: target.asset.mime || "image/png" };
+    const saved = await service.db.updateGenerationMetadata(messageId, { conversationId, userId }, (current) => {
+      const assets = Array.isArray(current.assets) ? [...current.assets] : [];
+      const posters = Array.isArray(current.posters) ? [...current.posters] : [];
+      const same = JSON.stringify(posters[index]) === JSON.stringify((meta.posters as unknown[])[index]);
+      if (current.status !== "completed" || index >= assets.length || !same) return null;
+      assets[index] = asset;
+      posters[index] = poster;
+      const { composites: _composites, ...rest } = current;
+      return { ...rest, assets, posters };
+    });
+    if (!saved) return c.json({ error: "这张图已变化，请刷新后再恢复" }, 409);
+    return c.json({ index, asset, poster });
+  });
+
+  // POST /:id/generations/:messageId/poster/export — render 1x/2x HD PNG at original or new aspect ratio without storing.
+  app.post("/:id/generations/:messageId/poster/export", async (c) => {
+    const userId = c.get("userId");
+    const conversationId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const body = await c.req.json().catch(() => null) as {
+      index?: unknown; fields?: unknown; template?: unknown; style?: unknown;
+      titleLines?: unknown; manualTitleLines?: unknown; scale?: unknown; ratio?: unknown;
+    } | null;
+    const index = body?.index;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+      return c.json({ error: "index is required" }, 400);
+    }
+    if (body?.ratio !== undefined && !parsePosterExportRatio(body.ratio)) {
+      return c.json({ error: "不支持的导出比例" }, 400);
+    }
+    if (body?.scale !== undefined && body.scale !== 1 && body.scale !== 2) {
+      return c.json({ error: "不支持的导出倍率" }, 400);
+    }
+    if (!deps.assets) return c.json({ error: "导出暂不可用" }, 503);
+    const msg = await service.db.getGenerationMessage(messageId, conversationId, userId);
+    if (!msg) return c.json({ error: "Message not found" }, 404);
+    const meta = msg.metadata;
+    const stored = parsePosterLayout(Array.isArray(meta.posters) ? meta.posters[index] : undefined);
+    const backgroundUrl = stored?.background?.url;
+    if (meta.kind !== "generation" || meta.mediaType !== "image" || meta.status !== "completed" || !stored || !backgroundUrl) {
+      return c.json({ error: "这张图不支持高清导出" }, 409);
+    }
+    const backgroundKey = outputStorageKey(backgroundUrl);
+    const owned = backgroundKey ? await service.db.getGeneratedByStorageKey(backgroundKey) : null;
+    if (!backgroundKey || !owned || owned.user_id !== userId || !await deps.assets.exists(backgroundKey)) {
+      return c.json({ error: "背景图已不存在，无法导出" }, 409);
+    }
+    const layout = body?.fields && typeof body.fields === "object"
+      ? editPosterLayout(stored, {
+        fields: body.fields, template: body.template, style: body.style,
+        titleLines: body.titleLines, manualTitleLines: body.manualTitleLines,
+      })
+      : (body?.template !== undefined || body?.style !== undefined)
+        ? editPosterLayout(stored, {
+          fields: stored.fields, template: body.template ?? stored.template, style: body.style ?? stored.style,
+          titleLines: stored.titleLines, manualTitleLines: stored.manualTitleLines,
+        })
+        : stored;
+    const scale = parsePosterExportScale(body?.scale);
+    const ratio = parsePosterExportRatio(body?.ratio) ?? "original";
+    try {
+      const background = await deps.assets.get(backgroundKey);
+      const rendered = await renderPoster(background, layout, { scale, ratio });
+      const ratioSuffix = ratio === "original" ? "" : `-${ratio.replace(":", "x")}`;
+      const scaleSuffix = scale === 2 ? "-2x" : "";
+      return new Response(new Uint8Array(rendered.body), {
+        headers: {
+          "Content-Type": rendered.mime,
+          "Content-Disposition": `attachment; filename="poster${ratioSuffix}${scaleSuffix}.png"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (error) {
+      console.warn("[image.poster] export failed", { messageId, errorType: (error as Error)?.name });
+      return c.json({ error: "高清导出失败，请稍后重试" }, 500);
+    }
   });
 
   // White-background correction is local and reversible; the original stays owned by the same user.

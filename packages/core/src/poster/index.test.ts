@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  acceptedTitleLines, editPosterLayout, emptyPosterFields, parseAccentRuns, parseManualTitleInput, parsePosterLayout,
-  parsePosterPlan, PosterPlanError, posterBackgroundPrompt, posterPartVertical, posterTemplateFor, sanitizePosterFields,
-  storedPosters, titleLineOptions, verifyPosterFields, parsePosterStyle, DEFAULT_POSTER_STYLE,
+  acceptedTitleLines, editPosterLayout, emptyPosterFields, MAX_POSTER_HISTORY, parseAccentRuns, parseManualTitleInput,
+  parsePosterExportRatio, parsePosterExportScale, parsePosterLayout, parsePosterPlan, PosterPlanError, posterBackgroundPrompt,
+  posterPartVertical, posterTemplateFor, recordPosterVersion, sanitizePosterFields, storedPosters, titleLineOptions, verifyPosterFields,
+  parsePosterStyle, DEFAULT_POSTER_STYLE,
 } from "./index.js";
 
 const request = "做一张火锅店开业海报，全场 8 折，套餐 199 元，11 月 20 日开业，地址人民路 88 号";
@@ -221,5 +222,27 @@ describe("layout helpers", () => {
     expect(storedPosters([null])).toBeUndefined();
     expect(storedPosters("x")).toBeUndefined();
     expect(sanitizePosterFields({ points: ["a", "", 3, "b", "c", "d", "e"] }).points).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("supports per-part fonts, version history recording/capping, background meta and export options", () => {
+    expect(parsePosterStyle({ parts: { title: { font: "serif" }, subtitle: { font: "comic" } } }).parts).toEqual({ title: { font: "serif" } });
+    expect(parsePosterExportRatio(undefined)).toBe("original");
+    expect(parsePosterExportRatio("9:16")).toBe("9:16");
+    expect(parsePosterExportRatio("99:1")).toBeNull();
+    expect(parsePosterExportScale(2)).toBe(2);
+    expect(parsePosterExportScale(4)).toBe(1);
+    let layout = parsePosterLayout({
+      template: "overlay", fields: { title: "v0" }, backgroundPrompt: "warm table", backgroundSuspect: true,
+    })!;
+    for (let i = 0; i < MAX_POSTER_HISTORY + 3; i++) {
+      const history = recordPosterVersion(layout, { url: `/static/assets/p${i}.png`, mime: "image/png" }, `2026-11-14T11:0${i}:00Z`);
+      layout = { ...layout, fields: { ...layout.fields, title: `v${i + 1}` }, history };
+    }
+    expect(layout.history).toHaveLength(MAX_POSTER_HISTORY);
+    expect(layout.history?.[0].asset.url).toBe(`/static/assets/p${MAX_POSTER_HISTORY + 2}.png`);
+    const parsed = parsePosterLayout({ ...layout, history: [...(layout.history ?? []), { bad: true }] })!;
+    expect(parsed.history).toHaveLength(MAX_POSTER_HISTORY);
+    expect(parsed.backgroundPrompt).toBe("warm table");
+    expect(parsed.backgroundSuspect).toBe(true);
   });
 });

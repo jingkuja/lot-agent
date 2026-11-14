@@ -1153,4 +1153,21 @@ describe("真实字体 posters", () => {
     await run("火锅店周年庆");
     expect(keys).toEqual([]);
   });
+
+  it("flags suspect noisy/text-like patterns in the reserved text strip without failing", async () => {
+    const w = 256;
+    const h = 384;
+    const raw = Buffer.alloc(w * h * 3, 220);
+    for (let y = Math.round(h * 0.62); y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const val = x % 8 < 4 ? 250 : 20;
+        const off = (y * w + x) * 3;
+        raw[off] = val; raw[off + 1] = val; raw[off + 2] = val;
+      }
+    }
+    const noisy = await sharp(raw, { raw: { width: w, height: h, channels: 3 } }).png().toBuffer();
+    const { deps } = fakeDeps(setProvider(), { urlToBytes: vi.fn(async () => ({ body: noisy, mime: "image/png" })), extFor: () => "png" });
+    const out = await runGenerationJob(deps, { ...job, input: { ...job.input, n: 1, poster } }, "image");
+    expect(out.posters?.[0].backgroundSuspect).toBe(true);
+  });
 });

@@ -4,13 +4,16 @@ import { randomId } from "../lib/uuid.js";
 import type { GenerationView } from "../hooks/useChat.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import type { PosterFields, PosterLayout, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
-import type { PosterPreviewEdit, PosterPreviewResult, PreviewPosterHandler } from "../api/client.js";
+import type {
+  ExportPosterHandler, ExportPosterOptions, PosterPreviewEdit, PosterPreviewResult, PreviewPosterHandler, RestorePosterHandler,
+} from "../api/client.js";
 import { ImageEditDialog } from "./ImageEditDialog.js";
 import { POSTER_FIELD_LABELS, PosterTextDialog } from "./PosterTextDialog.js";
 import { ImageViewerDialog, type ViewerImage } from "./ImageViewerDialog.js";
 import {
   COMPOSE_LAYOUTS, COMPOSE_MIN_IMAGES, EXPORT_PRESETS, imageSetRole, WHITE_BACKGROUND_ISSUES,
-  type ComposeLayout, type ExportPreset, type GenerationComposite, type RedoRequest, type SetRedoRequest, type WhiteBackgroundCheck,
+  type ComposeLayout, type ExportPreset, type GenerationComposite, type PosterRedoOverride, type RedoRequest,
+  type SetRedoRequest, type WhiteBackgroundCheck,
 } from "../lib/image-settings.js";
 import { useConfirm } from "../modules/marketing-video/ConfirmDialog.js";
 
@@ -36,11 +39,17 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 
 /** One generated asset: preview (img/video) + download link, with a graceful
     fallback so a load error never looks like a bare broken-image icon. */
-function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext, onPreviewPoster, long }: {
+function AssetView({
+  asset, mediaType, index, settings, onEdit, poster, onRetext, onPreviewPoster,
+  onRestorePoster, onExportPoster, onRegeneratePoster, long,
+}: {
   /** 真实字体: the wording typeset on this image, and how to change it. Both are needed for 改字. */
   poster?: PosterLayout | null;
   onRetext?: RetextHandler;
   onPreviewPoster?: ImagePosterPreview;
+  onRestorePoster?: ImagePosterRestore;
+  onExportPoster?: ImagePosterExport;
+  onRegeneratePoster?: (override: PosterRedoOverride) => Promise<string | undefined>;
   asset: Asset;
   long?: boolean;
   mediaType: "image" | "video";
@@ -97,7 +106,10 @@ function AssetView({ asset, mediaType, index, settings, onEdit, poster, onRetext
       {retexting && poster && onRetext && (
         <PosterTextDialog imageUrl={asset.url} poster={poster} onClose={() => setRetexting(false)}
           onSubmit={(fields, template, style, titleOptions) => onRetext(index, fields, template, style, titleOptions)}
-          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(index, edit, signal))} />
+          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(index, edit, signal))}
+          onRestore={onRestorePoster && ((versionIndex) => onRestorePoster(index, versionIndex))}
+          onExport={onExportPoster && ((options) => onExportPoster(index, options))}
+          onRegenerateTemplate={onRegeneratePoster} />
       )}
     </div>
   );
@@ -108,21 +120,24 @@ type RetextHandler = (
   titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
 ) => Promise<string | undefined>;
 type ImagePosterPreview = (index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
+type ImagePosterRestore = (index: number, versionIndex: number) => Promise<string | undefined>;
+type ImagePosterExport = (index: number, options: ExportPosterOptions) => Promise<string | undefined>;
 
 /** 真实字体: what the user should know about the typeset wording — fields left empty, or text that did not fit. */
 function PosterNotes({ posters }: { posters?: (PosterLayout | null)[] }) {
   const { t } = useI18n();
-  if (!posters?.some((poster) => poster?.overflow || poster?.cleared?.length)) return null;
+  if (!posters?.some((poster) => poster?.overflow || poster?.cleared?.length || poster?.backgroundSuspect)) return null;
   return (
     <div className="gen-white-notes" role="status">
       {posters.map((poster, index) => {
-        if (!poster?.overflow && !poster?.cleared?.length) return null;
+        if (!poster?.overflow && !poster?.cleared?.length && !poster?.backgroundSuspect) return null;
         const names = (poster.cleared ?? []).map((name) => t(POSTER_FIELD_LABELS[name])).join(t("、"));
         const label = posters.length > 1 ? <strong>{t("第 {0} 张", [index + 1])} </strong> : null;
         return <div key={index} className="gen-white-issue">
           {label}
           {names && <p>{t("这些内容没在你的描述里找到，没有写到图上：{0}。点图上的「改字」可以补上，不扣积分。", [names])}</p>}
           {poster.overflow && <p>{t("文字太多，缩到最小字号仍放不下，建议点「改字」删减。")}</p>}
+          {poster.backgroundSuspect && <p>{t("文字区域底图纹理较复杂（可能影响文字清晰度），可点「改字」开启背景遮罩或调高对比度，也可「重新生成」底图。")}</p>}
         </div>;
       })}
     </div>
@@ -199,10 +214,15 @@ function MissingTile({ label, busy, ratio }: { label?: string; busy: boolean; ra
 type RedoHandler = (request: SetRedoRequest) => Promise<string | undefined>;
 
 /** Several images from one generation in a single frame: a grid of tiles, an enlarged view, 重做 / 补齐 and 合成. */
-function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onRetext, onPreviewPoster, onWhite, posterBusy }: {
+function ImageSet({
+  generation, assets, onEdit, onCompose, onRedo, onExport, onRetext,
+  onPreviewPoster, onRestorePoster, onExportPoster, onWhite, posterBusy,
+}: {
   onWhite?: (index: number, restore: boolean) => Promise<string | undefined>;
   onRetext?: RetextHandler;
   onPreviewPoster?: ImagePosterPreview;
+  onRestorePoster?: ImagePosterRestore;
+  onExportPoster?: ImagePosterExport;
   posterBusy?: boolean;
   generation: GenerationView;
   assets: Asset[];
@@ -306,8 +326,10 @@ function ImageSet({ generation, assets, onEdit, onCompose, onRedo, onExport, onR
       )}
       {retexting !== null && onRetext && generation.posters?.[retexting] && assets[retexting] && (
         <PosterTextDialog imageUrl={assets[retexting].url} poster={generation.posters[retexting]!} onClose={() => setRetexting(null)}
-          onSubmit={(fields, template, style) => onRetext(retexting, fields, template, style)}
-          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(retexting, edit, signal))} />
+          onSubmit={(fields, template, style, titleOptions) => onRetext(retexting, fields, template, style, titleOptions)}
+          onPreview={onPreviewPoster && ((edit, signal) => onPreviewPoster(retexting, edit, signal))}
+          onRestore={onRestorePoster && ((versionIndex) => onRestorePoster(retexting, versionIndex))}
+          onExport={onExportPoster && ((options) => onExportPoster(retexting, options))} />
       )}
       {redoing !== null && onRedo && assets[redoing] && (
         <ImageEditDialog redo imageUrl={assets[redoing].url} onClose={() => setRedoing(null)}
@@ -521,6 +543,8 @@ export function GenerationCard({
   onExport,
   onEditPoster,
   onPreviewPoster,
+  onRestorePoster,
+  onExportPoster,
   onCancelGeneration,
   onWhiteBackground,
 }: {
@@ -535,6 +559,10 @@ export function GenerationCard({
   ) => Promise<string | undefined>;
   /** 改字预览: render a draft for editing without saving it. */
   onPreviewPoster?: PreviewPosterHandler;
+  /** 真实字体版本回退: restore a saved snapshot on the server without billing. */
+  onRestorePoster?: RestorePosterHandler;
+  /** 真实字体高清/换比例导出: renders PNG bytes at the requested resolution and aspect ratio. */
+  onExportPoster?: ExportPosterHandler;
   /** 打包下载 this generation's images; resolves to an error text. Undefined hides it. */
   onExport?: (messageId: string, preset: ExportPreset, names: string[], compositeNames: string[]) => Promise<string | undefined>;
   /** 重做 one image of a set or 补齐 its missing ones; resolves to an error text. Undefined hides both. */
@@ -594,6 +622,21 @@ export function GenerationCard({
     } : undefined;
   const previewPoster: ImagePosterPreview | undefined = messageId && onPreviewPoster
     ? (index, edit, signal) => onPreviewPoster(messageId, index, edit, signal) : undefined;
+  const restorePoster: ImagePosterRestore | undefined = messageId && onRestorePoster
+    ? (index, versionIndex) => onRestorePoster(messageId, index, versionIndex) : undefined;
+  const exportPoster: ImagePosterExport | undefined = messageId && onExportPoster
+    ? (index, options) => onExportPoster(messageId, index, options) : undefined;
+  const regenerateForPoster = messageId && onRedo && taskId && assets?.length === 1 && !imageSetRole(generation.scene, 0)
+    ? async (override: PosterRedoOverride): Promise<string | undefined> => {
+      if (regenerateBusy) return "正在提交…";
+      setRegenerateBusy(true);
+      try {
+        return await onRedo(messageId, { regenerate: true, requestId: randomId(), poster: override });
+      } finally {
+        setRegenerateBusy(false);
+      }
+    }
+    : undefined;
   const onWhite = messageId && onWhiteBackground ? (index: number, restore: boolean) => onWhiteBackground(messageId, index, restore) : undefined;
   if (status === "completed" && assets && assets.length > 0) {
     // Several images from one generation, or any 产品套图 / 主副图, share one frame; other single images and videos
@@ -602,7 +645,8 @@ export function GenerationCard({
       if (mediaType === "image" && (assets.length >= COMPOSE_MIN_IMAGES || imageSet) && assets.every((a) => a.mime.startsWith("image/"))) {
         return (
           <>
-            <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onPreviewPoster={previewPoster} onWhite={onWhite}
+            <ImageSet generation={generation} assets={assets} onEdit={onEditImage} onRetext={retext} onPreviewPoster={previewPoster}
+              onRestorePoster={restorePoster} onExportPoster={exportPoster} onWhite={onWhite}
               posterBusy={posterBusy}
               onCompose={messageId && onCompose ? (layout, gap) => onCompose(messageId, layout, gap) : undefined}
               onRedo={messageId && onRedo && imageSet && !generation.unknownResult ? (request) => onRedo(messageId, request) : undefined}
@@ -619,7 +663,9 @@ export function GenerationCard({
             {assets.map((a, i) => (
               <AssetView key={i} asset={a} mediaType={mediaType} index={i} settings={generation.settings}
                 onEdit={mediaType === "image" && a.mime.startsWith("image/") ? onEditImage : undefined}
-                poster={generation.posters?.[i]} onRetext={retext} onPreviewPoster={previewPoster} long={generation.longImage} />
+                poster={generation.posters?.[i]} onRetext={retext} onPreviewPoster={previewPoster}
+                onRestorePoster={restorePoster} onExportPoster={exportPoster}
+                onRegeneratePoster={singleImage ? regenerateForPoster : undefined} long={generation.longImage} />
             ))}
           </div>
           {posterBusy && <PosterBusyMask />}

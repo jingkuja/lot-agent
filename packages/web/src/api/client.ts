@@ -1,5 +1,7 @@
 import type { KnowledgeSourceType } from "@lot-agent/core";
-import type { PosterFields, PosterLayout, PosterPreviewScene, PosterStyle, PosterTemplate } from "@lot-agent/core/poster";
+import type {
+  PosterExportRatio, PosterFields, PosterLayout, PosterPreviewScene, PosterStyle, PosterTemplate,
+} from "@lot-agent/core/poster";
 import type {
   ComposeLayout, ExportPreset, GenerationComposite, GenerationRedo, PosterLibraryImage, PosterReference, SetRedoRequest,
 } from "../lib/image-settings.js";
@@ -17,6 +19,9 @@ export interface PosterPreviewEdit {
 }
 export type PosterPreviewResult = PosterPreviewScene | Blob;
 export type PreviewPosterHandler = (messageId: string, index: number, edit: PosterPreviewEdit, signal: AbortSignal) => Promise<PosterPreviewResult>;
+export type ExportPosterOptions = PosterPreviewEdit & { scale?: 1 | 2; ratio?: PosterExportRatio };
+export type RestorePosterHandler = (messageId: string, index: number, versionIndex: number) => Promise<string | undefined>;
+export type ExportPosterHandler = (messageId: string, index: number, options: ExportPosterOptions) => Promise<string | undefined>;
 
 export interface ConversationProject { id: string; name: string; }
 
@@ -271,6 +276,22 @@ export interface AgentRunRecord {
   id: string;
   status: string;
   steps: Array<{ id: string; tool_name: string; status: string; input: unknown; result?: { content?: string } }>;
+}
+
+async function postBinary(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body), signal,
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event("lot:unauthorized"));
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
+  }
+  return res;
 }
 
 export const api = {
@@ -605,6 +626,8 @@ export const api = {
       posterReference?: PosterReference;
       /** 真实字体: typeset the wording on a text-free picture. */
       realText?: boolean;
+      /** Optional layout/template override when regenerating from an existing real-text image. */
+      poster?: PosterPreviewEdit;
       requestId?: string;
       regenerateFrom?: string;
     },
@@ -658,18 +681,7 @@ export const api = {
   exportGeneration: async (
     conversationId: string, messageId: string, body: { preset: ExportPreset; names: string[]; compositeNames: string[] },
   ): Promise<Blob> => {
-    const res = await fetch(`${BASE}/conversations/${conversationId}/generations/${messageId}/export`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body),
-    });
-    if (res.status === 401) {
-      clearToken();
-      window.dispatchEvent(new Event("lot:unauthorized"));
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
-    }
+    const res = await postBinary(`/conversations/${conversationId}/generations/${messageId}/export`, body);
     return res.blob();
   },
 
@@ -701,19 +713,23 @@ export const api = {
   previewPoster: async (
     conversationId: string, messageId: string, body: PosterPreviewEdit & { index: number }, signal: AbortSignal,
   ): Promise<PosterPreviewResult> => {
-    const res = await fetch(`${BASE}/conversations/${conversationId}/generations/${messageId}/poster/preview`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ ...body, format: "layers" }), signal,
-    });
-    if (res.status === 401) {
-      clearToken();
-      window.dispatchEvent(new Event("lot:unauthorized"));
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new ApiClientError(typeof err.error === "string" ? err.error : res.statusText, res.status, err.code, err);
-    }
+    const res = await postBinary(`/conversations/${conversationId}/generations/${messageId}/poster/preview`, { ...body, format: "layers" }, signal);
     return res.headers.get("content-type")?.startsWith("application/json") ? res.json() as Promise<PosterPreviewScene> : res.blob();
+  },
+
+  /** 真实字体版本回退: restore a previously saved snapshot on the server without model billing. */
+  restorePoster: (conversationId: string, messageId: string, body: { index: number; versionIndex: number }) =>
+    request<{ index: number; asset: { url: string; mime: string }; poster: PosterLayout }>(
+      `/conversations/${conversationId}/generations/${messageId}/poster/restore`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  /** 真实字体高清/换比例导出: returns 1x or 2x PNG bytes at the requested ratio. */
+  exportPoster: async (
+    conversationId: string, messageId: string, body: ExportPosterOptions & { index: number },
+  ): Promise<Blob> => {
+    const res = await postBinary(`/conversations/${conversationId}/generations/${messageId}/poster/export`, body);
+    return res.blob();
   },
 
   composeGeneration: (conversationId: string, messageId: string, body: { layout: ComposeLayout; gap: boolean }) =>

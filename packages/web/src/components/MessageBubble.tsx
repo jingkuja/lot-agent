@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api/client.js";
 import { TypingDots } from "./TypingDots.js";
 import type { DisplayMessage } from "../hooks/useChat.js";
-import type { ImageInputContext, PreviewPosterHandler } from "../api/client.js";
+import type { ExportPosterHandler, ImageInputContext, PreviewPosterHandler, RestorePosterHandler } from "../api/client.js";
 import type { GenerationSettings } from "../hooks/chat-reducer.js";
 import { GenerationCard } from "./GenerationCard.js";
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
@@ -58,6 +58,8 @@ interface MessageBubbleProps {
     titleOptions?: { titleLines?: string[]; manualTitleLines?: boolean },
   ) => Promise<string | undefined>;
   onPreviewPoster?: PreviewPosterHandler;
+  onRestorePoster?: RestorePosterHandler;
+  onExportPoster?: ExportPosterHandler;
 }
 
 function ImageInputDetails({ input }: { input: ImageInputContext }) {
@@ -105,6 +107,8 @@ export function MessageBubble({
   onExportGeneration,
   onEditPoster,
   onPreviewPoster,
+  onRestorePoster,
+  onExportPoster,
 }: MessageBubbleProps) {
   const { t } = useI18n();
   if (message.generation) {
@@ -123,6 +127,8 @@ export function MessageBubble({
             onExport={onExportGeneration}
             onEditPoster={onEditPoster}
             onPreviewPoster={onPreviewPoster}
+            onRestorePoster={onRestorePoster}
+            onExportPoster={onExportPoster}
           />
         </div>
       </div>
