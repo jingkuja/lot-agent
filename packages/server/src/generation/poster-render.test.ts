@@ -342,6 +342,24 @@ describe("renderPoster", () => {
     const [a, b] = await Promise.all([renderPoster(picture, layout("top_panel")), renderPoster(picture, layout("top_panel"))]);
     expect(a.body.equals(b.body)).toBe(true);
   });
+
+  it("rotates a text layer around its center cleanly while updating render key", async () => {
+    const picture = await background(512, 512, "#e9dcc3");
+    const base = layout("overlay");
+    const rotated = {
+      ...base,
+      style: { font: "sans" as const, titleWeight: "bold" as const, scrim: "transparent" as const, parts: { title: { rotate: -15 } } },
+    };
+    const [straightRes, tiltedRes, previewRes] = await Promise.all([
+      renderPoster(picture, { ...base, style: { font: "sans", titleWeight: "bold", scrim: "transparent" } }),
+      renderPoster(picture, rotated),
+      renderPosterPreview(picture, rotated),
+    ]);
+    expect(straightRes.body.equals(tiltedRes.body)).toBe(false);
+    expect(tiltedRes.width).toBe(512);
+    expect(previewRes.layers.some((layer) => layer.kind === "text" && layer.part === "title")).toBe(true);
+    expect(posterRenderKey("bg.png", rotated)).not.toBe(posterRenderKey("bg.png", base));
+  });
 });
 
 describe("poster helpers", () => {

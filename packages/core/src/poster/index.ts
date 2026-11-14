@@ -24,6 +24,7 @@ export const POSTER_NUDGE_LIMIT = 100;
 export const POSTER_FONT_SCALE = { default: 100, min: 50, max: 300, step: 10 } as const;
 export const POSTER_LETTER_SPACING = { default: 0, min: -10, max: 50, step: 5 } as const;
 export const POSTER_LINE_SPACING = { default: 100, min: 80, max: 200, step: 10 } as const;
+export const POSTER_ROTATE = { default: 0, min: -180, max: 180, step: 5 } as const;
 
 export interface PosterPartStyle {
   /** Overrides global font for this text block (`sans` | `serif`). */
@@ -40,6 +41,8 @@ export interface PosterPartStyle {
   letterSpacing?: number;
   /** Line spacing percentage relative to the automatic default (100). */
   lineSpacing?: number;
+  /** Clockwise rotation angle around the block's center, in degrees (-180..180). */
+  rotate?: number;
   /** Text outline thickness. */
   stroke?: PosterStroke;
   /** `#rrggbb`; absent picks high-contrast black or white against the text color. */
@@ -73,7 +76,7 @@ function nudge(value: unknown): number {
 
 function parsePartStyle(raw: unknown): PosterPartStyle | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const { font, color, dx, dy, vertical, fontScale, letterSpacing, lineSpacing, stroke, strokeColor } = raw as Record<string, unknown>;
+  const { font, color, dx, dy, vertical, fontScale, letterSpacing, lineSpacing, rotate, stroke, strokeColor } = raw as Record<string, unknown>;
   const part: PosterPartStyle = {};
   if (POSTER_FONTS.includes(font as PosterFont)) part.font = font as PosterFont;
   const validColor = hexColor(color);
@@ -87,6 +90,8 @@ function parsePartStyle(raw: unknown): PosterPartStyle | undefined {
   if (tracking !== undefined) part.letterSpacing = tracking;
   const leading = clampedOption(lineSpacing, POSTER_LINE_SPACING);
   if (leading !== undefined) part.lineSpacing = leading;
+  const angle = clampedOption(rotate, POSTER_ROTATE);
+  if (angle !== undefined) part.rotate = angle;
   if (POSTER_STROKES.includes(stroke as PosterStroke) && stroke !== "none") {
     part.stroke = stroke as PosterStroke;
     const outline = hexColor(strokeColor);

@@ -224,8 +224,14 @@ describe("layout helpers", () => {
     expect(sanitizePosterFields({ points: ["a", "", 3, "b", "c", "d", "e"] }).points).toEqual(["a", "b", "c", "d"]);
   });
 
-  it("supports per-part fonts, version history recording/capping, background meta and export options", () => {
-    expect(parsePosterStyle({ parts: { title: { font: "serif" }, subtitle: { font: "comic" } } }).parts).toEqual({ title: { font: "serif" } });
+  it("supports per-part fonts, rotation, version history recording/capping, background meta and export options", () => {
+    expect(parsePosterStyle({
+      parts: {
+        title: { font: "serif", rotate: 15 },
+        subtitle: { font: "comic", rotate: 0 },
+        price: { rotate: -240 },
+      },
+    }).parts).toEqual({ title: { font: "serif", rotate: 15 }, price: { rotate: -180 } });
     expect(parsePosterExportRatio(undefined)).toBe("original");
     expect(parsePosterExportRatio("9:16")).toBe("9:16");
     expect(parsePosterExportRatio("99:1")).toBeNull();

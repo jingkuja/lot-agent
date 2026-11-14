@@ -3803,6 +3803,13 @@ export const messages: Record<string, { en: string; id: string }> = {
     "en": "Drag text to move, drag corners to scale, or use arrow keys to nudge",
     "id": "Seret teks untuk memindahkan, seret sudut untuk mengubah ukuran, atau gunakan tombol panah",
   },
+  "拖动移动（支持吸附对齐），拖角缩放，顶钮旋转": {
+    "en": "Drag to move with snap guides, drag corners to scale, or use the top handle to rotate",
+    "id": "Seret untuk memindahkan (dengan garis bantu), sudut untuk skala, tombol atas untuk memutar",
+  },
+  "旋转": {"en": "Rotate", "id": "Putar"},
+  "向左旋转{0}": {"en": "Rotate {0} left", "id": "Putar {0} ke kiri"},
+  "向右旋转{0}": {"en": "Rotate {0} right", "id": "Putar {0} ke kanan"},
   "文字区域底图纹理较复杂，可开启轻柔/加强遮罩提升清晰度。": {
     "en": "Text area looks busy; try a soft or strong scrim for sharper readability.",
     "id": "Area teks terlihat ramai; gunakan lapisan lembut atau kuat agar lebih jelas.",

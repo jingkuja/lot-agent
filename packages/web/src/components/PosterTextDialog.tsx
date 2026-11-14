@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
   POSTER_EXPORT_RATIOS, POSTER_FONTS, POSTER_FONT_SCALE, POSTER_LETTER_SPACING, POSTER_LIMITS, POSTER_LINE_SPACING,
-  POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_STROKES, POSTER_TEMPLATES, parseManualTitleInput, parsePosterStyle,
+  POSTER_NUDGE_LIMIT, POSTER_PARTS, POSTER_ROTATE, POSTER_STROKES, POSTER_TEMPLATES, parseManualTitleInput, parsePosterStyle,
   posterPartVertical, posterTemplateFor,
   type PosterExportRatio, type PosterFieldName, type PosterFields, type PosterFont, type PosterLayout,
   type PosterPart, type PosterPartStyle, type PosterPreviewScene, type PosterStroke, type PosterStyle, type PosterTemplate,
@@ -246,11 +246,13 @@ export function PosterTextDialog({
   const resizePart = (part: PosterPart, step: number) => setPart(part, (current) => ({
     ...current, fontScale: (current.fontScale ?? POSTER_FONT_SCALE.default) + step,
   }));
-  const stepPartMetric = (part: PosterPart, key: "letterSpacing" | "lineSpacing", step: number, fallback: number) => (
+  const stepPartMetric = (
+    part: PosterPart, key: "letterSpacing" | "lineSpacing" | "rotate", step: number, fallback: number,
+  ) => (
     setPart(part, (current) => ({ ...current, [key]: (current[key] ?? fallback) + step }))
   );
   const parts = POSTER_PARTS.filter((part) => partHasText(part, draftFields, points));
-  const hint = preview?.scene && !previewError ? "拖动文字移动位置，拖边角可缩放字号，方向键可微调"
+  const hint = preview?.scene && !previewError ? "拖动移动（支持吸附对齐），拖角缩放，顶钮旋转"
     : canPreview && !preview && !previewError ? "正在加载可拖动预览…" : "每次移动画布的 1%，保存后生效";
   const dialogBusy = busy || regenerating || exporting || restoringIndex !== null;
 
@@ -267,7 +269,8 @@ export function PosterTextDialog({
         <div className="image-edit-preview poster-text-preview">
           {preview?.scene ? <PosterPreviewCanvas scene={preview.scene} style={style} interactive={!dialogBusy && previewCurrent}
             onMove={(part, offset) => setPart(part, (current) => ({ ...current, ...offset }))}
-            onResize={(part, fontScale) => setPart(part, (current) => ({ ...current, fontScale }))} />
+            onResize={(part, fontScale) => setPart(part, (current) => ({ ...current, fontScale }))}
+            onRotate={(part, rotate) => setPart(part, (current) => ({ ...current, rotate }))} />
             : <img className="poster-preview-flat" src={previewUrl ?? imageUrl} draggable={false}
               alt={t(preview ? "预览效果" : "当前生成图")} onLoad={({ currentTarget }) => {
                 setDimensions({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight });
@@ -348,10 +351,11 @@ export function PosterTextDialog({
               const fontScale = own?.fontScale ?? POSTER_FONT_SCALE.default;
               const letterSpacing = own?.letterSpacing ?? POSTER_LETTER_SPACING.default;
               const lineSpacing = own?.lineSpacing ?? POSTER_LINE_SPACING.default;
+              const rotate = own?.rotate ?? POSTER_ROTATE.default;
               const stroke = own?.stroke ?? "none";
               const expanded = !!expandedParts[part];
               const hasExtraStyle = !!own?.font || letterSpacing !== POSTER_LETTER_SPACING.default
-                || lineSpacing !== POSTER_LINE_SPACING.default || stroke !== "none";
+                || lineSpacing !== POSTER_LINE_SPACING.default || rotate !== POSTER_ROTATE.default || stroke !== "none";
               return <div className="poster-part-item" key={part}>
                 <div className="poster-part-row">
                   <span className="poster-part-name" title={label}>{label}</span>
@@ -413,6 +417,18 @@ export function PosterTextDialog({
                         {POSTER_FONTS.map((item) => <option key={item} value={item}>{t(FONT_LABELS[item])}</option>)}
                       </select>
                     </label>
+                    <div className="poster-part-metric">
+                      <span>{t("旋转")}</span>
+                      <div className="poster-part-size" role="group" aria-label={t("旋转")}>
+                        <button type="button" className="poster-part-nudge" disabled={rotate <= POSTER_ROTATE.min}
+                          aria-label={t("向左旋转{0}", [label])}
+                          onClick={() => stepPartMetric(part, "rotate", -POSTER_ROTATE.step, POSTER_ROTATE.default)}>−</button>
+                        <span className="poster-part-size-value">{rotate}°</span>
+                        <button type="button" className="poster-part-nudge" disabled={rotate >= POSTER_ROTATE.max}
+                          aria-label={t("向右旋转{0}", [label])}
+                          onClick={() => stepPartMetric(part, "rotate", POSTER_ROTATE.step, POSTER_ROTATE.default)}>+</button>
+                      </div>
+                    </div>
                     <div className="poster-part-metric">
                       <span>{t("字间距")}</span>
                       <div className="poster-part-size" role="group" aria-label={t("字间距")}>

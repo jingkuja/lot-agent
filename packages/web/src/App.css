@@ -5227,10 +5227,26 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .poster-preview-handle--sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
 .poster-preview-handle--se { right: -5px; bottom: -5px; cursor: nwse-resize; }
 .poster-preview-scale-tag {
-  position: absolute; left: 50%; top: -22px; transform: translateX(-50%); padding: 1px 6px; border-radius: var(--radius-sm);
+  position: absolute; left: 50%; top: -44px; transform: translateX(-50%); padding: 1px 6px; border-radius: var(--radius-sm);
   background: var(--bg-card); color: var(--accent); border: 1px solid var(--accent); font-size: 11px; line-height: 1.4;
-  pointer-events: none; white-space: nowrap;
+  pointer-events: none; white-space: nowrap; z-index: 5;
 }
+.poster-preview-rotate-handle {
+  position: absolute; left: 50%; top: -24px; transform: translateX(-50%); width: 16px; height: 16px; border-radius: 50%;
+  border: 1.5px solid var(--accent); background: var(--bg-card); color: var(--accent);
+  display: inline-flex; align-items: center; justify-content: center; cursor: grab;
+  opacity: 0; transition: opacity 0.12s ease; touch-action: none;
+}
+.poster-preview-rotate-handle::after {
+  content: ""; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+  width: 1px; height: 8px; background: var(--accent); pointer-events: none;
+}
+.poster-preview-rotate-handle svg { width: 10px; height: 10px; pointer-events: none; }
+.poster-preview-part:is(:hover:not(:disabled), .is-selected, :focus-visible) .poster-preview-rotate-handle { opacity: 1; }
+.poster-preview-part[data-dragging="true"] .poster-preview-rotate-handle { cursor: grabbing; }
+.poster-preview-guide { position: absolute; pointer-events: none; z-index: 4; opacity: 0.85; }
+.poster-preview-guide--x { top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--accent); }
+.poster-preview-guide--y { left: 0; right: 0; height: 0; border-top: 1px dashed var(--accent); }
 .poster-template-warn { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .poster-regen-btn {
   padding: 4px 10px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--bg-active);

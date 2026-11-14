@@ -1008,11 +1008,24 @@ async function buildPoster(background: Buffer, layout: PosterLayout, options?: P
 /** Render `layout` onto `background`. Supports optional `scale` (1 or 2) and aspect `ratio` re-typesetting. */
 export async function renderPoster(background: Buffer, layout: PosterLayout, options?: PosterRenderOptions): Promise<RenderedPoster> {
   const { base, layers, width, height, template, overflow } = await buildPoster(background, layout, options);
-  const placed = layers.map((layer) => {
+  const partsStyle = parsePosterStyle(layout.style).parts;
+  const placed = await Promise.all(layers.map(async (layer) => {
     const { input, left, top } = layer;
     const shift = layer.kind === "scrim" ? { x: 0, y: 0 } : partShift(layout, layer.part, width, height);
-    return { input, left: left + shift.x, top: top + shift.y };
-  });
+    const angle = layer.kind === "scrim" ? 0 : (partsStyle?.[layer.part]?.rotate ?? 0);
+    if (!angle) return { input, left: left + shift.x, top: top + shift.y };
+    const rotated = await sharp(input).ensureAlpha()
+      .rotate(angle, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    const cx = left + shift.x + layer.width / 2;
+    const cy = top + shift.y + layer.height / 2;
+    return {
+      input: rotated.data,
+      left: Math.round(cx - rotated.info.width / 2),
+      top: Math.round(cy - rotated.info.height / 2),
+    };
+  }));
   const body = placed.length ? await sharp(base).composite(await insideCanvas(placed, width, height)).png().toBuffer() : base;
   return { body, mime: "image/png", width, height, template, overflow };
 }
@@ -1031,9 +1044,9 @@ export async function renderPosterPreview(background: Buffer, layout: PosterLayo
 
 /** Identifies a rendered poster: the same background and layout always give the same picture, so it is stored once. */
 export function posterRenderKey(backgroundKey: string, layout: PosterLayout): string {
-  // Render revision 5 adds per-part fonts and quiet-band overlay placement.
+  // Render revision 6 adds per-part rotation around layer center.
   const values = [
-    5, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
+    6, backgroundKey, layout.template, layout.fields, layout.titleLines ?? null,
     layout.manualTitleLines ?? false, parsePosterStyle(layout.style),
   ];
   const content = JSON.stringify(values);
