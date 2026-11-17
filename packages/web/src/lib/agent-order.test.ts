@@ -44,10 +44,24 @@ describe("sortedSubAgents", () => {
 });
 
 
-it.each([null, 99, -10])("pins marketing video after general regardless of its saved order %s", (order) => {
-  const input = [mk("video", -20), mk("general"), mk("image", 0), mk("marketing_video", order), mk("ppt", null)];
+it.each([null, 99, -10])("pins marketing video, image, and digital presenter after general regardless of saved order %s", (order) => {
+  const input = [
+    mk("video", -20),
+    mk("general"),
+    mk("digital_presenter", 5),
+    mk("image", 0),
+    mk("marketing_video", order),
+    mk("ppt", null),
+  ];
   const original = [...input];
   const result = splitInstalledAgents(input);
-  expect([result.general?.id, ...result.visible.map((agent) => agent.id)]).toEqual(["general", "marketing_video", "video", "image", "ppt"]);
+  expect([result.general?.id, ...result.visible.map((agent) => agent.id)]).toEqual([
+    "general",
+    "marketing_video",
+    "image",
+    "digital_presenter",
+    "video",
+    "ppt",
+  ]);
   expect(input).toEqual(original);
 });

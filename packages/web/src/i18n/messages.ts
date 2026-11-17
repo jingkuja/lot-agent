@@ -1176,6 +1176,8 @@ export const messages: Record<string, { en: string; id: string }> = {
   "沉淀资料与专属知识": {"en": "Your files and knowledge", "id": "Dokumen dan pengetahuan Anda"},
   "工作区导航": {"en": "Workspace navigation", "id": "Navigasi ruang kerja"},
   "数字员工": {"en": "Digital employee", "id": "Karyawan digital"},
+  "漫剧工厂": {"en": "Comic Studio", "id": "Studio Komik"},
+  "即将发布": {"en": "Coming soon", "id": "Segera hadir"},
   "早上好": {"en": "Good morning", "id": "Selamat pagi"},
   "下午好": {"en": "Good afternoon", "id": "Selamat siang"},
   "晚上好": {"en": "Good evening", "id": "Selamat malam"},

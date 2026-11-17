@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useI18n } from "../i18n/index.js";
 import { LanguageSelect } from "../i18n/index.js";
 import { BRAND_LOGO_SRC } from "../assets/brand-logo.js";
@@ -35,6 +36,12 @@ export function BrandHeader({
   digitalEmployeeBadge = 0,
 }: BrandHeaderProps) {
   const { t } = useI18n();
+  const [comingSoonTick, setComingSoonTick] = useState(0);
+  useEffect(() => {
+    if (!comingSoonTick) return;
+    const timer = window.setTimeout(() => setComingSoonTick(0), 2400);
+    return () => window.clearTimeout(timer);
+  }, [comingSoonTick]);
   return (
     <div className="brand-header">
       <div className="brand-card">
@@ -95,35 +102,55 @@ export function BrandHeader({
             </div>
           )}
           {(onOpenAssistant || onOpenDigitalEmployee) && (
-            <div className="brand-module-switch" role="tablist" aria-label={t("工作区导航")}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeModule === "assistant"}
-                className={`brand-module-tab ${activeModule === "assistant" ? "active" : ""}`}
-                onClick={onOpenAssistant}
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M4 19V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12" />
-                  <path d="M8 9h3v3H8zM14 9h2M14 12h2M8 16h8" />
-                </svg>
-                AI Studio
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeModule === "digitalEmployee"}
-                className={`brand-module-tab ${activeModule === "digitalEmployee" ? "active" : ""}`}
-                onClick={onOpenDigitalEmployee}
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <circle cx="12" cy="8" r="3.5" />
-                  <path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
-                  <path d="M18.5 5.5h2M19.5 4.5v2" />
-                </svg>
-                {t("数字员工")}
-                {digitalEmployeeBadge > 0 && <b className="brand-module-badge">{digitalEmployeeBadge > 99 ? "99+" : digitalEmployeeBadge}</b>}
-              </button>
+            <div className="brand-module-switch-wrap">
+              <div className="brand-module-switch" role="tablist" aria-label={t("工作区导航")}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeModule === "assistant"}
+                  className={`brand-module-tab ${activeModule === "assistant" ? "active" : ""}`}
+                  onClick={() => { setComingSoonTick(0); onOpenAssistant?.(); }}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M4 19V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12" />
+                    <path d="M8 9h3v3H8zM14 9h2M14 12h2M8 16h8" />
+                  </svg>
+                  AI Studio
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeModule === "digitalEmployee"}
+                  className={`brand-module-tab ${activeModule === "digitalEmployee" ? "active" : ""}`}
+                  onClick={() => { setComingSoonTick(0); onOpenDigitalEmployee?.(); }}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <circle cx="12" cy="8" r="3.5" />
+                    <path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
+                    <path d="M18.5 5.5h2M19.5 4.5v2" />
+                  </svg>
+                  <span>{t("数字员工")}</span>
+                  {digitalEmployeeBadge > 0 && <b className="brand-module-badge">{digitalEmployeeBadge > 99 ? "99+" : digitalEmployeeBadge}</b>}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  className="brand-module-tab"
+                  onClick={() => setComingSoonTick((n) => n + 1)}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                    <path d="M9.5 4v16M15.5 4v16M3 10.5h6.5M15.5 13.5H21" />
+                  </svg>
+                  <span>{t("漫剧工厂")}</span>
+                </button>
+              </div>
+              {comingSoonTick > 0 && (
+                <div className="brand-module-notice" role="status">
+                  {t("即将发布")}
+                </div>
+              )}
             </div>
           )}
         </div>

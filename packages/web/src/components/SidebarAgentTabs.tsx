@@ -56,55 +56,73 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
         <div className="sidebar-current-agent">
           {current && icon(current)}
           <div className="sidebar-current-agent-copy">
-            <span>{t("当前 Agent")}</span>
             <strong>{current ? t(current.name) : t("加载中…")}</strong>
           </div>
-          <button type="button" className="agent-grid-toggle agent-feishu-toggle" aria-label={t("飞书接入")}
-            title={t("飞书接入")} onClick={() => setFeishuOpen(true)}>
-            <span className="agent-grid-toggle-icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-                <path d="m21 3-7 18-4-7-7-4 18-7Z" strokeLinejoin="round" /><path d="m10 14 6-6" />
+          <button
+            type="button"
+            className="agent-feishu-toggle"
+            aria-label={t("飞书接入")}
+            title={t("飞书接入")}
+            onClick={() => setFeishuOpen(true)}
+          >
+            <span className="agent-feishu-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="m21 3-7 18-4-7-7-4 18-7Z" strokeLinejoin="round" />
+                <path d="m10 14 6-6" />
               </svg>
             </span>
             <span>{t("飞书")}</span>
           </button>
-          {hasMore && <button ref={trigger} type="button" className={`agent-grid-toggle ${expanded ? "active" : ""}`}
-            aria-expanded={expanded} aria-controls={gridId} aria-label={t(expanded ? "收起" : "更多")}
-            title={t("切换 Agent")} disabled={disabled} onClick={() => setOpen((value) => !value)}>
-            <span className="agent-grid-toggle-icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden>
-                {[4, 10, 16].flatMap((x) => [4, 10, 16].map((y) => <rect key={`${x}-${y}`} x={x} y={y} width="4" height="4" rx="1" />))}
-              </svg>
-            </span>
-            <span>{t(expanded ? "收起" : "更多")}</span>
-          </button>}
         </div>
         <div className="agent-launcher" id={gridId}>
           <div className={`agent-launcher-grid${expanded ? " is-expanded" : ""}`} role="group" aria-label={t("选择 Agent")}>
             {visible.map((agent) => (
-              <button key={agent.id} type="button"
+              <button
+                key={agent.id}
+                type="button"
                 className={`agent-launcher-item ${agent.id === activeId ? "active" : ""}`}
-                aria-pressed={agent.id === activeId} title={t(agent.description)} disabled={disabled}
+                aria-pressed={agent.id === activeId}
+                title={t(agent.description)}
+                disabled={disabled}
                 onClick={() => {
-                  setOpen(false);
-                  trigger.current?.focus();
+                  if (open) {
+                    setOpen(false);
+                    trigger.current?.focus();
+                  }
                   onSwitch(agent.id);
-                }}>
+                }}
+              >
                 {icon(agent)}
                 <span>{t(agent.name)}</span>
-                {agent.id === activeId && <span className="agent-launcher-check" aria-hidden>✓</span>}
               </button>
             ))}
           </div>
-          {hasMore && <button type="button" className={`agent-launcher-more${expanded ? " is-expanded" : ""}`}
-            aria-expanded={expanded} aria-controls={gridId} disabled={disabled}
-            onClick={() => setOpen((value) => !value)}>
-            <span>{expanded ? t("收起") : t("更多助手")}</span>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2"
-              strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>}
+          {hasMore && (
+            <button
+              ref={trigger}
+              type="button"
+              className={`agent-launcher-more${expanded ? " is-expanded" : ""}`}
+              aria-expanded={expanded}
+              aria-controls={gridId}
+              disabled={disabled}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <span>{expanded ? t("收起") : t("更多助手")}</span>
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
       {feishuOpen && <FeishuSettings onClose={() => setFeishuOpen(false)} />}
