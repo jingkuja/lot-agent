@@ -1160,6 +1160,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "安装": {"en": "Install", "id": "Pasang"},
   "更多已安装 Agent": {"en": "More installed agents", "id": "Agen terpasang lainnya"},
   "更多": {"en": "More", "id": "Lainnya"},
+  "更多助手": {"en": "More assistants", "id": "Asisten lainnya"},
   "暂无素材": {"en": "No assets yet", "id": "Belum ada aset"},
   "素材": {"en": "Assets", "id": "Aset"},
   "问题格式无效，请直接补充你的需求。": {"en": "Invalid question format. Enter your requirements directly.", "id": "Format pertanyaan tidak valid. Masukkan kebutuhan Anda langsung."},

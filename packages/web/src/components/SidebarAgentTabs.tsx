@@ -96,6 +96,15 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
               </button>
             ))}
           </div>
+          {hasMore && <button type="button" className={`agent-launcher-more${expanded ? " is-expanded" : ""}`}
+            aria-expanded={expanded} aria-controls={gridId} disabled={disabled}
+            onClick={() => setOpen((value) => !value)}>
+            <span>{expanded ? t("收起") : t("更多助手")}</span>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>}
         </div>
       </div>
       {feishuOpen && <FeishuSettings onClose={() => setFeishuOpen(false)} />}
