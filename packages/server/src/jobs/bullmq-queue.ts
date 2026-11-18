@@ -5,7 +5,7 @@ import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { GENERATION_QUEUE_FAILED } from "../generation/errors.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName, type MarketingQueueLimits } from "./task-queues.js";
+import { DEFAULT_TASK_QUEUE, isComicMediaTask, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName, type MarketingQueueLimits } from "./task-queues.js";
 
 // A render that waits for the same owner's earlier render frees its slot for
 // other users, then retries after this delay (plus jitter).
@@ -178,8 +178,7 @@ export class BullmqJobQueue implements JobQueue {
     }
   }
 
-  /** Redis errors are unknown, never missing. For confirmed missing entries, recover marketing delivery
-   * by ID and close chat media receipts whose submitting request can no longer publish them. */
+  /** Detect missing jobs without confusing them with Redis errors. Reconcile persisted media deliveries and unpublished chat receipts. */
   async diagnosePending(staleMs: number): Promise<void> {
     let readable = this.connection.status === "ready";
     for (const row of await this.db.findStalePendingTasks(staleMs)) {
@@ -195,13 +194,12 @@ export class BullmqJobQueue implements JobQueue {
               stage = "等待队列处理";
               break;
             }
-            // An old terminal entry may carry retry history. Never blindly
-            // remove/recreate it from a periodic diagnostic.
-            stage = "队列状态待核实";
+            // Comic media rows here have attempts=0, which an explicit resume sets before re-delivery.
+            if (!isComicMediaTask(row.type) || !["failed", "completed"].includes(state)) stage = "队列状态待核实";
           }
         }
       } catch { readable = false; stage = "队列状态待核实"; }
-      if (stage === "投递未完成，可恢复排队" && row.type === "marketing.video") {
+      if (stage === "投递未完成，可恢复排队" && (row.type === "marketing.video" || isComicMediaTask(row.type))) {
         try {
           await queueDeadline(() => this.deliverPersisted(row.id, row.type));
           stage = "等待队列处理";
@@ -243,6 +241,10 @@ export class BullmqJobQueue implements JobQueue {
   /** Publish a newly committed task once, without reviving terminal queue entries. */
   publishNewTask(id: string, type: string): Promise<void> {
     return queueDeadline(() => publishPersistedJob(this.queues.get(taskQueueName(type))!, id, type, { maxAttempts: 1 }));
+  }
+
+  resumePersisted(id: string, type: string): Promise<void> {
+    return queueDeadline(() => this.deliverPersisted(id, type));
   }
 
   /** Do not revive a cancelled row while its previous worker is unwinding. */

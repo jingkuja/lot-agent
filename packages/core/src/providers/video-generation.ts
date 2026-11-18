@@ -3,6 +3,7 @@ import {
   MockGenerationClient,
   extractVendorError,
   type CreateResult,
+  type GenerationCallOptions,
   type PollResult,
   type ReferenceInput,
   type ReferenceMedia,
@@ -33,8 +34,8 @@ export interface VideoGenerationRequest {
 }
 
 export interface VideoGenerationProvider {
-  create(req: VideoGenerationRequest): Promise<CreateResult>;
-  poll(taskId: string): Promise<PollResult>;
+  create(req: VideoGenerationRequest, options?: GenerationCallOptions): Promise<CreateResult>;
+  poll(taskId: string, options?: GenerationCallOptions): Promise<PollResult>;
 }
 
 export type VideoVendorAdapter = VendorAdapter<VideoGenerationRequest>;

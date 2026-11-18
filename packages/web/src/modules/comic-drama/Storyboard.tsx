@@ -1,11 +1,12 @@
 import { useRef } from "react";
-import type { ComicDramaClip, ComicDramaClipDraft } from "@lot-agent/core/comic-drama";
+import type { ComicClipCasting, ComicDramaClip, ComicDramaClipDraft, ComicSeriesCast } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 
 import { DictionaryOptions, useComicChoices } from "./LibraryParts.js";
 
 type Props = {
   clips: readonly ComicDramaClip[];
+  cast: readonly ComicSeriesCast[];
   drafts: Readonly<Record<string, { draft: ComicDramaClipDraft }>>;
   disabled: boolean;
   locked: boolean;
@@ -18,7 +19,7 @@ type Props = {
   reorder: (ids: string[]) => void;
 };
 
-export function Storyboard({ clips, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder }: Props) {
+export function Storyboard({ clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder }: Props) {
   const { t } = useI18n();
   const dragging = useRef<string | null>(null);
   const clip = clips.find(entry => entry.id === selected) ?? clips[0];
@@ -58,12 +59,14 @@ export function Storyboard({ clips, drafts, disabled, locked, selected, select, 
           <button type="button" disabled={disabled} onClick={() => remove(clip.id)}>{t("删除")}</button>
         </div>
       </header>
-      <ClipFields key={clip.id} draft={drafts[clip.id]?.draft ?? clip.draft} disabled={locked} change={draft => edit(clip.id, draft)} />
+      <ClipFields key={clip.id} draft={drafts[clip.id]?.draft ?? clip.draft} disabled={locked} cast={cast} change={draft => edit(clip.id, draft)} />
     </section>}
   </div>;
 }
 
-function ClipFields({ draft, disabled, change }: { draft: ComicDramaClipDraft; disabled: boolean; change: (draft: ComicDramaClipDraft) => void }) {
+function ClipFields({ draft, disabled, cast, change }: {
+  draft: ComicDramaClipDraft; disabled: boolean; cast: readonly ComicSeriesCast[]; change: (draft: ComicDramaClipDraft) => void;
+}) {
   const { t } = useI18n();
   const framing = useComicChoices("framing");
   const movement = useComicChoices("movement");
@@ -88,6 +91,7 @@ function ClipFields({ draft, disabled, change }: { draft: ComicDramaClipDraft; d
           if (Number.isFinite(ms) && ms >= 1 && ms <= 60_000) update({ durationMs: ms });
         }} /></label>
     </div>
+    <ClipCast cast={cast} current={draft.cast ?? []} change={actors => update({ cast: actors })} />
     <div className="comic-section-heading"><h3>{t("镜头")}</h3>
       <button type="button" disabled={draft.shots.length >= 3 || !firstFraming || !firstMovement} onClick={() => {
         if (firstFraming && firstMovement) setShots([...draft.shots, {
@@ -126,4 +130,49 @@ function ClipFields({ draft, disabled, change }: { draft: ComicDramaClipDraft; d
       <label>{t("台词文本")}<textarea maxLength={1000} value={line.text} onChange={event => updateLine(index, { text: event.target.value })} /></label>
     </div>)}
   </fieldset>;
+}
+
+
+function ClipCast({ cast, current, change }: { cast: readonly ComicSeriesCast[]; current: ComicClipCasting; change: (value: ComicClipCasting) => void }) {
+  const { t, locale } = useI18n();
+  const slots = useComicChoices("slot");
+  const expressions = useComicChoices("expression");
+  const choices = cast.filter(entry => !current.some(actor => actor.characterId === entry.snapshot.characterId));
+  const add = (id: string) => {
+    const snapshot = choices.find(entry => entry.snapshot.characterId === id)?.snapshot;
+    if (!snapshot) return;
+    const slot = snapshot.assets.find(asset => asset.kind === "slot" && asset.key === "front") ??
+      snapshot.assets.find(asset => asset.kind === "slot");
+    change([...current, { characterId: id, slotKey: slot?.key ?? null, expressionKey: null }]);
+  };
+  return <>
+    <div className="comic-section-heading"><h3>{t("出镜人物")}</h3></div>
+    {current.map((actor, index) => {
+      const snapshot = cast.find(entry => entry.snapshot.characterId === actor.characterId)?.snapshot;
+      if (!snapshot) return null;
+      const update = (fields: Partial<typeof actor>) => change(current.map((entry, i) => i === index ? { ...entry, ...fields } : entry));
+      return <div className="comic-subcard" key={actor.characterId}>
+        <div className="comic-actions"><strong>{snapshot.name}</strong> <small>{snapshot.outfitName}</small>
+          <button type="button" onClick={() => change(current.filter((_, i) => i !== index))}>{t("移除出镜")}</button>
+        </div>
+        <div className="comic-fields">
+          <label>{t("造型槽位")}<select value={actor.slotKey ?? ""} onChange={event => update({ slotKey: event.target.value || null })}>
+            <option value="">{t("仅用角色描述")}</option>
+            {snapshot.assets.filter(asset => asset.kind === "slot").map(asset =>
+              <option value={asset.key} key={asset.key}>{slots.find(row => row.key === asset.key)?.labels[locale] ?? asset.key}</option>)}
+          </select></label>
+          <label>{t("表情")}<select value={actor.expressionKey ?? ""} onChange={event => update({ expressionKey: event.target.value || null })}>
+            <option value="">—</option>
+            {snapshot.assets.filter(asset => asset.kind === "expression").map(asset =>
+              <option value={asset.key} key={asset.key}>{expressions.find(row => row.key === asset.key)?.labels[locale] ?? asset.key}</option>)}
+          </select></label>
+        </div>
+      </div>;
+    })}
+    <label className="comic-actor-add">{t("添加出镜角色")}<select aria-label={t("添加出镜角色")} value="" disabled={!choices.length || current.length >= 32}
+      onChange={event => add(event.target.value)}>
+      <option value="">{t(cast.length === 0 ? "先在选角中添加角色" : "请选择")}</option>
+      {choices.map(({ snapshot }) => <option value={snapshot.characterId} key={snapshot.characterId}>{snapshot.name}</option>)}
+    </select></label>
+  </>;
 }

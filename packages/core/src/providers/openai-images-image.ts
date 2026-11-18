@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { extractVendorError, isRealPersonRejection, type CreateResult, type PollResult, type GenerationCallOptions } from "./generation-common.js";
 import { ProviderError } from "./provider-error.js";
 import type { ImageGenerationProvider, ImageGenerationRequest } from "./image-generation.js";
+import { gatewayRequestId } from "../llm/gateway-request-id.js";
 
 /**
  * Turn Tokenhub's synchronous Images API response into sources understood by
@@ -106,7 +107,11 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
       signal,
       redirect: "error",
     });
-    const text = await res.text();
+    const trace = gatewayRequestId(res.headers);
+    const requestId = trace === this.opts.apiKey ? undefined : trace;
+    const text = await res.text().catch(() => {
+      throw Object.assign(new Error("image generation failed: response body interrupted"), { gatewayRequestId: requestId });
+    });
     if (!res.ok) {
       let diagnostic: string | undefined;
       try { diagnostic = extractVendorError(JSON.parse(text) as Record<string, unknown>, "create"); }
@@ -115,7 +120,7 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
         if (isRealPersonRejection(text)) diagnostic = new ProviderError("generation", "create", "REAL_PERSON_REJECTED", { httpStatus: res.status }).message;
       }
       const error = new Error(diagnostic ?? `image generation failed: HTTP ${res.status}`);
-      Object.assign(error, { httpStatus: res.status, confirmedRejection: res.status >= 400 && res.status < 500 && res.status !== 408 });
+      Object.assign(error, { httpStatus: res.status, gatewayRequestId: requestId });
       throw error;
     }
 
@@ -123,13 +128,14 @@ export class OpenAIImagesImageProvider implements ImageGenerationProvider {
     try {
       response = JSON.parse(text);
     } catch {
-      throw new Error("image generation failed: response is not JSON");
+      throw Object.assign(new Error("image generation failed: response is not JSON"), { gatewayRequestId: requestId });
     }
     const urls = extractImageUrls(response);
-    if (!urls.length) throw new Error("image generation failed: no image url or b64_json in response");
+    if (!urls.length) throw Object.assign(new Error("image generation failed: no image url or b64_json in response"), { gatewayRequestId: requestId });
 
     const taskId = `images_${randomUUID()}`;
-    return { taskId, status: "completed", progress: 100, result: { status: "completed", progress: 100, url: urls[0], urls } };
+    return { taskId, status: "completed", progress: 100, result: { status: "completed", progress: 100, url: urls[0], urls },
+      ...(requestId ? { gatewayRequestId: requestId } : {}) };
   }
 
   async poll(_taskId: string): Promise<PollResult> {

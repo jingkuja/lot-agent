@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { Hono } from "hono";
 import { COMIC_MEDIA_PATH, type ComicLibraryRepository, type ComicMaterialKind, type ComicMediaLinks, type StoredComicMedia } from "@lot-agent/core/comic-drama";
 import { createUploadAccessGuard, privateFilesEnabled, signPrivateMaterial, type PrivateMaterialOptions } from "../generation/private-materials.js";
-import { inspectMedia } from "../marketing-video/media.js";
+import { ffmpeg, inspectMedia, mediaProcess } from "../marketing-video/media.js";
 import { staticFileHandler } from "../static-files.js";
 import { meteredUpload, UploadTooLargeError } from "../util/metered-upload.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
@@ -15,6 +15,7 @@ import { ComicLibraryError, libraryMissing } from "./library-db.js";
 const imageFormats: Record<string, string> = { jpeg: "jpg", png: "png", webp: "webp" };
 const allowedMime = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"], ["audio/wav", "wav"], ["audio/mpeg", "mp3"]]);
 const MiB = 1024 * 1024;
+export const COMIC_VIDEO_MAX_BYTES = 80 * MiB;
 
 function limits(kind: ComicMaterialKind | "character", mime: string) {
   const image = mime.startsWith("image/");
@@ -24,6 +25,13 @@ function limits(kind: ComicMaterialKind | "character", mime: string) {
 }
 
 async function probe(path: string, thumb: string, ext: string, maxMs: number, signal: AbortSignal) {
+  if (ext === "mp4") {
+    const info = await inspectMedia(path, signal);
+    if (info.format !== "mov" || !info.video || !info.width || !info.height) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+    if (info.duration * 1000 > maxMs) throw new ComicLibraryError("MEDIA_TOO_LONG", 400);
+    const rotate = Math.abs(info.rotation % 180) === 90;
+    return { width: rotate ? info.height : info.width, height: rotate ? info.width : info.height, durationMs: Math.round(info.duration * 1000) };
+  }
   if (ext === "mp3" || ext === "wav") {
     const info = await inspectMedia(path, signal);
     if (info.format !== ext || !info.audio || info.video) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
@@ -48,11 +56,63 @@ export class ComicMediaLibrary {
     private readonly signing: PrivateMaterialOptions = {},
   ) {}
 
-  async upload<T>(request: Request, owner: string, kind: ComicMaterialKind | "character", persist: (media: StoredComicMedia) => Promise<T>) {
+  assertAvailable() {
     if (!privateFilesEnabled(this.signing)) throw new ComicLibraryError("MEDIA_UNAVAILABLE", 503);
+  }
+
+  async imageReference(owner: string, id: string, signal: AbortSignal) {
+    const media = await this.repo.media(owner, id);
+    if (!media || !/^[-a-f0-9]{36}\.(jpg|png|webp)$/.test(media.storageKey)) libraryMissing();
+    signal.throwIfAborted();
+    const body = await sharp(join(this.root, media.storageKey), { limitInputPixels: 40_000_000 })
+      .autoOrient().resize(1024, 1024, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+    signal.throwIfAborted();
+    return `data:image/jpeg;base64,${body.toString("base64")}`;
+  }
+
+  async videoReference(owner: string, id: string) {
+    const media = await this.repo.media(owner, id);
+    if (!media?.mime.startsWith("image/")) libraryMissing();
+    const link = this.sign(owner, id, media.storageKey, true);
+    if (!/^https?:\/\//i.test(link)) throw new ComicLibraryError("VIDEO_REFERENCE_ORIGIN_REQUIRED", 503);
+    return link;
+  }
+
+  assertVideoReferenceOrigin() {
+    const raw = this.signing.publicBaseUrl ?? process.env.PUBLIC_BASE_URL;
+    const base = raw ? URL.parse(raw) : null;
+    if (!base || !["https:", "http:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
+      throw new ComicLibraryError("VIDEO_REFERENCE_ORIGIN_REQUIRED", 503);
+    }
+  }
+
+  async extractFrame(owner: string, id: string, timeMs: number, signal: AbortSignal): Promise<Request> {
+    const media = await this.repo.media(owner, id);
+    if (!media || media.mime !== "video/mp4" || !/^[a-f0-9-]{36}\.mp4$/.test(media.storageKey)) libraryMissing();
+    if (!media.durationMs || timeMs >= media.durationMs) throw new ComicLibraryError("FRAME_OUT_OF_RANGE", 400);
+    const source = join(this.root, media.storageKey);
+    const directory = await mkdtemp(join(this.root, ".frame-"));
+    try {
+      const frame = join(directory, "frame.png");
+      await mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "mov", "-enable_drefs", "0",
+        "-ss", (timeMs / 1000).toFixed(3), "-i", source, "-map", "0:v:0", "-frames:v", "1",
+        "-vf", "scale=w='min(iw,1920)':h='min(ih,1920)':force_original_aspect_ratio=decrease", "-threads", "1", frame],
+      { signal, timeoutMs: 20_000 }).catch(error => {
+        if (signal.aborted) throw error;
+        throw new ComicLibraryError("FRAME_UNAVAILABLE", 400);
+      });
+      const bytes = await readFile(frame).catch(() => { throw new ComicLibraryError("FRAME_UNAVAILABLE", 400); });
+      return new Request("http://comic-drama.invalid/frame", { method: "POST", body: new Uint8Array(bytes), signal,
+        headers: { "Content-Type": "image/png" } });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+
+  async upload<T>(request: Request, owner: string, kind: ComicMaterialKind | "character" | "generated-video", persist: (media: StoredComicMedia) => Promise<T>) {
+    this.assertAvailable();
     const typedMime = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
     const mime = typedMime === "audio/x-wav" ? "audio/wav" : typedMime ?? "";
-    const { ext, maxBytes, maxMs } = limits(kind, mime);
+    if (kind === "generated-video" && mime !== "video/mp4") throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+    const { ext, maxBytes, maxMs } = kind === "generated-video" ? { ext: "mp4", maxBytes: COMIC_VIDEO_MAX_BYTES, maxMs: 60_000 } : limits(kind, mime);
     if (!request.body) throw new ComicLibraryError("FILE_REQUIRED", 400);
     if (Number(request.headers.get("content-length")) > maxBytes) throw new ComicLibraryError("MEDIA_TOO_LARGE", 413);
     const id = randomUUID();
@@ -95,10 +155,10 @@ export class ComicMediaLibrary {
     }
   }
 
-  private sign(owner: string, id: string, key: string) {
+  private sign(owner: string, id: string, key: string, external = false) {
     try {
       return signPrivateMaterial({ id, user_id: owner, storage_key: key, url: "", type: "upload", is_private: true },
-        { ...this.signing, publicBaseUrl: "", materialPath: COMIC_MEDIA_PATH });
+        { ...this.signing, publicBaseUrl: external ? this.signing.publicBaseUrl : "", materialPath: COMIC_MEDIA_PATH });
     } catch { throw new ComicLibraryError("MEDIA_UNAVAILABLE", 503); }
   }
 
@@ -112,7 +172,7 @@ export class ComicMediaLibrary {
     const app = new Hono();
     const guard = createUploadAccessGuard({
       getUploadByStorageKey: async key => {
-        if (!/^[0-9a-f-]{36}(?:-thumb)?\.(?:jpg|png|webp|mp3|wav)$/.test(key)) return null;
+        if (!/^[0-9a-f-]{36}(?:-thumb)?\.(?:jpg|png|webp|mp3|wav|mp4)$/.test(key)) return null;
         const row = await this.repo.file(key);
         return row ? { id: row.id, user_id: row.owner, storage_key: key, url: "", type: "upload", is_private: true } : null;
       },

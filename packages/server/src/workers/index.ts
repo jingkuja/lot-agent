@@ -25,7 +25,7 @@ import { initializePosterFonts } from "../generation/poster-render.js";
 import { DurableImageProvider, PgImageCallStore, imageCallFingerprint } from "../generation/image-receipts.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
-import { DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
+import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveImageReferenceUrl, resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
@@ -47,6 +47,10 @@ import { createUserOcr, OCR_MAX_TOKENS, OCR_MODEL } from "../knowledge/ingestion
 import { PRODUCT_DOCUMENT_IMAGE_LIMIT } from "../digital-employee/product-document-service.js";
 import { createOwnerLlmResolver } from "../digital-employee/runtime.js";
 import { internationalModelsEnabled } from "../tokenhub/model-access.js";
+import { PgComicLibrary } from "../comic-drama/library-repository.js";
+import { ComicMediaLibrary } from "../comic-drama/media-library.js";
+import { runComicImageGeneration } from "../comic-drama/generation-worker.js";
+import { runComicVideoGeneration } from "../comic-drama/video-worker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -340,6 +344,23 @@ async function main() {
   queue.process("marketing.video", async (job, ctl) => runMarketingVideo({
     db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, uploads: uploadStorage, generation: (child, signal) => genDeps("video", child, signal),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
+  const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(db.pool));
+  queue.process(COMIC_IMAGE_TASK, (job, ctl) => runComicImageGeneration({
+    pool: db.pool, media: comicMedia, receiptPath: resolve(ROOT, "data/image-receipts"),
+    provider: async (owner, model) => {
+      const apiKey = await db.getUserApiKey(owner, managedKeysEnabled);
+      if (!apiKey) throw new Error("MODEL_AUTH_REQUIRED");
+      return providerFactory.image(model, apiKey);
+    },
+  }, job, ctl.signal));
+  queue.process(COMIC_VIDEO_TASK, (job, ctl) => runComicVideoGeneration({
+    pool: db.pool, media: comicMedia,
+    provider: async (owner, model) => {
+      const apiKey = await db.getUserApiKey(owner, managedKeysEnabled);
+      if (!apiKey) throw new Error("MODEL_AUTH_REQUIRED");
+      return providerFactory.video(model, apiKey);
+    },
+  }, job, ctl.signal));
   // Digital presenters always use the owner's own model key: the gateway bills the owner.
   queue.process(DIGITAL_PRESENTER_TASK, async (job, ctl) => runDigitalPresenter({
     db, dataRoot: resolve(ROOT, "data"), storage,

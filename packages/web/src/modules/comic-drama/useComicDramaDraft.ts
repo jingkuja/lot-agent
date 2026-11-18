@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComicDramaClipDraft, ComicDramaDetail } from "@lot-agent/core/comic-drama";
+import { fitComicActor, type ComicDramaClipDraft, type ComicDramaDetail } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { comicDramaApi } from "./api.js";
 
@@ -36,7 +36,9 @@ export function useComicDramaDraft() {
     return () => { alive.current = false; window.removeEventListener("beforeunload", warn); };
   }, []);
 
-  const load = useCallback((detail: ComicDramaDetail | null) => commit({ ...initial, detail }), [commit]);
+  const load = useCallback((detail: ComicDramaDetail | null) => {
+    commit({ ...initial, detail: detail ? { ...detail, cast: detail.cast ?? [] } : null });
+  }, [commit]);
   const editClip = (id: string, draft: ComicDramaClipDraft) => {
     const next = state.current;
     const revision = next.clips[id]?.revision ?? next.detail?.clips.find(clip => clip.id === id)?.revision;
@@ -85,13 +87,14 @@ export function useComicDramaDraft() {
             const result = await comicDramaApi.saveScript(id, pending.content, pending.revision);
             const current = state.current;
             const script = current.script === pending || !current.script ? undefined : { ...current.script, revision: result.seriesRevision };
-            commit({ ...current, script, detail: { ...detail, clips: result.clips, script: result.script,
+            commit({ ...current, script, detail: { ...detail, clips: result.clips, script: result.script, cast: result.cast ?? detail.cast,
               series: { ...detail.series, revision: result.seriesRevision } } });
           }
         }
         return true;
       } catch (error) {
-        const kind = error instanceof ApiClientError && [404, 409].includes(error.status) ? "conflict" : "failed";
+        const stale = error instanceof ApiClientError && ([404, 409].includes(error.status) || error.code === "INVALID_CAST_REFERENCE");
+        const kind = stale ? "conflict" : "failed";
         commit({ ...state.current, issue: { kind, target } });
         return false;
       } finally {
@@ -115,9 +118,17 @@ export function useComicDramaDraft() {
     const target = next.issue.target;
     const clip = latest.clips.find(entry => entry.id === target);
     if (target !== "script" && (!clip || !next.clips[target])) return;
-    const clips = target === "script" ? next.clips : { ...next.clips, [target]: { ...next.clips[target], revision: clip!.revision } };
+    const clips = { ...next.clips };
+    const pending = clips[target];
+    if (clip && pending) {
+      const cast = pending.draft.cast?.flatMap(actor => {
+        const snapshot = latest.cast?.find(entry => entry.snapshot.characterId === actor.characterId)?.snapshot;
+        return snapshot ? [fitComicActor(actor, snapshot)] : [];
+      });
+      clips[target] = { revision: clip.revision, draft: cast ? { ...pending.draft, cast } : pending.draft };
+    }
     const script = target === "script" && next.script ? { ...next.script, revision: latest.series.revision } : next.script;
-    commit({ ...next, detail: latest, clips, script, issue: undefined });
+    commit({ ...next, detail: { ...latest, cast: latest.cast ?? [] }, clips, script, issue: undefined });
   };
 
   const getDetail = useCallback(() => state.current.detail, []);

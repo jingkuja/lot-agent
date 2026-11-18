@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicDramaIdSchema, comicDramaRevisionSchema, comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
+  comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema, comicDramaRevisionSchema,
+  comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
   comicDramaSetCurrentSchema, createComicDramaSeriesSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema,
   updateComicDramaSeriesSchema, type ComicDramaRepository,
 } from "@lot-agent/core/comic-drama";
+import { ComicLibraryError } from "./library-db.js";
 import { ComicDramaError } from "./repository.js";
 
 type Variables = { userId: string };
@@ -13,6 +15,7 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
   const app = new Hono<{ Variables: Variables }>();
   app.use("/series/*", bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) }));
   app.onError((error, c) => {
+    if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
     if (error instanceof ComicDramaError) {
       if (error.code === "REVISION_CONFLICT") return c.json({ code: error.code, currentRevision: error.currentRevision }, 409);
       return c.json({ code: error.code }, error.code === "NOT_FOUND" ? 404 : 400);
@@ -20,7 +23,7 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     console.error("[comic-drama] workspace request failed", { path: c.req.routePath, errorType: error.name });
     return c.json({ code: "TEMPORARILY_UNAVAILABLE" }, 503);
   });
-  const seriesId = (value: string) => {
+  const seriesId = (value: string | undefined) => {
     const parsed = comicDramaIdSchema.safeParse(value);
     if (!parsed.success) throw new ComicDramaError("NOT_FOUND");
     return parsed.data;
@@ -56,8 +59,38 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     }
     return c.json(await repo.update(owner, id, input.data));
   });
-  for (const [action, sequel] of [["copy", false], ["sequel", true]] as const) {
-    app.post(`/series/:id/${action}`, async c => c.json(await repo.derive(c.get("userId"), seriesId(c.req.param("id")), sequel), 201));
+  app.post("/series/:id/copy", async c => c.json(await repo.derive(c.get("userId"), seriesId(c.req.param("id")), false), 201));
+  app.post("/series/:id/sequel", async c => {
+    const body = await c.req.text();
+    let options: unknown;
+    try { options = body ? JSON.parse(body) : {}; }
+    catch { return c.json({ code: "INVALID_INPUT" }, 400); }
+    const input = comicSequelOptionsSchema.safeParse(options);
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.derive(c.get("userId"), seriesId(c.req.param("id")), true, input.data.inheritCastAndStyle), 201);
+  });
+  app.get("/series/:id/cast", async c => c.json(await repo.readCast(c.get("userId"), seriesId(c.req.param("id")))));
+  app.post("/series/:id/cast", async c => {
+    const input = comicCastAddSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const { expectedRevision, characterId, outfitId } = input.data;
+    return c.json(await repo.changeCast(c.get("userId"), seriesId(c.req.param("id")), expectedRevision,
+      { action: "add", characterId, outfitId }), 201);
+  });
+  app.patch("/series/:id/cast/:characterId", async c => {
+    const input = comicCastOutfitSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const characterId = seriesId(c.req.param("characterId"));
+    return c.json(await repo.changeCast(c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision,
+      { action: "outfit", characterId, outfitId: input.data.outfitId }));
+  });
+  for (const [method, suffix, action] of [["POST", "/sync", "sync"], ["DELETE", "", "remove"]] as const) {
+    app.on(method, "/series/:id/cast/:characterId" + suffix, async c => {
+      const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+      const characterId = seriesId(c.req.param("characterId"));
+      return c.json(await repo.changeCast(c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision, { action, characterId }));
+    });
   }
   app.post("/series/:id/archive", async c => {
     const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));

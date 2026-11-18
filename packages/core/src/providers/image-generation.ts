@@ -21,7 +21,7 @@ export interface ImageGenerationRequest {
 
 export interface ImageGenerationProvider {
   create(req: ImageGenerationRequest, options?: GenerationCallOptions): Promise<CreateResult>;
-  poll(taskId: string): Promise<PollResult>;
+  poll(taskId: string, options?: GenerationCallOptions): Promise<PollResult>;
 }
 
 /** Infrastructure is supplied by the server; receipts never contain model credentials. */
@@ -29,6 +29,7 @@ export interface ImageCallReceipt {
   state: "submitting" | "submitted" | "completed" | "failed" | "unknown";
   fingerprint: string;
   vendorId?: string;
+  gatewayRequestId?: string;
   result?: PollResult;
   error?: string;
 }

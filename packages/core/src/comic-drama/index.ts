@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { comicClipCastingSchema, type ComicCastChange, type ComicSeriesCast } from "./cast.js";
 
 export const COMIC_DRAMA_ROOT = "/comic-drama";
 export const COMIC_DRAMA_API_ROOT = "/api/comic-drama";
@@ -64,6 +65,7 @@ export const comicDramaClipDraftSchema = z.object({
   scene: z.string().trim().max(1000),
   shots: z.array(shot).max(3),
   lines: z.array(line).max(30),
+  cast: comicClipCastingSchema.optional(),
 }).strict().superRefine(({ shots, lines }, ctx) => {
   if (shots.length && shots.reduce((total, entry) => total + entry.durationShare, 0) !== 100) {
     ctx.addIssue({ code: "custom", path: ["shots"], message: "Shot duration shares must total 100" });
@@ -121,12 +123,12 @@ export type ComicDramaReorder = z.infer<typeof reorderComicDramaClipsSchema>;
 export type ComicDramaListQuery = z.infer<typeof comicDramaSeriesListSchema>;
 
 export type ComicDramaScript = { version: number; content: string };
-export type ComicDramaDetail = { series: ComicDramaSeries; clips: ComicDramaClip[]; script: ComicDramaScript | null };
+export type ComicDramaDetail = { series: ComicDramaSeries; clips: ComicDramaClip[]; script: ComicDramaScript | null; cast: ComicSeriesCast[] };
 export type ComicDramaListing = {
   entries: Array<ComicDramaSeries & { updatedAt: string; clipCount: number }>;
   nextCursor: string | null;
 };
-export type ComicDramaContent = Pick<ComicDramaDetail, "clips" | "script"> & { seriesRevision: number };
+export type ComicDramaContent = Pick<ComicDramaDetail, "clips" | "script" | "cast"> & { seriesRevision: number };
 
 export interface ComicDramaRepository {
   list(owner: string, query: ComicDramaListQuery): Promise<ComicDramaListing>;
@@ -134,7 +136,9 @@ export interface ComicDramaRepository {
   current(owner: string): Promise<string | null>;
   open(owner: string, seriesId: string): Promise<ComicDramaDetail>;
   create(owner: string, fields: ComicDramaSeriesInput): Promise<ComicDramaDetail>;
-  derive(owner: string, seriesId: string, sequel: boolean): Promise<ComicDramaDetail>;
+  derive(owner: string, seriesId: string, sequel: boolean, inheritCastAndStyle?: boolean): Promise<ComicDramaDetail>;
+  readCast(owner: string, seriesId: string): Promise<{ cast: ComicSeriesCast[]; seriesRevision: number }>;
+  changeCast(owner: string, seriesId: string, expectedRevision: number, change: ComicCastChange): Promise<ComicDramaContent>;
   update(owner: string, seriesId: string, fields: ComicDramaSeriesUpdate): Promise<ComicDramaSeries>;
   archive(owner: string, seriesId: string, expectedRevision: number): Promise<void>;
   remove(owner: string, seriesId: string, expectedRevision: number): Promise<void>;
@@ -147,3 +151,6 @@ export interface ComicDramaRepository {
 }
 
 export * from "./library.js";
+export * from "./cast.js";
+export * from "./generation.js";
+export * from "./timeline.js";

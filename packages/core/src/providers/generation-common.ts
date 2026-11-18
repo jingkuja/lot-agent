@@ -20,7 +20,7 @@ export interface ReferenceMedia {
 
 /** A vendor reference may be a URL or provider asset ID, singly or as a list. */
 export type ReferenceInput = string | string[];
-export interface CreateResult { taskId: string; status: string; progress: number; result?: PollResult }
+export interface CreateResult { taskId: string; status: string; progress: number; result?: PollResult; gatewayRequestId?: string }
 export interface GenerationCallOptions { signal?: AbortSignal; slot?: number }
 export interface PollResult {
   status: string;
@@ -141,7 +141,10 @@ export class HttpGenerationClient<Req extends { model?: string }> {
       signal: options?.signal,
     }, 0, "create");
     console.log("[generation.create] response", { status: res.status });
-    const text = await res.text();
+    const text = await res.text().catch(() => {
+      throw new ProviderError("generation", "create", res.ok ? "TRANSPORT_ERROR" : "HTTP_ERROR",
+        { httpStatus: res.status, gatewayRequestId: gatewayRequestId(res.headers), privateValues: [apiKey] });
+    });
     const realPerson = isRealPersonRejection(text);
     let json: Record<string, unknown>;
     try { json = JSON.parse(text); }
@@ -153,13 +156,15 @@ export class HttpGenerationClient<Req extends { model?: string }> {
     try { created = adapter.parseCreate(json); }
     catch { throw new ProviderError("generation", "create", "INVALID_RESPONSE", details); }
     if (!created.taskId) throw new ProviderError("generation", "create", realPerson ? "REAL_PERSON_REJECTED" : "INVALID_RESPONSE", details);
-    return created;
+    const requestId = details.gatewayRequestId;
+    return { ...created, ...(requestId && requestId !== apiKey ? { gatewayRequestId: requestId } : {}) };
   }
-  async poll(taskId: string): Promise<PollResult> {
+  async poll(taskId: string, options?: GenerationCallOptions): Promise<PollResult> {
     const { adapter, baseUrl, apiKey } = this.opts;
     const res = await this.request(`${baseUrl}${adapter.pollPath(taskId)}`, {
       method: "GET",
       headers: { ...this.opts.headers, Authorization: `Bearer ${apiKey}` },
+      signal: options?.signal,
     }, 1, "poll");
     let json: Record<string, unknown>;
     try {

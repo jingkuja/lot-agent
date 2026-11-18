@@ -24,7 +24,10 @@ export function marketingPoolIssue(limits: Pick<MarketingQueueLimits, "concurren
 }
 
 export const DIGITAL_PRESENTER_TASK = "digital-presenter.video";
-/** Long renders (marketing videos and digital presenters) must not occupy the ordinary task worker. */
+export const COMIC_IMAGE_TASK = "comic-drama.image";
+export const COMIC_VIDEO_TASK = "comic-drama.video";
+export const isComicMediaTask = (type: string) => type === COMIC_IMAGE_TASK || type === COMIC_VIDEO_TASK;
+/** Long media generation must not occupy the ordinary task worker. */
 export function taskQueueName(type: string): string {
-  return type === "marketing.video" || type === DIGITAL_PRESENTER_TASK ? MARKETING_VIDEO_QUEUE : DEFAULT_TASK_QUEUE;
+  return type === "marketing.video" || type === DIGITAL_PRESENTER_TASK || isComicMediaTask(type) ? MARKETING_VIDEO_QUEUE : DEFAULT_TASK_QUEUE;
 }

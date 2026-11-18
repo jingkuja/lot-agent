@@ -15,6 +15,8 @@ const errors: Record<string, string> = {
   MEDIA_TOO_LONG: "音频超过时长限制",
   UNSUPPORTED_MEDIA: "文件格式不支持或内容损坏",
   NOT_FOUND: "素材或角色不存在",
+  FRAME_OUT_OF_RANGE: "截帧时间超出视频范围",
+  FRAME_UNAVAILABLE: "无法读取此时间点的画面",
 };
 export function libraryError(error: unknown) {
   return error instanceof ApiClientError && error.code ? errors[error.code] ?? "操作失败，请重试" : "操作失败，请重试";
@@ -48,7 +50,9 @@ export function DictionaryOptions({ choices, existing, empty, ...props }: Choice
   </select>;
 }
 
-export function MediaPreview({ media, title, thumbOnly = false }: { media: ComicMedia; title: string; thumbOnly?: boolean }) {
+export function MediaPreview({ media, title, thumbOnly = false, openOriginal = false }: {
+  media: Pick<ComicMedia, "id" | "hasThumbnail" | "durationMs">; title: string; thumbOnly?: boolean; openOriginal?: boolean;
+}) {
   const { t } = useI18n();
   const [attempt, remake] = useState(0);
   const [state, setState] = useState<ComicMediaLinks | "error" | null>(null);
@@ -71,9 +75,12 @@ export function MediaPreview({ media, title, thumbOnly = false }: { media: Comic
     remake(i => i + 1);
   }}>{t("重新获取预览")}</button>;
   if (!state) return <div className="comic-media-well" aria-label={t("加载中…")} />;
-  if (media.hasThumbnail) return <div className="comic-media-well">
-    <img src={state.thumbnailUrl ?? undefined} alt={title} loading="lazy" onLoad={() => { recovered.current = false; }} onError={failure} />
-  </div>;
+  if (media.hasThumbnail) {
+    const image = <img src={state.thumbnailUrl ?? undefined} alt={title} loading="lazy" onLoad={() => { recovered.current = false; }} onError={failure} />;
+    return openOriginal
+      ? <a href={state.url} target="_blank" rel="noreferrer" aria-label={t("查看原图")} className="comic-media-well">{image}</a>
+      : <div className="comic-media-well">{image}</div>;
+  }
   if (thumbOnly) return null;
   return <div className="comic-audio">
     <audio controls preload="none" src={state.url} aria-label={title}

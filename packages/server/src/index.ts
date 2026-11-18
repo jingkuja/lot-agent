@@ -67,13 +67,16 @@ import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
-import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH } from "@lot-agent/core/comic-drama";
+import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicVideoProfile } from "@lot-agent/core/comic-drama";
 import { PgComicDramaRepository } from "./comic-drama/repository.js";
 import { PgComicDictionary } from "./comic-drama/dictionary.js";
 import { PgComicLibrary } from "./comic-drama/library-repository.js";
 import { ComicMediaLibrary } from "./comic-drama/media-library.js";
 import { createComicLibraryRoutes } from "./comic-drama/library-routes.js";
 import { createComicDramaRoutes } from "./comic-drama/routes.js";
+import { createComicGenerationRoutes } from "./comic-drama/generation-routes.js";
+import { PgComicGeneration } from "./comic-drama/generation-repository.js";
+import { resolvePricing, resolveProvider } from "./models/catalog.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -137,7 +140,11 @@ async function main() {
     if (diagnosingTasks) return;
     diagnosingTasks = true;
     try {
-      if (service.jobQueue instanceof BullmqJobQueue) await service.jobQueue.diagnosePending(3 * 60 * 1000);
+      if (service.jobQueue instanceof BullmqJobQueue) {
+        const queue = service.jobQueue;
+        await queue.diagnosePending(3 * 60 * 1000);
+        await new PgComicGeneration(service.db.pool).reconcileInterrupted(id => queue.canResumePersisted(id));
+      }
     } catch {
       console.warn("[task-queue] pending diagnostics unavailable");
     } finally { diagnosingTasks = false; }
@@ -409,14 +416,43 @@ async function main() {
       `${COMIC_DRAMA_API_ROOT}/characters/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/upload`,
     ], uploadRateLimit);
     const library = new PgComicLibrary(service.db.pool);
+    const series = new PgComicDramaRepository(service.db.pool);
     const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), library);
     app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
     app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
-    app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(new PgComicDramaRepository(service.db.pool), async (owner, model) => {
+    app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
       const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
       const catalog = await service.getUserModelCatalog(owner, key);
       return catalog?.video.some(item => item.id === model) === true;
     }));
+    if (service.jobQueue instanceof BullmqJobQueue) {
+      const repo = new PgComicGeneration(service.db.pool);
+      const pruneQuotes = () => void repo.pruneExpiredQuotes().catch(() => console.warn("[comic-drama] quote cleanup unavailable"));
+      pruneQuotes();
+      setInterval(pruneQuotes, 60 * 60_000).unref();
+      app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
+        pool: service.db.pool, library, series, media: comicMedia, queue: service.jobQueue,
+        quotePrice: async (owner, modelId = process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2") => {
+          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+          if (!key || resolveProvider(service.modelCatalog, modelId, "image") !== "openai-images") return null;
+          const price = service.modelCatalog.pricing[modelId];
+          const amountMicros = Math.round((price?.unitPrice ?? 0) * 1_000_000);
+          if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0 || amountMicros > Number.MAX_SAFE_INTEGER / 10) return null;
+          const catalog = await service.getUserModelCatalog(owner, key);
+          return catalog?.image.some(item => item.id === modelId) ? { modelId, amountMicros } : null;
+        },
+        quoteVideoPrice: async (owner, modelId) => {
+          if (!comicVideoProfile(modelId) || resolveProvider(service.modelCatalog, modelId, "video") !== "openai-video") return null;
+          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+          if (!key) return null;
+          const { unitPrice } = resolvePricing(service.modelCatalog, modelId, "video");
+          const amountMicros = Math.round(unitPrice * 1_000_000);
+          if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0 || amountMicros > Number.MAX_SAFE_INTEGER / 150) return null;
+          const catalog = await service.getUserModelCatalog(owner, key);
+          return catalog?.video.some(item => item.id === modelId) ? { modelId, amountMicros, unit: "second" } : null;
+        },
+      }));
+    }
   }
 
   // /api/balance alias → same balance logic, user-scoped

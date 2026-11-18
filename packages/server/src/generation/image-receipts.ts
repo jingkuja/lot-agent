@@ -32,11 +32,13 @@ export class DurableImageProvider implements ImageGenerationProvider {
     try {
       created = await this.provider.create(request, options);
     } catch (error) {
-      const e = (error ?? {}) as { confirmedRejection?: boolean; httpStatus?: number };
-      const rejected = e.confirmedRejection === true || (!!e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500 && e.httpStatus !== 408);
+      const e = (error ?? {}) as { confirmedRejection?: boolean; httpStatus?: number; gatewayRequestId?: string };
+      const rejected = e.confirmedRejection === true ||
+        (!!e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500 && ![408, 409, 425].includes(e.httpStatus));
       const safe = /CONTENT_BLOCKED|REAL_PERSON_REJECTED/.exec(error instanceof Error ? error.message : "")?.[0] ?? "IMAGE_GENERATION_FAILED";
       try {
-        await this.store.save(slot, { fingerprint: this.fingerprint, state: rejected ? "failed" : "unknown", error: safe });
+        await this.store.save(slot, { fingerprint: this.fingerprint, state: rejected ? "failed" : "unknown",
+          error: safe, gatewayRequestId: e.gatewayRequestId });
       } catch {
         throw new ImageResultUnknown();
       }
@@ -47,7 +49,7 @@ export class DurableImageProvider implements ImageGenerationProvider {
     try {
       await this.store.save(slot, {
         fingerprint: this.fingerprint, state: created.result ? "completed" : "submitted",
-        vendorId: created.result ? undefined : created.taskId, result: created.result,
+        vendorId: created.result ? undefined : created.taskId, result: created.result, gatewayRequestId: created.gatewayRequestId,
       });
     } catch {
       throw new ImageResultUnknown();
@@ -55,16 +57,16 @@ export class DurableImageProvider implements ImageGenerationProvider {
     return { taskId: `receipt:${slot}`, status: created.result ? "completed" : "submitted", progress: created.progress };
   }
 
-  async poll(id: string): Promise<PollResult> {
+  async poll(id: string, options?: GenerationCallOptions): Promise<PollResult> {
     if (/^images_/.test(id)) throw new ImageResultUnknown();
     const match = /^receipt:(\d+)$/.exec(id);
-    if (!match) return this.provider.poll(id); // Real async IDs saved before the receipt migration.
+    if (!match) return this.provider.poll(id, options); // Real async IDs saved before the receipt migration.
     const slot = Number(match[1]);
     const receipt = await this.store.get(slot);
     if (!receipt || receipt.fingerprint !== this.fingerprint) throw new ImageResultUnknown();
     if (receipt.result) return receipt.result;
     if (receipt.state !== "submitted" || !receipt.vendorId) throw new ImageResultUnknown();
-    const result = await this.provider.poll(receipt.vendorId);
+    const result = options ? await this.provider.poll(receipt.vendorId, options) : await this.provider.poll(receipt.vendorId);
     if (result.status === "completed") await this.store.save(slot, { ...receipt, state: "completed", result });
     return result;
   }
@@ -81,7 +83,7 @@ export class PgImageCallStore implements ImageCallStore {
     return !!result.rowCount;
   }
   async get(slot: number): Promise<ImageCallReceipt | null> {
-    const { rows } = await this.pool.query(`SELECT state,fingerprint,vendor_id AS "vendorId",result,error
+    const { rows } = await this.pool.query(`SELECT state,fingerprint,vendor_id AS "vendorId",gateway_request_id AS "gatewayRequestId",result,error
       FROM image_call_receipts WHERE task_id=$1 AND user_id=$2 AND slot=$3`, [this.taskId, this.owner, slot]);
     return rows[0] ?? null;
   }
@@ -107,11 +109,11 @@ export class PgImageCallStore implements ImageCallStore {
       }
       result = { ...result, url: urls[0], urls };
     }
-    const saved = await this.pool.query(`UPDATE image_call_receipts SET state=$4,vendor_id=$5,result=$6,error=$7,updated_at=now()
+    const saved = await this.pool.query(`UPDATE image_call_receipts SET state=$4,vendor_id=$5,result=$6,error=$7,gateway_request_id=$10,updated_at=now()
       WHERE task_id=$1 AND user_id=$2 AND slot=$3 AND fingerprint=$8
       AND ((claim_id=$9 AND state='submitting') OR (state='submitted' AND $4='completed')) RETURNING task_id`,
     [this.taskId, this.owner, slot, receipt.state, receipt.vendorId ?? null, result ?? null, receipt.error ?? null,
-      receipt.fingerprint, this.claimId]);
+      receipt.fingerprint, this.claimId, receipt.gatewayRequestId ?? null]);
     if (!saved.rowCount) {
       const current = await this.get(slot);
       if (current?.state !== "completed" || current.fingerprint !== receipt.fingerprint) throw new ImageResultUnknown();

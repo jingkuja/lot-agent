@@ -1,4 +1,4 @@
-/** Isolated W2 verification. Uses the real workspace routes and PostgreSQL, with fixture auth and model permissions. */
+/** Isolated workspace verification using real routes and PostgreSQL, with optional W5 Redis and a fake image gateway. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -18,6 +18,9 @@ import { PgComicLibrary } from "../src/comic-drama/library-repository.js";
 import { ComicMediaLibrary } from "../src/comic-drama/media-library.js";
 import { createComicLibraryRoutes } from "../src/comic-drama/library-routes.js";
 import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-drama-library.js";
+import { verifyComicCast } from "./fixtures/check-comic-drama-cast.js";
+import { mountComicGenerationFixture, verifyComicGeneration } from "./fixtures/check-comic-drama-generation.js";
+import { verifyComicVideo, w6Kling } from "./fixtures/check-comic-drama-video.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 
@@ -39,11 +42,14 @@ app.use(`${COMIC_DRAMA_API_ROOT}/*`, async (c, next) => {
   c.set("userId", token === "Bearer fixture-one" ? owner : other);
   await next();
 });
-app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(new PgComicDramaRepository(pool), async (user, id) => user === owner && id === model));
+const seriesRepo = new PgComicDramaRepository(pool);
+app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(seriesRepo, async (user, id) => user === owner && [model, w6Kling].includes(id)));
 const fixtureMediaDir = await mkdtemp(join(tmpdir(), "lot-comic-library-"));
 const library = new PgComicLibrary(pool);
 let clockOffset = 0;
-const files = new ComicMediaLibrary(fixtureMediaDir, library, { masterKey: "cd".repeat(32), now: () => Date.now() + clockOffset });
+const files = new ComicMediaLibrary(fixtureMediaDir, library, {
+  masterKey: "cd".repeat(32), now: () => Date.now() + clockOffset, publicBaseUrl: "https://comic-fixture.invalid",
+});
 app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(pool), files));
 app.route(COMIC_MEDIA_PATH.slice(0, -1), files.publicRoutes({
   resolve: async token => token === "fixture-one" ? { userId: owner } : token === "fixture-two" ? { userId: other } : null,
@@ -51,7 +57,7 @@ app.route(COMIC_MEDIA_PATH.slice(0, -1), files.publicRoutes({
 const fixtureUser = { id: owner, name: "Comic fixture" };
 app.get("/api/auth/me", c => c.json(fixtureUser));
 app.get("/api/auth/mode", c => c.json({ debug: true, user: fixtureUser }));
-app.get("/api/models", c => c.json({ llm: [], image: [], video: [{ id: model, name: model }] }));
+app.get("/api/models", c => c.json({ llm: [], image: [], video: [model, w6Kling].map(id => ({ id, name: id })) }));
 app.get("/api/agents", c => c.json([{ id: "general", name: "通用助手", type: "general", installed: true }]));
 app.get("/api/conversations", c => c.json({ items: [], nextCursor: null }));
 app.get("/api/conversations/projects", c => c.json([]));
@@ -69,6 +75,7 @@ async function json<T>(path: string, method = "GET", body?: unknown, status = 20
   return data as T;
 }
 
+let generation: Awaited<ReturnType<typeof mountComicGenerationFixture>> | undefined;
 try {
   const count = await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public'");
   assert.equal(count.rows[0].n, 0, "Test database must be empty");
@@ -80,6 +87,13 @@ try {
   await runMigrations(pool, migrations);
   assert.equal((await pool.query("SELECT legacy_draft FROM public.cd_series")).rows[0].legacy_draft, "retained");
   await pool.query("INSERT INTO users(id,name) VALUES ($1,'Owner one'),($2,'Owner two')", [owner, other]);
+  const redisUrl = process.env.COMIC_DRAMA_TEST_REDIS_URL;
+  if (redisUrl) {
+    generation = await mountComicGenerationFixture({
+      app, database: url, redisUrl, pool, library, series: seriesRepo, media: files, mediaRoot: fixtureMediaDir,
+      receiptPath: join(fixtureMediaDir, "receipts"), owner,
+    });
+  }
   assert.equal((await req("", "GET", undefined, "bad")).status, 401);
   assert.equal((await req("", "POST", { ...fields, ownerId: other })).status, 400);
   assert.equal((await req("", "POST", fields, "fixture-two")).status, 400);
@@ -126,6 +140,9 @@ try {
   console.log("PASS W2 PG/HTTP: migrations, auth, model eligibility, owner isolation, concurrent CAS, order, script, copy, sequel, archive, delete");
 
   await verifyComicLibrary(app, ms => { clockOffset += ms; });
+  await verifyComicCast(app);
+  if (generation) await verifyComicGeneration(app, pool, generation);
+  const videoEpisode = generation ? await verifyComicVideo(app, pool, generation.video) : null;
 
   if (process.argv.includes("--ui")) {
     const project = fileURLToPath(new URL("../../../packages/web", import.meta.url));
@@ -178,6 +195,8 @@ try {
         await page.getByRole("button", { name: /剧本/ }).click();
         await page.getByLabel("剧本正文").fill("雨夜的便利店仍在营业。");
         await page.getByRole("button", { name: "历史剧集", exact: true }).click();
+        await page.getByRole("textbox", { name: "搜索剧集" }).fill("雨夜便利店");
+        await page.getByRole("button", { name: "搜索", exact: true }).click();
         await page.getByRole("button", { name: /雨夜便利店/ }).first().click();
         await page.getByRole("heading", { name: "雨夜便利店", exact: true }).waitFor();
         await page.reload();
@@ -254,6 +273,147 @@ try {
         await page.goto(deepLink);
         console.log("PASS W3 Web: custom dictionary, character and outfit, custom slot upload, thumbnail, material replacement and version history");
 
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const steps = page.getByRole("navigation", { name: "制作步骤" });
+        await steps.getByRole("button", { name: /选角/ }).click();
+        await page.getByRole("button", { name: /选择角色/ }).click();
+        await page.getByLabel("角色名称").selectOption({ label: "W3 角色" });
+        await page.getByLabel("造型套装").selectOption({ label: "雨衣" });
+        await page.getByRole("button", { name: "锁定造型" }).click();
+        const castCard = page.locator(".comic-cast-card").filter({ hasText: "W3 角色" });
+        await castCard.getByText(/版本 1/).waitFor();
+        await steps.getByRole("button", { name: /分镜/ }).click();
+        await page.getByLabel("添加出镜角色").selectOption({ label: "W3 角色" });
+        await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
+
+        await page.getByRole("button", { name: "历史剧集", exact: true }).click();
+        const episodeRow = page.locator(".comic-history-list article").filter({ hasText: "W2 浏览器剧集" });
+        await episodeRow.getByRole("button", { name: "续写下一集" }).click();
+        assert.equal(await page.getByRole("checkbox", { name: "沿用上一集的角色与画风" }).isChecked(), true);
+        await page.getByRole("button", { name: "创建并打开", exact: true }).click();
+        await page.getByRole("heading", { name: "W2 浏览器剧集 #2", exact: true }).waitFor();
+        await steps.getByRole("button", { name: /选角/ }).click();
+        await castCard.getByText(/版本 1/).waitFor();
+        const sequelLink = page.url();
+        await page.getByRole("button", { name: "角色素材库", exact: true }).click();
+        await page.getByRole("button", { name: "W3 角色", exact: true }).click();
+        await page.getByRole("button", { name: /上传角色图片/ }).click();
+        await page.getByLabel("造型槽位").selectOption("rain_hood");
+        await page.getByLabel("选择文件").setInputFiles({ ...fixtureImage, buffer: await comicFixturePng("#8a4747") });
+        await page.getByRole("dialog").getByRole("button", { name: "上传", exact: true }).click();
+        await page.locator(".comic-library-card").getByText(/版本 2/).waitFor();
+        await page.goto(sequelLink);
+        await steps.getByRole("button", { name: /选角/ }).click();
+        await castCard.getByText("角色库有更新", { exact: true }).waitFor();
+        await castCard.getByText(/版本 1/).waitFor();
+        await castCard.getByRole("button", { name: "同步最新造型" }).click();
+        await castCard.getByText(/版本 2/).waitFor();
+        await page.goto(deepLink);
+        await steps.getByRole("button", { name: /选角/ }).click();
+        await castCard.getByText(/版本 1/).waitFor();
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+        assert.ok(await page.evaluate(() => {
+          const main = document.querySelector(".comic-workspace")!;
+          return main.scrollWidth <= main.clientWidth + 1;
+        }));
+        if (process.env.COMIC_CAST_SCREENSHOT) {
+          await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLImageElement>(".comic-cast-card img")).some(img => img.naturalWidth > 0));
+          await page.screenshot({ path: process.env.COMIC_CAST_SCREENSHOT });
+        }
+        console.log("PASS W4 Web: cast, storyboard binding, locked sequel, library update and episode-scoped sync");
+
+        if (generation) {
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await steps.getByRole("button", { name: /生成/ }).click();
+          const original = generation.counts.submits;
+          await page.getByRole("button", { name: "预览首帧费用", exact: true }).click();
+          const fee = page.getByRole("dialog", { name: "生成费用预览" });
+          await fee.getByText("预估合计").waitFor();
+          await fee.getByText(/参考图版本 · V1/).waitFor();
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          assert.ok(await fee.evaluate((element: HTMLElement) => element.getBoundingClientRect().width < innerWidth));
+          if (process.env.COMIC_GENERATION_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_GENERATION_SCREENSHOT });
+          await fee.getByRole("button", { name: "取消", exact: true }).click();
+          await fee.waitFor({ state: "hidden" });
+          assert.equal(generation.counts.submits, original);
+
+          await page.setViewportSize({ width: 1440, height: 900 });
+          for (const box of await page.getByRole("checkbox", { name: /^选择分镜/ }).all()) await box.check();
+          await page.getByRole("button", { name: "预览批量费用（2）", exact: true }).click();
+          await fee.getByText("fixture-image", { exact: false }).nth(1).waitFor();
+          await fee.getByRole("button", { name: "确认费用并生成" }).evaluate((button: HTMLElement) => { button.click(); button.click(); });
+          const batch = page.locator(".comic-edit-card").filter({ has: page.getByRole("heading", { name: "批量生成进度" }) });
+          await batch.getByText("图片已入库", { exact: true }).nth(1).waitFor();
+          assert.equal(generation.counts.submits, original + 2);
+          await page.getByRole("img", { name: "首帧图片" }).waitFor();
+          await page.getByRole("button", { name: "确认此首帧" }).click();
+          await page.getByText("已确认首帧", { exact: true }).waitFor();
+          await page.reload();
+          await steps.getByRole("button", { name: /生成/ }).click();
+          await page.getByText("已确认首帧", { exact: true }).waitFor();
+
+          await page.getByRole("button", { name: "角色素材库", exact: true }).click();
+          await page.getByRole("button", { name: "W3 角色", exact: true }).click();
+          await page.getByRole("button", { name: "表情", exact: true }).click();
+          await page.getByRole("button", { name: "生成表情", exact: true }).click();
+          const expressionPicker = page.getByRole("dialog", { name: "生成表情", exact: true });
+          await expressionPicker.getByRole("combobox").selectOption("smile");
+          await expressionPicker.getByRole("button", { name: "预览费用", exact: true }).click();
+          await fee.getByRole("button", { name: "确认费用并生成" }).click();
+          await page.getByRole("img", { name: "微笑" }).waitFor();
+          assert.equal(generation.counts.submits, original + 3);
+          await page.goto(deepLink);
+          console.log("PASS W5 Web: cancel zero submits, batch pricing, double click, private previews, durable approval and generated expression");
+        }
+
+        if (generation && videoEpisode) {
+          await page.getByRole("button", { name: "历史成片", exact: true }).click();
+          await page.getByRole("heading", { name: "历史成片", exact: true }).waitFor();
+          await page.locator('input[name="seriesQuery"]').fill("W6 video fixture");
+          await page.locator('select[name="adopted"]').selectOption("true");
+          await Promise.all([
+            page.waitForResponse((response: { url(): string; ok(): boolean }) => response.ok() && /\/comic-drama\/videos\?.*adopted=true/.test(response.url())),
+            page.getByRole("button", { name: "筛选", exact: true }).click(),
+          ]);
+          const adopted = page.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 1 · 已采用" });
+          await adopted.getByText("W6 video fixture · 版本 1 · 已采用").waitFor();
+          const open = adopted.getByRole("button", { name: "打开对应分镜" });
+          await open.click();
+          await page.waitForURL("**/series/" + videoEpisode);
+          await page.getByRole("button", { name: "用已确认首帧", exact: true }).waitFor();
+          await page.getByLabel("为已采用的分镜生成新版").check();
+          const beforeVideo = generation.video.submitted.length;
+          const previewVideo = page.getByRole("button", { name: "预览视频费用", exact: true });
+          const fee = page.getByRole("dialog", { name: "生成费用预览" });
+          await previewVideo.click();
+          await fee.getByText(/4 秒视频/).waitFor();
+          await fee.getByRole("button", { name: "取消", exact: true }).click();
+          assert.equal(generation.video.submitted.length, beforeVideo);
+          await previewVideo.click();
+          await fee.getByRole("button", { name: "确认费用并生成", exact: true }).click();
+          const newest = page.locator(".comic-video-card").filter({ hasText: "版本 2" });
+          await newest.getByText("视频已入库", { exact: true }).waitFor();
+          await newest.getByRole("button", { name: "采用此版本", exact: true }).click();
+          await newest.getByText("版本 2 · 已采用", { exact: true }).waitFor();
+          assert.equal(generation.video.submitted.length, beforeVideo + 1);
+          await newest.locator("video").evaluate((player: HTMLVideoElement) => { player.preload = "metadata"; player.load(); });
+          await page.waitForFunction(() => Array.from(document.querySelectorAll("video")).some(player => player.videoWidth === 320 && player.duration === 4));
+          await newest.getByRole("button", { name: "截帧另存", exact: true }).click();
+          const frame = page.getByRole("dialog", { name: "截帧另存", exact: true });
+          await frame.getByLabel("素材名称").fill("W6 界面截帧");
+          await frame.getByRole("button", { name: "保存", exact: true }).click();
+          await newest.getByText("已保存截帧", { exact: true }).waitFor();
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          if (process.env.COMIC_VIDEO_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_VIDEO_SCREENSHOT, fullPage: true });
+          await page.goto(deepLink);
+          await page.setViewportSize({ width: 1440, height: 900 });
+          console.log("PASS W6 Web: adopted filter, reopen clip, video quote cancel, regeneration, playback, adoption and frame save");
+        }
+
         const desktopBinary = process.env.COMIC_DRAMA_ELECTRON_PATH;
         if (desktopBinary) {
           const profile = await mkdtemp(join(tmpdir(), "comic-drama-desktop-"));
@@ -275,16 +435,41 @@ try {
               await desktopPage.getByRole("heading", { name: "W2 浏览器剧集" }).waitFor();
               assert.ok(await desktopPage.evaluate(() => Boolean((window as unknown as { lotDesktop?: unknown }).lotDesktop)));
               assert.equal(await desktopPage.getByLabel("场景", { exact: true }).inputValue(), "本地冲突版本");
+              await desktopPage.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /选角/ }).click();
+              const desktopCast = desktopPage.locator(".comic-cast-card").filter({ hasText: "W3 角色" });
+              await desktopCast.getByText(/版本 1/).waitFor();
+              await desktopCast.getByText("角色库有更新", { exact: true }).waitFor();
+              if (generation) {
+                await desktopPage.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /生成/ }).click();
+                await desktopPage.getByText("已确认首帧", { exact: true }).waitFor();
+                await desktopPage.waitForFunction(() => Array.from(document.images).some(img => img.alt === "首帧图片" && img.naturalWidth === 480));
+                console.log("PASS W5 Electron: signed generated first frame and persisted approval");
+              }
+              if (videoEpisode) {
+                await desktopPage.getByRole("button", { name: "历史成片", exact: true }).click();
+                const video = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 2 · 已采用" }).locator("video");
+                await video.evaluate((player: HTMLVideoElement) => { player.preload = "metadata"; player.load(); });
+                await desktopPage.waitForFunction(() => Array.from(document.querySelectorAll("video")).some(player => player.videoWidth === 320));
+                console.log("PASS W6 Electron: history and signed video playback");
+              }
               await desktopPage.getByRole("button", { name: "素材库", exact: true }).click();
               await desktopPage.waitForFunction(() => Array.from(document.images).some(img => img.alt === "W3 夜景" && img.naturalWidth === 480));
-              console.log("PASS W2/W3 Electron: desktop preload, nested workspace deep link and signed media preview through loopback");
+              console.log("PASS W2–W4 Electron: preload, deep link, locked cast snapshot and signed media preview through loopback");
             } finally { await desktop.close(); }
           } finally { await rm(profile, { recursive: true, force: true }); }
         }
-        for (const [locale, label] of [["en", "Scene"], ["id", "Adegan"]]) {
+        for (const [locale, label, casting, generate, firstFrame] of [
+          ["en", "Scene", "Add a character to the clip", "Generate", "Generate first frames"],
+          ["id", "Adegan", "Tambahkan karakter ke klip", "Buat", "Buat bingkai awal"],
+        ]) {
           await page.evaluate((next: string) => localStorage.setItem("lot:language", next), locale);
           await page.reload();
           await page.getByLabel(label, { exact: true }).waitFor();
+          await page.getByLabel(casting, { exact: true }).waitFor();
+          if (generation) {
+            await page.locator(".comic-steps").getByRole("button", { name: new RegExp(generate) }).click();
+            await page.getByRole("heading", { name: firstFrame, exact: true }).waitFor();
+          }
         }
         await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
         enabled = false;
@@ -299,6 +484,7 @@ try {
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   }
 } finally {
+  await generation?.close();
   await pool.end();
   await rm(fixtureMediaDir, { recursive: true, force: true });
 }

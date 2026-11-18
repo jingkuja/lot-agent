@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ComicDramaListing } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
+import { LibraryDialog } from "./LibraryParts.js";
 import { comicDramaApi } from "./api.js";
 
 type Entry = ComicDramaListing["entries"][number];
@@ -8,7 +9,7 @@ type Entry = ComicDramaListing["entries"][number];
 export function SeriesHistory({ busy, open, derive, change }: {
   busy: boolean;
   open: (id: string) => void;
-  derive: (id: string, action: "copy" | "sequel") => void;
+  derive: (id: string, action: "copy" | "sequel", inherit?: boolean) => Promise<boolean>;
   change: (entry: Entry, action: "archive" | "remove") => Promise<boolean>;
 }) {
   const { t, locale } = useI18n();
@@ -19,6 +20,7 @@ export function SeriesHistory({ busy, open, derive, change }: {
   const [archived, setArchived] = useState(false);
   const [cursors, setCursors] = useState<string[]>([]);
   const [refresh, setRefresh] = useState(0);
+  const [sequel, setSequel] = useState<Entry | null>(null);
   const cursor = cursors.at(-1);
   useEffect(() => {
     const controller = new AbortController();
@@ -53,14 +55,20 @@ export function SeriesHistory({ busy, open, derive, change }: {
         </button>
         <div className="comic-actions">
           {!entry.archivedAt && <>
-            <button type="button" disabled={busy} onClick={() => derive(entry.id, "copy")}>{t("复制剧集")}</button>
-            <button type="button" disabled={busy} onClick={() => derive(entry.id, "sequel")}>{t("续写下一集")}</button>
+            <button type="button" disabled={busy} onClick={() => void derive(entry.id, "copy")}>{t("复制剧集")}</button>
+            <button type="button" disabled={busy} onClick={() => setSequel(entry)}>{t("续写下一集")}</button>
             <button type="button" disabled={busy} onClick={() => void update(entry, "archive")}>{t("归档")}</button>
           </>}
           <button type="button" disabled={busy} onClick={() => void update(entry, "remove")}>{t("删除")}</button>
         </div>
       </article>)}
     </div>}
+    {sequel && <LibraryDialog title={t("续写下一集")} submitLabel={t("创建并打开")} close={() => setSequel(null)} save={async form => {
+      if (!await derive(sequel.id, "sequel", form.get("inherit") === "on")) throw new Error("Sequel could not be created");
+    }}>
+      <p>{sequel.title}</p>
+      <label className="comic-sequel-option"><input type="checkbox" name="inherit" defaultChecked />{t("沿用上一集的角色与画风")}</label>
+    </LibraryDialog>}
     {(!!cursor || !!result?.nextCursor) && <div className="comic-actions">
       <button type="button" disabled={!cursor} onClick={() => setCursors(value => value.slice(0, -1))}>{t("上一页")}</button>
       <button type="button" disabled={!result?.nextCursor} onClick={() => {

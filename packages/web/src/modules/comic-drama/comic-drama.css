@@ -133,3 +133,48 @@
 }
 .comic-dictionary-list small { display: block; margin-top: 4px; }
 .comic-dictionary-list code { font-size: 0.85em; color: var(--text-secondary); }
+
+.comic-cast-heading, .comic-cast-card header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.comic-cast-heading { margin-bottom: 14px; }
+.comic-cast-heading h2, .comic-cast-card h3, .comic-cast-card p { margin: 0; }
+.comic-cast-list { display: grid; gap: 14px; }
+.comic-cast-card { padding: 16px; display: grid; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+.comic-cast-card p, .comic-cast-card figcaption { color: var(--text-secondary); }
+.comic-cast-update { padding: 4px 7px; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); }
+.comic-cast-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 122px), 1fr)); gap: 10px; }
+.comic-cast-assets:empty { display: none; }
+.comic-cast-assets figure { margin: 0; min-width: 0; }
+.comic-cast-assets figcaption { margin-top: 4px; overflow-wrap: anywhere; }
+.comic-actor-add { margin-top: 10px; }
+.comic-workspace .comic-sequel-option { display: flex; align-items: center; gap: 9px; }
+.comic-dialog .comic-sequel-option input { width: auto; }
+
+.comic-generation-picker { align-self: start; }
+.comic-generation-targets, .comic-generation-status-list, .comic-quote-list { list-style: none; padding: 0; margin: 0; }
+.comic-generation-targets { display: grid; gap: 6px; max-height: 50vh; overflow: auto; }
+.comic-generation-targets li, .comic-generation-status-list li { display: flex; align-items: center; gap: 10px; }
+.comic-generation-targets li button { flex: 1; min-width: 0; text-align: start; overflow-wrap: anywhere; }
+.comic-generation-targets button[aria-pressed=true] { border-color: var(--accent); background: var(--bg-hover); }
+.comic-generation-results { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.comic-generation-note, .comic-quote-list small { color: var(--text-secondary); font-size: .85rem; }
+.comic-generation-status-list li { padding: 8px 0; flex-wrap: wrap; }
+.comic-generation-status-list li + li { border-top: 1px solid var(--border); }
+.comic-take-status { color: var(--text-secondary); }
+.comic-character-jobs { margin-bottom: 16px; }
+.comic-quote { width: min(540px, calc(100% - 26px)); max-height: 90vh; margin: auto; overflow: auto; }
+.comic-quote-list li, .comic-quote-total { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.comic-quote-list li > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.comic-quote-amount, .comic-quote-total { font-variant-numeric: tabular-nums; }
+.comic-quote-amount { white-space: nowrap; }
+.comic-quote-total { border-bottom: 0; padding-bottom: 0; }
+
+.comic-generation-modes { margin-bottom: 14px; }
+.comic-generation-modes button[aria-pressed=true] { border-color: var(--accent); background: var(--bg-hover); }
+.comic-video-replace { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.comic-video-references { margin-top: 10px; }
+.comic-video-references summary { cursor: pointer; }
+.comic-video-references > div { margin-top: 8px; }
+.comic-video-card video { width: 100%; max-height: 340px; background: var(--bg-hover); border-radius: 8px; }
+.comic-video-card a { color: var(--accent); overflow-wrap: anywhere; }

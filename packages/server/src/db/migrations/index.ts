@@ -127,6 +127,9 @@ export const migrations: Migration[] = [
   imageAssetRoles,
   comicDramaWorkspace,
   comicDramaLibrary,
+  comicDramaCast,
+  comicDramaGeneration,
+  comicDramaVideo,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -174,3 +177,6 @@ import { imageCallReceipts } from "./0082-image-call-receipts.js";
 import { imageAssetRoles } from "./0083-image-asset-roles.js";
 import { comicDramaWorkspace } from "./0084-comic-drama-workspace.js";
 import { comicDramaLibrary } from "./0085-comic-drama-library.js";
+import { comicDramaCast } from "./0086-comic-drama-cast.js";
+import { comicDramaGeneration } from "./0087-comic-drama-generation.js";
+import { comicDramaVideo } from "./0088-comic-drama-video.js";

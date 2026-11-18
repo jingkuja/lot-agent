@@ -56,6 +56,17 @@ describe("durable image calls", () => {
     expect(provider.create).toHaveBeenCalledTimes(1);
   });
 
+  it("retains the gateway trace and prevents another POST for an ambiguous conflict", async () => {
+    const { store, rows } = memory();
+    const provider = { create: vi.fn(async () => {
+      throw Object.assign(new Error("gateway conflict"), { httpStatus: 409, gatewayRequestId: "gateway-123" });
+    }), poll: vi.fn() };
+    await expect(new DurableImageProvider(provider, store, "scope").create(request)).rejects.toBeInstanceOf(ImageResultUnknown);
+    await expect(new DurableImageProvider(provider, store, "scope").create(request)).rejects.toBeInstanceOf(ImageResultUnknown);
+    expect(rows.get(0)).toMatchObject({ state: "unknown", gatewayRequestId: "gateway-123" });
+    expect(provider.create).toHaveBeenCalledTimes(1);
+  });
+
   it("resumes async IDs, rejects legacy fake IDs, and honors cancellation before claim", async () => {
     const { store, rows } = memory();
     rows.set(2, { state: "submitted", vendorId: "real-task", fingerprint: "scope" });

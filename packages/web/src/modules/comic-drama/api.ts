@@ -1,5 +1,6 @@
 import type {
-  ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaDetail, ComicDramaListing, ComicDramaSeries, ComicDramaSeriesInput,
+  ComicCastChange, ComicSeriesCast, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaDetail, ComicDramaListing,
+  ComicDramaSeries, ComicDramaSeriesInput,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -14,7 +15,19 @@ export const comicDramaApi = {
   current: (signal?: AbortSignal) => read<{ seriesId: string | null }>(`${root}/current`, signal),
   open: (id: string) => write<ComicDramaDetail>(`${root}/current`, "PUT", { seriesId: id }),
   create: (fields: ComicDramaSeriesInput) => write<ComicDramaDetail>(root, "POST", fields),
-  derive: (id: string, action: "copy" | "sequel") => write<ComicDramaDetail>(`${path(id)}/${action}`, "POST", {}),
+  derive: (id: string, action: "copy" | "sequel", inheritCastAndStyle = true) =>
+    write<ComicDramaDetail>(`${path(id)}/${action}`, "POST", action === "sequel" ? { inheritCastAndStyle } : {}),
+  cast: (id: string, signal?: AbortSignal) => read<{ cast: ComicSeriesCast[]; seriesRevision: number }>(`${path(id)}/cast`, signal),
+  changeCast: (id: string, expectedRevision: number, change: ComicCastChange) => {
+    const root = `${path(id)}/cast`;
+    const target = root + "/" + change.characterId;
+    if (change.action === "add") return write<ComicDramaContent>(root, "POST", {
+      expectedRevision, characterId: change.characterId, outfitId: change.outfitId,
+    });
+    if (change.action === "outfit") return write<ComicDramaContent>(target, "PATCH", { expectedRevision, outfitId: change.outfitId });
+    if (change.action === "sync") return write<ComicDramaContent>(target + "/sync", "POST", { expectedRevision });
+    return write<ComicDramaContent>(target, "DELETE", { expectedRevision });
+  },
   update: (id: string, fields: ComicDramaSeriesInput, expectedRevision: number) =>
     write<ComicDramaSeries>(path(id), "PATCH", { ...fields, expectedRevision }),
   archive: (id: string, expectedRevision: number) => write<{ ok: true }>(`${path(id)}/archive`, "POST", { expectedRevision }),

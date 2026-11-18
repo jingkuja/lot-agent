@@ -43,9 +43,10 @@ const MODULE_IMPORTS = new Set([
   "services/response-language-policy.ts",
 ]);
 
-const COMIC_PLATFORM = new Set(["server:index.ts", "web:shell/ProductShell.tsx", "web:i18n/index.tsx"]);
+const COMIC_PLATFORM = new Set(["server:index.ts", "server:workers/index.ts", "web:shell/ProductShell.tsx", "web:i18n/index.tsx"]);
 const COMIC_SERVER_IMPORTS = new Set([
   "../generation/private-materials.js", "../marketing-video/media.js", "../static-files.js", "../util/metered-upload.js",
+  "../generation/image-receipts.js", "../jobs/task-queues.js", "../marketing-video/image-size.js", "../marketing-video/run.js",
 ]);
 const COMIC_WEB_IMPORTS = new Set(["../../api/client.js", "../../components/BrandHeader.js", "../../i18n/index.js"]);
 const COMIC_SOURCE = /(^|\/)comic-drama(?:\/|$)/;

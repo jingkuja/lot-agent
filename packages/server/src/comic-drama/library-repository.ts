@@ -16,10 +16,24 @@ const mediaValue = `jsonb_build_object('id',f.id,'mime',f.mime,'sizeBytes',f.siz
 const mediaColumns = `id,owner_id AS owner,storage_key AS "storageKey",thumbnail_key AS "thumbnailKey",mime,size_bytes AS "sizeBytes",
   width,height,duration_ms AS "durationMs",(thumbnail_key IS NOT NULL) AS "hasThumbnail"`;
 
-async function insertMedia(db: ComicQuery, media: StoredComicMedia) {
+export async function insertComicMedia(db: ComicQuery, media: StoredComicMedia) {
   const { id, owner, storageKey, thumbnailKey, mime, sizeBytes, width, height, durationMs } = media;
   await db.query(`INSERT INTO ${tables}.cd_media (id,owner_id,storage_key,thumbnail_key,mime,size_bytes,width,height,duration_ms)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [id, owner, storageKey, thumbnailKey, mime, sizeBytes, width, height, durationMs]);
+}
+
+/** Callers hold the character row lock while allocating the next asset version. */
+export async function insertComicCharacterVersion(
+  db: ComicQuery, owner: string, id: string, input: ComicCharacterUpload, mediaId: string,
+) {
+  const outfit = input.kind === "slot" ? input.outfitId : null;
+  const { rows } = await db.query<{ version: number }>(`INSERT INTO ${tables}.cd_character_assets
+    (owner_id,character_id,outfit_id,kind,key,version,media_id)
+    SELECT $1,$2,$3,$4,$5,coalesce(max(version),0)+1,$6 FROM ${tables}.cd_character_assets
+    WHERE owner_id=$1 AND character_id=$2 AND outfit_id IS NOT DISTINCT FROM $3::uuid AND kind=$4 AND key=$5 RETURNING version`,
+  [owner, id, outfit, input.kind, input.key, mediaId]);
+  await db.query(`UPDATE ${tables}.cd_characters SET updated_at=clock_timestamp() WHERE owner_id=$1 AND id=$2`, [owner, id]);
+  return rows[0].version;
 }
 
 function page<T>(rows: T[]): ComicLibraryPage<T> {
@@ -60,11 +74,11 @@ export class PgComicLibrary implements ComicLibraryRepository {
     return rows[0];
   }
 
-  async getCharacter(owner: string, id: string): Promise<ComicCharacterDetail> {
-    const character = await this.character(this.pool, owner, id);
-    const outfits = await this.pool.query<ComicOutfit>(`SELECT id,name FROM ${tables}.cd_character_outfits
+  async getCharacter(owner: string, id: string, db: ComicQuery = this.pool): Promise<ComicCharacterDetail> {
+    const character = await this.character(db, owner, id);
+    const outfits = await db.query<ComicOutfit>(`SELECT id,name FROM ${tables}.cd_character_outfits
       WHERE owner_id=$1 AND character_id=$2 ORDER BY name,id`, [owner, id]);
-    const { rows: assets } = await this.pool.query<ComicCharacterAsset>(`SELECT DISTINCT ON (a.kind,a.outfit_id,a.key)
+    const { rows: assets } = await db.query<ComicCharacterAsset>(`SELECT DISTINCT ON (a.kind,a.outfit_id,a.key)
       a.kind,a.key,a.outfit_id AS "outfitId",a.version,${mediaValue} AS media FROM ${tables}.cd_character_assets a
       JOIN ${tables}.cd_media f ON f.id=a.media_id WHERE a.owner_id=$1 AND a.character_id=$2
       ORDER BY a.kind,a.outfit_id,a.key,a.version DESC`, [owner, id]);
@@ -118,22 +132,15 @@ export class PgComicLibrary implements ComicLibraryRepository {
     await requireComicChoice(db, owner, input.kind, input.key);
   }
 
-  validateCharacterAsset(owner: string, id: string, input: ComicCharacterUpload) {
-    return this.validateCharacterUpload(this.pool, owner, id, input);
+  validateCharacterAsset(owner: string, id: string, input: ComicCharacterUpload, db: ComicQuery = this.pool) {
+    return this.validateCharacterUpload(db, owner, id, input);
   }
 
   addCharacterAsset(owner: string, id: string, input: ComicCharacterUpload, media: StoredComicMedia) {
     return libraryTransaction(this.pool, async db => {
       await this.validateCharacterUpload(db, owner, id, input, true);
-      const outfit = input.kind === "slot" ? input.outfitId : null;
-      await insertMedia(db, media);
-      const { rows } = await db.query<{ version: number }>(`INSERT INTO ${tables}.cd_character_assets
-        (owner_id,character_id,outfit_id,kind,key,version,media_id)
-        SELECT $1,$2,$3,$4,$5,coalesce(max(version),0)+1,$6 FROM ${tables}.cd_character_assets
-        WHERE character_id=$2 AND outfit_id IS NOT DISTINCT FROM $3::uuid AND kind=$4 AND key=$5 RETURNING version`,
-        [owner, id, outfit, input.kind, input.key, media.id]);
-      await db.query(`UPDATE ${tables}.cd_characters SET updated_at=clock_timestamp() WHERE id=$1`, [id]);
-      return rows[0].version;
+      await insertComicMedia(db, media);
+      return insertComicCharacterVersion(db, owner, id, input, media.id);
     });
   }
 
@@ -167,7 +174,7 @@ export class PgComicLibrary implements ComicLibraryRepository {
     return libraryTransaction(this.pool, async db => {
       const { kind, name, categoryKey, tags } = input;
       await requireComicChoice(db, owner, kind, categoryKey);
-      await insertMedia(db, media);
+      await insertComicMedia(db, media);
       const { rows } = await db.query<{ id: string }>(`INSERT INTO ${tables}.cd_materials(owner_id,kind,name,category_key,tags)
         VALUES($1,$2,$3,$4,$5) RETURNING id`, [owner, kind, name, categoryKey, tags]);
       const id = rows[0].id;
@@ -179,7 +186,7 @@ export class PgComicLibrary implements ComicLibraryRepository {
   replaceMaterial(owner: string, id: string, media: StoredComicMedia) {
     return libraryTransaction(this.pool, async db => {
       await this.materialInput(owner, id, db, true);
-      await insertMedia(db, media);
+      await insertComicMedia(db, media);
       const { rows } = await db.query<{ version: number }>(`INSERT INTO ${tables}.cd_material_versions(owner_id,material_id,version,media_id)
         SELECT $1,$2,max(version)+1,$3 FROM ${tables}.cd_material_versions WHERE material_id=$2 RETURNING version`, [owner, id, media.id]);
       await db.query(`UPDATE ${tables}.cd_materials SET updated_at=clock_timestamp() WHERE id=$1`, [id]);

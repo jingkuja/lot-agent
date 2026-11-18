@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload } from "@lot-agent/core/comic-drama";
+import type {
+  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload, ComicGenerationQuote,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
+import { comicGenerationApi } from "./generation-api.js";
+import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
+import { ComicTakeStatus, RecoverComicImage, useGenerationHistory } from "./GenerationHistory.js";
 import { ChoiceSelect, comicListWords, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
 
 const images = "image/jpeg,image/png,image/webp";
@@ -96,13 +101,34 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   const { locale, t } = useI18n();
   const [kind, setKind] = useState<"slot" | "expression">("slot");
   const [outfitId, setOutfit] = useState("");
-  const [dialog, setDialog] = useState<"edit" | "outfit" | "upload" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "outfit" | "upload" | "generate" | null>(null);
   const [versionTarget, setVersionTarget] = useState<ComicCharacterUpload | null>(null);
+  const [fee, setFee] = useState<{ quote: ComicGenerationQuote; label: string } | null>(null);
   const [error, setError] = useState("");
-  const choices = useComicChoices(kind);
+  const slots = useComicChoices("slot");
+  const expressions = useComicChoices("expression");
+  const choices = kind === "slot" ? slots : expressions;
   const outfit = character.outfits.find(entry => entry.id === outfitId) ?? character.outfits[0];
   const rows = character.assets.filter(asset => asset.kind === kind && (kind === "expression" || asset.outfitId === outfit?.id));
   const reload = async () => changed(await comicLibraryApi.character(character.id));
+  const generationScope = { resource: "characters", id: character.id } as const;
+  const loadTakes = useCallback((signal: AbortSignal) => comicGenerationApi.characterTakes(character.id, signal), [character.id]);
+  const generation = useGenerationHistory(loadTakes);
+  const latestGenerated = generation.current?.find(take => take.state === "ready")?.id;
+  useEffect(() => {
+    if (!latestGenerated) return;
+    const controller = new AbortController();
+    void comicLibraryApi.character(character.id, controller.signal).then(result => {
+      if (!controller.signal.aborted) changed(result);
+    }).catch(() => { if (!controller.signal.aborted) setError("读取角色失败，请重试"); });
+    return () => controller.abort();
+  }, [character.id, changed, latestGenerated]);
+  const needsAttention = generation.current?.filter(take => take.state !== "ready").slice(0, 8) ?? [];
+  const takeLabel = (target: ComicCharacterUpload) => {
+    const label = (target.kind === "slot" ? slots : expressions).find(entry => entry.key === target.key)?.labels[locale] ?? target.key;
+    const outfitName = target.kind === "slot" && character.outfits.find(entry => entry.id === target.outfitId)?.name;
+    return outfitName ? outfitName + " · " + label : label;
+  };
   const versions = useCallback((signal: AbortSignal) => versionTarget ?
     comicLibraryApi.characterVersions(character.id, versionTarget, signal) : Promise.resolve([]), [character.id, versionTarget]);
   const showVersions = (asset: ComicCharacterAsset) => {
@@ -144,7 +170,19 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       </>}
       {!character.archived && <button className="primary" disabled={kind === "slot" && !outfit}
         onClick={() => setDialog("upload")}>＋ {t("上传角色图片")}</button>}
+      {!character.archived && <button disabled={kind === "slot" && !outfit}
+        onClick={() => setDialog("generate")}>{t(kind === "slot" ? "生成造型" : "生成表情")}</button>}
     </div>
+    {(needsAttention.length > 0 || generation.failed) && <section className="comic-edit-card comic-character-jobs">
+      <header><h2>{t("角色图片任务")}</h2>
+        {generation.failed && <button type="button" onClick={generation.refresh}>{t("重新读取")}</button>}
+      </header>
+      <ul className="comic-generation-status-list">{needsAttention.map(take => <li key={take.id}>
+        <strong>{take.characterTarget ? takeLabel(take.characterTarget) : character.name}</strong>
+        <ComicTakeStatus take={take} />
+        {take.state === "recoverable" && <RecoverComicImage take={take} refreshed={generation.refresh} />}
+      </li>)}</ul>
+    </section>}
     {rows.length === 0 && <div className="comic-empty">{t(kind === "slot" && !outfit ? "先创建一套造型" : "暂无角色图片")}</div>}
     <div className="comic-library-grid">{rows.map(asset => {
       const label = choices.find(entry => entry.key === asset.key)?.labels[locale] ?? asset.key;
@@ -178,6 +216,19 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       <label>{t("选择文件")}<input name="file" type="file" accept={images} required /></label>
       <small>{t("JPG、PNG 或 WebP，最多 20 MB。同一槽位上传新版会保留历史。")}</small>
     </LibraryDialog>}
+    {dialog === "generate" && <LibraryDialog title={t(kind === "slot" ? "生成造型" : "生成表情")} submitLabel={t("预览费用")}
+      close={() => setDialog(null)} save={async (form, signal) => {
+        const key = String(form.get("key") ?? "");
+        const target: ComicCharacterUpload = kind === "slot" && outfit ? { kind, key, outfitId: outfit.id } : { kind: "expression", key };
+        const quote = await comicGenerationApi.preview(generationScope, target, signal);
+        if (!signal.aborted) setFee({ quote, label: takeLabel(target) });
+      }}>
+      <label>{t(kind === "slot" ? "造型槽位" : "表情")}
+        <ChoiceSelect name="key" domain={kind} aria-label={t(kind === "slot" ? "造型槽位" : "表情")} required empty={t("请选择")} autoFocus />
+      </label>
+    </LibraryDialog>}
+    {fee && <GenerationQuoteDialog quote={fee.quote} label={() => fee.label} close={() => setFee(null)}
+      confirm={id => comicGenerationApi.confirm(generationScope, id)} submitted={generation.refresh} />}
     {versionTarget && <MediaVersions list={versions} close={() => setVersionTarget(null)} />}
   </>;
 }

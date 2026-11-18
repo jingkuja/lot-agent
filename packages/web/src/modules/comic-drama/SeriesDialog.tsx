@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { ComicDramaSeries, ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
+import { comicVideoProfile, type ComicDramaSeries, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { ChoiceSelect } from "./LibraryParts.js";
 
@@ -15,6 +15,7 @@ export function SeriesDialog({ series, models, close, save, error }: {
   const { t, modelName } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState(false);
+  const available = models.filter(model => comicVideoProfile(model.id));
   useEffect(() => { dialog.current?.showModal(); }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,9 +49,9 @@ export function SeriesDialog({ series, models, close, save, error }: {
         </div>
         <label>{t("视频模型")}<select name="videoModel" defaultValue={series?.videoModel ?? ""}>
           <option value="">{t("稍后选择")}</option>
-          {series?.videoModel && !models.some(model => model.id === series.videoModel) &&
+          {series?.videoModel && !available.some(model => model.id === series.videoModel) &&
             <option value={series.videoModel}>{series.videoModel}</option>}
-          {models.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
+          {available.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
         </select></label>
         {error && <p className="comic-error" role="alert">{error}</p>}
         <div className="comic-actions">
