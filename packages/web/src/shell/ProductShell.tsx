@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { COMIC_DRAMA_ROOT } from "@lot-agent/core/comic-drama";
+import { ComicDramaWorkspace } from "../modules/comic-drama/ComicDramaWorkspace.js";
+import { useI18n } from "../i18n/index.js";
 import type { User } from "../api/client.js";
 import { Workspace } from "../pages/Workspace.js";
 import { DIGITAL_EMPLOYEE_AGENT_ID } from "../modules/digital-employee/conversation-scope.js";
@@ -33,6 +36,9 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [llmNoticeTitle, setLlmNoticeTitle] = useState<string | null>(null);
   const employeeFlags = useEmployeeFlags();
   const employeeSummary = useEmployeeSummary();
+  const { comicDramaEnabled } = useI18n();
+  const isComicPath = pathname === COMIC_DRAMA_ROOT || pathname.startsWith(COMIC_DRAMA_ROOT + "/");
+  const isComicDrama = comicDramaEnabled && isComicPath;
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
 
   useEffect(() => {
@@ -52,7 +58,13 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   }, []);
 
   // Old links, bookmarks and past chat messages reach their new place.
-  useEffect(() => { replacePath(normalizeEmployeePath(pathname)); }, [pathname, replacePath]);
+  useEffect(() => {
+    if (isComicPath && !comicDramaEnabled) replacePath("/assistant");
+    else replacePath(normalizeEmployeePath(pathname));
+  }, [pathname, replacePath, comicDramaEnabled, isComicPath]);
+
+  const openComicDrama = comicDramaEnabled ? () => navigate(COMIC_DRAMA_ROOT) : undefined;
+  const showAssistant = !isDigitalEmployee && !isComicDrama;
 
   const handleOpenDigitalEmployee = useCallback(() => {
     const open = (catalog: { llm: unknown[] }) => {
@@ -65,12 +77,13 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
 
   return (
     <>
-      <div className={isDigitalEmployee ? "product-shell-view is-hidden" : "product-shell-view"} aria-hidden={isDigitalEmployee || undefined}>
+      <div className={showAssistant ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!showAssistant || undefined}>
         <Workspace
           user={user}
           onLogout={onLogout}
           modelCatalog={modelCatalog}
           onNavigateDigitalEmployee={handleOpenDigitalEmployee}
+          onNavigateComicDrama={openComicDrama}
           hiddenAgentIds={HIDDEN_AGENT_IDS}
           digitalEmployeeBadge={employeeSummary.pending}
         />
@@ -91,8 +104,13 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
           navigate={navigate}
           replacePath={replacePath}
           onNavigateAssistant={() => navigate("/assistant")}
+          onNavigateComicDrama={openComicDrama}
         />
       </div>
+      {comicDramaEnabled && <div className={isComicDrama ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isComicDrama || undefined}>
+        <ComicDramaWorkspace key={user.id} user={user} pathname={pathname} active={isComicDrama} navigate={navigate} replacePath={replacePath}
+          onLogout={onLogout} onOpenAssistant={() => navigate("/assistant")} onOpenDigitalEmployee={handleOpenDigitalEmployee} models={modelCatalog.video} />
+      </div>}
       {llmNoticeTitle && <LlmModelRequiredModal title={llmNoticeTitle} onClose={() => setLlmNoticeTitle(null)} />}
     </>
   );

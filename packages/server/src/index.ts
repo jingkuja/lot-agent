@@ -67,6 +67,13 @@ import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
+import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH } from "@lot-agent/core/comic-drama";
+import { PgComicDramaRepository } from "./comic-drama/repository.js";
+import { PgComicDictionary } from "./comic-drama/dictionary.js";
+import { PgComicLibrary } from "./comic-drama/library-repository.js";
+import { ComicMediaLibrary } from "./comic-drama/media-library.js";
+import { createComicLibraryRoutes } from "./comic-drama/library-routes.js";
+import { createComicDramaRoutes } from "./comic-drama/routes.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -219,7 +226,10 @@ async function main() {
 
   const requestLogger = logger();
   // These paths can carry capabilities in the query string.
-  const UNLOGGED_PATHS = ["/static/", "/api/rag/preview/", "/api/public/feishu/", "/api/public/marketing-analysis-audio/", "/api/public/digital-presenter-media/"];
+  const UNLOGGED_PATHS = [
+    "/static/", "/api/rag/preview/", "/api/public/feishu/", "/api/public/marketing-analysis-audio/", "/api/public/digital-presenter-media/",
+    COMIC_MEDIA_PATH,
+  ];
   app.use("*", (c, next) => UNLOGGED_PATHS.some((path) => c.req.path.startsWith(path)) ? next() : requestLogger(c, next));
   app.use("*", cors({
     origin: (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(",")).split(","),
@@ -246,7 +256,8 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
-  app.route("/api/public/product", createProductRoutes(digitalEmployeeProductFlags));
+  const comicDramaEnabled = process.env.COMIC_DRAMA_FACTORY === "1";
+  app.route("/api/public/product", createProductRoutes(() => ({ ...digitalEmployeeProductFlags(), comicDramaEnabled })));
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
   app.route("/api/public/feishu", createFeishuPublicRoutes(feishu));
@@ -390,6 +401,23 @@ async function main() {
     }
   }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
+  if (comicDramaEnabled) {
+    app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
+      store: rateLimitStore, keyFn: c => c.get("userId"), prefix: "rl:comic-drama", limit: 180, windowMs: 60_000,
+    }));
+    app.on("POST", [
+      `${COMIC_DRAMA_API_ROOT}/characters/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/upload`,
+    ], uploadRateLimit);
+    const library = new PgComicLibrary(service.db.pool);
+    const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), library);
+    app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
+    app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
+    app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(new PgComicDramaRepository(service.db.pool), async (owner, model) => {
+      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+      const catalog = await service.getUserModelCatalog(owner, key);
+      return catalog?.video.some(item => item.id === model) === true;
+    }));
+  }
 
   // /api/balance alias → same balance logic, user-scoped
   app.get("/api/balance", async (c) => {

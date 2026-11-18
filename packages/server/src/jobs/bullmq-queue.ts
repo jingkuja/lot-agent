@@ -4,6 +4,7 @@ import { DelayedError, Queue, Worker, type ConnectionOptions } from "bullmq";
 import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
+import { GENERATION_QUEUE_FAILED } from "../generation/errors.js";
 import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName, type MarketingQueueLimits } from "./task-queues.js";
 
 // A render that waits for the same owner's earlier render frees its slot for
@@ -177,9 +178,8 @@ export class BullmqJobQueue implements JobQueue {
     }
   }
 
-  /** Queue latency is diagnostic only. Redis errors are unknown, never missing. A marketing video whose
-   * delivery is confirmed missing is delivered again by its own ID: it was never claimed, so nothing
-   * paid has started, and the same ID cannot create a second task. */
+  /** Redis errors are unknown, never missing. For confirmed missing entries, recover marketing delivery
+   * by ID and close chat media receipts whose submitting request can no longer publish them. */
   async diagnosePending(staleMs: number): Promise<void> {
     let readable = this.connection.status === "ready";
     for (const row of await this.db.findStalePendingTasks(staleMs)) {
@@ -207,6 +207,11 @@ export class BullmqJobQueue implements JobQueue {
           stage = "等待队列处理";
         } catch { readable = false; }
       }
+      const input = row.input as { chatGeneration?: boolean; assistantMessageId?: string } | null;
+      if (stage === "投递未完成，可恢复排队" && input?.chatGeneration === true && typeof input.assistantMessageId === "string") {
+        await this.db.failUnpublishedChatGeneration(row.id, input.assistantMessageId, GENERATION_QUEUE_FAILED);
+        continue;
+      }
       await this.db.setPendingTaskDiagnostic(row.id, stage);
     }
   }
@@ -233,6 +238,11 @@ export class BullmqJobQueue implements JobQueue {
       const state = await previous.getState();
       if (state === "failed" || state === "completed") await previous.retry(state);
     } else await publishPersistedJob(queue, id, type, { maxAttempts: 1 });
+  }
+
+  /** Publish a newly committed task once, without reviving terminal queue entries. */
+  publishNewTask(id: string, type: string): Promise<void> {
+    return queueDeadline(() => publishPersistedJob(this.queues.get(taskQueueName(type))!, id, type, { maxAttempts: 1 }));
   }
 
   /** Do not revive a cancelled row while its previous worker is unwinding. */

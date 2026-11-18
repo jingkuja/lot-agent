@@ -53,6 +53,24 @@ function missingNotice(missing: number): string {
   return `套图中有 ${missing} 张未生成成功`;
 }
 
+/** A media tool saves its receipt before the assistant replies. Show it after the reply in the same turn. */
+function orderChatGenerationCards(messages: DisplayMessage[]): DisplayMessage[] {
+  const visible: DisplayMessage[] = [];
+  let cards: DisplayMessage[] = [];
+  for (const message of messages) {
+    if (message.generation?.background) {
+      cards.push(message);
+      continue;
+    }
+    if (message.role === "user" && cards.length) {
+      visible.push(...cards);
+      cards = [];
+    }
+    visible.push(message);
+  }
+  return [...visible, ...cards];
+}
+
 interface GenerationToken {
   cancelled: boolean;
   submission?: AbortController;
@@ -83,6 +101,14 @@ export function useChat(
   // concurrent chat bleeds its reply into whatever conversation is displayed.
   const streamsRef = useRef<Map<string, AbortController>>(new Map());
   const genPollRef = useRef<GenerationToken | null>(null);
+  const backgroundPollsRef = useRef(new Map<string, GenerationToken>());
+  useEffect(() => {
+    const polls = backgroundPollsRef.current;
+    return () => {
+      for (const token of polls.values()) token.cancelled = true;
+      polls.clear();
+    };
+  }, []);
   const pendingSubmissions = useRef(new Map<string, GenerationToken>());
   /** Set below; loadMessages resumes watching redos through it. */
   const pollRedoRef = useRef<((cid: string, taskId: string) => void) | null>(null);
@@ -105,8 +131,13 @@ export function useChat(
   // resuming an in-flight generation after a conversation (re)load. The caller
   // owns the cancellation `token` (stored in genPollRef) so switching away stops it.
   const pollGeneration = useCallback(
-    (taskId: string, messageId: string, mediaType: "image" | "video", token: GenerationToken) => {
+    (taskId: string, messageId: string, mediaType: "image" | "video", token: GenerationToken, background = false) => {
       token.taskId = taskId;
+      const stopPolling = () => {
+        if (genPollRef.current === token) genPollRef.current = null;
+        if (backgroundPollsRef.current.get(taskId) === token) backgroundPollsRef.current.delete(taskId);
+        onStreamEndRef.current?.();
+      };
       let failures = 0;
       const poll = async () => {
         if (token.cancelled) return;
@@ -140,6 +171,7 @@ export function useChat(
             dispatch({
               type: "generation_finished",
               messageId,
+              background,
               generation: {
                 mediaType,
                 status: finalStatus,
@@ -164,21 +196,21 @@ export function useChat(
                 translateRef.current(downloadFailed ? "媒体下载失败，可重试下载" : t.error)
               );
             }
-            if (genPollRef.current === token) genPollRef.current = null;
-            onStreamEndRef.current?.();
+            stopPolling();
             return;
           }
           dispatch({ type: "generation_progress", messageId, progress: t.progress });
         } catch {
+          if (token.cancelled) return;
           failures += 1;
           if (failures >= 15) {
             dispatch({
               type: "generation_finished",
               messageId,
+              background,
               generation: { mediaType, status: "failed", error: "生成状态获取失败", taskId },
             });
-            if (genPollRef.current === token) genPollRef.current = null;
-            onStreamEndRef.current?.();
+            stopPolling();
             return;
           }
         }
@@ -214,6 +246,7 @@ export function useChat(
         role === "assistant" && parsedMeta?.kind === "generation"
           ? {
               mediaType: parsedMeta.mediaType as "image" | "video",
+              background: parsedMeta.chatGeneration === true,
               status: (parsedMeta.status ?? "generating") as GenerationView["status"],
               supportsProgress: parsedMeta.supportsProgress as boolean | undefined,
               assets: parsedMeta.assets,
@@ -287,7 +320,7 @@ export function useChat(
     // input; its stream events re-attach to the view on the next chunk.
     dispatch({
       type: "snapshot_loaded",
-      messages: display,
+      messages: orderChatGenerationCards(display),
       model: (data as { model?: string | null }).model ?? null,
       isStreaming: streamsRef.current.has(convId),
     });
@@ -295,11 +328,18 @@ export function useChat(
     // Resume polling for any generation still marked "generating" (e.g. the
     // user reloaded or reopened the conversation before it finished). The
     // message carries its taskId, so we re-query the task to pick up current
-    // progress / completion. At most one is expected in flight; poll the latest.
+    // progress / completion. Chat tools can have multiple jobs alongside later turns.
     const pending = display.filter(
       (m) => m.generation?.status === "generating" && m.generation.taskId
     );
-    const last = pending[pending.length - 1];
+    for (const { id, generation } of pending) {
+      const taskId = generation?.taskId;
+      if (!generation?.background || !taskId || backgroundPollsRef.current.has(taskId) || genPollRef.current?.taskId === taskId) continue;
+      const token = { cancelled: false };
+      backgroundPollsRef.current.set(taskId, token);
+      pollGeneration(taskId, id, generation.mediaType, token, true);
+    }
+    const last = pending.reverse().find(m => !m.generation?.background);
     // A redo on a finished set runs beside the chat: watch it and reload the set when it ends.
     for (const message of display) {
       const redo = message.generation?.redo;
@@ -901,7 +941,7 @@ export function useChat(
     // Stop only the conversation on screen — a concurrent stream in another
     // conversation keeps running.
     const cid = cidRef.current;
-    if (cid) {
+    if (cid && !taskId) {
       streamsRef.current.get(cid)?.abort();
       streamsRef.current.delete(cid);
     }
@@ -935,6 +975,8 @@ export function useChat(
     // Cancel any in-flight generation poll and drop the streaming lock so a
     // resumed poll in the next conversation doesn't leave the input disabled.
     if (genPollRef.current) { genPollRef.current.cancelled = true; genPollRef.current = null; }
+    for (const token of backgroundPollsRef.current.values()) token.cancelled = true;
+    backgroundPollsRef.current.clear();
     for (const token of redoPollsRef.current.values()) token.cancelled = true;
     redoPollsRef.current.clear();
     loadSeq.current++; setChannel(null); channelSnapshot.current = "";

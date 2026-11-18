@@ -5,6 +5,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./comic-drama": {
+      "types": "./dist/comic-drama/index.d.ts",
+      "import": "./dist/comic-drama/index.js"
+    },
     "./marketing-video": {
       "types": "./dist/marketing-video/index.d.ts",
       "import": "./dist/marketing-video/index.js"

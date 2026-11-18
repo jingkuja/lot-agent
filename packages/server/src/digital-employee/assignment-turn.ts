@@ -14,7 +14,7 @@ const UNREAD_AT_FINISH = 5;
 const RESEARCH_AND_OUTPUT_TOOLS = ["web_search", "web_fetch", "generate_document", "generate_ppt"];
 const FINISH_TOOL = "finish_task";
 /** The employee cannot message anyone from a task, the owner included: Feishu only carries the system's own notices. */
-export const ASSIGNMENT_BLOCKED_TOOLS = ["feishu_contacts", "feishu_send_message"];
+export const ASSIGNMENT_BLOCKED_TOOLS = ["feishu_contacts", "feishu_send_message", "generate_image", "generate_video"];
 
 /** True in either mode, so a change to one cannot loosen the other. */
 function sharedRules(searchLimit: number, searchesUsed: number): string {

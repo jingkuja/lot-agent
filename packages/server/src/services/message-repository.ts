@@ -74,6 +74,8 @@ export class MessageRepository {
     // Filter out orphan tool messages (no matching assistant tool_call)
     const history: Message[] = [];
     for (const m of filtered) {
+      // Chat generation cards are UI receipts. Their paired tool result is the model's record of the request.
+      if (m.metadata?.chatGeneration === true) continue;
       if (m.role === "tool" && m.tool_call_id) {
         if (!validToolCallIds.has(m.tool_call_id)) continue; // orphan — skip
       }

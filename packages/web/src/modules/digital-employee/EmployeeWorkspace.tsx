@@ -44,6 +44,7 @@ interface EmployeeWorkspaceProps {
   onLogout: () => void;
   navigate: (path: string) => void;
   replacePath: (path: string) => void;
+  onNavigateComicDrama?: () => void;
   onNavigateAssistant: () => void;
 }
 
@@ -54,7 +55,7 @@ const keepConversation = (conversation: Conversation | undefined) =>
 /** One employee: its card, five entries and a conversation that stays mounted under every page. */
 export function EmployeeWorkspace({
   user, modelCatalog, pathname, active, dailyScan, schedules, assignments, pendingCount, waitingTasks, onPendingChange, onLogout, navigate, replacePath,
-  onNavigateAssistant,
+  onNavigateAssistant, onNavigateComicDrama,
 }: EmployeeWorkspaceProps) {
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
@@ -249,6 +250,7 @@ export function EmployeeWorkspace({
     resetKey={view}
     keepConversation={keepConversation}
     onNavigateAssistant={onNavigateAssistant}
+    onNavigateComicDrama={onNavigateComicDrama}
     onNavigateDigitalEmployee={() => openView("today")}
     onSendStart={handleSendStart}
     beforeDispatch={beforeDispatch}

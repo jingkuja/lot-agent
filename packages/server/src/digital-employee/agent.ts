@@ -8,6 +8,7 @@ import {
 } from "../services/agent-extensions.js";
 import { isAssignmentConversation, type AssignmentService } from "./assignment-service.js";
 import { DEFAULT_EMPLOYEE_NAME } from "./employee-name.js";
+import { InputError } from "./errors.js";
 import {
   DIGITAL_EMPLOYEE_UNIFIED_SCOPE,
   readConversationFeatureScope,
@@ -21,9 +22,10 @@ export const DIGITAL_EMPLOYEE_AGENT_ID = "digital_employee";
 const INVALID_SCOPE = "digital_employee conversations require a valid featureScope";
 const TASK_CONVERSATION = "This conversation belongs to a background task and only the task can write to it";
 
-/** Business tools only this agent may use; ask_user and load_skill are shared. */
+/** Tools shared with general chat are not private to the digital employee. */
+const SHARED_TOOLS = new Set(["ask_user", "load_skill", "generate_image", "generate_video"]);
 export const DIGITAL_EMPLOYEE_PRIVATE_TOOL_NAMES = digitalEmployeeDefinition.toolNames
-  .filter((name) => name !== "ask_user" && name !== "load_skill");
+  .filter((name) => !SHARED_TOOLS.has(name));
 
 const SCOPE_TOOLS: Record<string, Set<string>> = {
   "marketing-materials": new Set([
@@ -63,7 +65,7 @@ const SCOPE_TOOLS: Record<string, Set<string>> = {
 export function digitalEmployeeAllowedToolNames(featureScope: string | undefined, toolNames: string[]): string[] {
   const allowed = featureScope ? SCOPE_TOOLS[featureScope] : undefined;
   if (!allowed) return [];
-  return toolNames.filter((name) => allowed.has(name));
+  return toolNames.filter((name) => allowed.has(name) || name === "generate_image" || name === "generate_video");
 }
 
 /** The name is passed as JSON because the user chooses it. */
@@ -93,7 +95,9 @@ export function createDigitalEmployeeExtension(deps: {
   resolveModel?: (userId: string | undefined, requested?: string | null) => Promise<ResolvedLlm>;
   settings?: Pick<EmployeeSettingsService, "get">;
   assignments?: Pick<AssignmentService, "beginTurn" | "chatTurn">;
+  validateMediaPrompt?: (userId: string, prompt: string) => Promise<void>;
 } = {}): AgentExtension {
+  const { validateMediaPrompt } = deps;
   return {
     agentId: DIGITAL_EMPLOYEE_AGENT_ID,
     ownerKeyOnly: true,
@@ -107,6 +111,16 @@ export function createDigitalEmployeeExtension(deps: {
       if (!readConversationFeatureScope(metadata)) throw new AgentConversationError(INVALID_SCOPE);
       if (isAssignmentConversation(metadata)) throw new AgentConversationError(TASK_CONVERSATION);
     },
+    validateChatMedia: validateMediaPrompt && (async (userId, metadata, prompt) => {
+      if (!readConversationFeatureScope(metadata) || isAssignmentConversation(metadata)) return "当前对话无法使用生成工具";
+      try {
+        await validateMediaPrompt(userId, prompt);
+        return null;
+      } catch (error) {
+        if (error instanceof InputError) return error.message;
+        throw error;
+      }
+    }),
     resolveModel: deps.resolveModel,
     async beginTurn({ userId, conversationId, metadata, toolNames }: AgentTurnInput): Promise<AgentTurnContext> {
       const featureScope = readConversationFeatureScope(metadata);

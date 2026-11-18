@@ -216,6 +216,8 @@ export function ChatPanel({
     .findIndex((m) => m.role === "assistant" && !m.isStreaming);
   const lastAssistantId =
     lastAssistantIdx >= 0 ? [...messages].reverse()[lastAssistantIdx].id : null;
+  const lastUserIndex = messages.map(message => message.role).lastIndexOf("user");
+  const lastTurnHasMedia = messages.slice(lastUserIndex + 1).some(message => message.generation?.background);
 
   const isEmpty = messages.length === 0;
   const agentKind = agent?.type || agent?.id;
@@ -361,7 +363,7 @@ export function ChatPanel({
               key={msg.id}
               message={msg}
               onRegenerate={
-                msg.id === lastAssistantId && !isStreaming ? onRegenerate : undefined
+                msg.id === lastAssistantId && !isStreaming && !lastTurnHasMedia ? onRegenerate : undefined
               }
               onSelectForPreview={onSelectForPreview}
               onQuickReply={isStreaming || readOnly ? undefined : (text) => { void onSend(text, []); }}

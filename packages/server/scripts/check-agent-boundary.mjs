@@ -25,6 +25,9 @@ const PLATFORM_FINAL = new Set([
   "server:knowledge/materials.ts",
   "web:components/BrandHeader.tsx",
   "web:shell/ProductShell.tsx",
+  // The shared product picker uses the existing owner-scoped product list.
+  "web:components/ProductPickerDialog.tsx",
+  "web:lib/product-reference.ts",
 ]);
 
 /** The module's view of the platform; anything else needs a port. */
@@ -39,6 +42,31 @@ const MODULE_IMPORTS = new Set([
   "services/attachment-extractor.ts",
   "services/response-language-policy.ts",
 ]);
+
+const COMIC_PLATFORM = new Set(["server:index.ts", "web:shell/ProductShell.tsx", "web:i18n/index.tsx"]);
+const COMIC_SERVER_IMPORTS = new Set([
+  "../generation/private-materials.js", "../marketing-video/media.js", "../static-files.js", "../util/metered-upload.js",
+]);
+const COMIC_WEB_IMPORTS = new Set(["../../api/client.js", "../../components/BrandHeader.js", "../../i18n/index.js"]);
+const COMIC_SOURCE = /(^|\/)comic-drama(?:\/|$)/;
+
+function checkComicDrama(name, local, text, specifiers) {
+  const label = `${name}:${local}`;
+  if (local.startsWith("db/migrations/")) return;
+  const module = name === "server" ? "comic-drama/" : "modules/comic-drama/";
+  if (local.startsWith(module)) {
+    for (const specifier of specifiers) {
+      if (specifier.startsWith("../") && !(name === "server" ? COMIC_SERVER_IMPORTS : COMIC_WEB_IMPORTS).has(specifier)) {
+        errors.push(`${label}: imports ${specifier} outside the comic drama boundary`);
+      }
+    }
+    return;
+  }
+  const agentId = /\bcomic_drama\b/.test(text.replace(/^\s*(\/\/|\*).*$/gm, ""));
+  if ((agentId || specifiers.some(specifier => COMIC_SOURCE.test(specifier))) && !COMIC_PLATFORM.has(label)) {
+    errors.push(`${label}: platform code must not name comic_drama or import its module`);
+  }
+}
 
 const IGNORED_FILE = /\.test\.tsx?$|\.d\.ts$/;
 const errors = [];
@@ -96,6 +124,7 @@ for (const [name, dir] of [["server", server], ["web", web]]) {
     const local = path.relative(dir, file).replaceAll(path.sep, "/");
     const text = fs.readFileSync(file, "utf8");
     const specifiers = imports(file, text);
+    checkComicDrama(name, local, text, specifiers);
     if (name === "server" && local.startsWith("digital-employee/")) checkModuleFile(file, specifiers);
     else if (!local.startsWith("modules/digital-employee/") && !local.startsWith("db/migrations/")) {
       checkPlatformFile(`${name}:${local}`, text, specifiers);

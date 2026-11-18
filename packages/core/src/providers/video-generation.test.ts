@@ -132,6 +132,16 @@ describe("OpenaiVideoAdapter", () => {
     expect("media" in body).toBe(false);
     expect("seconds" in body).toBe(false);
   });
+  it.each([GROK_VIDEO_MODEL, "kling-video-v3-omni"])("serializes the comic drama first-frame and cast request for %s", model => {
+    const firstFrame = "https://fixtures.example/02.png";
+    const cast = ["https://fixtures.example/lin.png", "https://fixtures.example/zhou.png"];
+    const request = { prompt: "Two characters meet at the counter.", durationSec: 8, ratio: "9:16", resolution: "720p" };
+    expect(a.buildCreateBody({ ...request, first_frame: firstFrame, input_reference: cast }, model)).toEqual({
+      model, prompt: request.prompt, seconds: "8", ratio: "9:16", metadata: { resolution: "720p" },
+      generate_audio: false, first_frame: firstFrame, input_reference: cast,
+    });
+    expect(a.buildCreateBody(request, model)).not.toHaveProperty("input_reference");
+  });
   it("keeps backwards compatibility with legacy media reference images", () => {
     const body = a.buildCreateBody({ prompt: "p", media: [
       { type: "reference_image", url: "https://x/ref-a.png" },

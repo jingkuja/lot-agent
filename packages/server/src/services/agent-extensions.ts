@@ -40,6 +40,8 @@ export interface AgentExtension {
   conversationMetadata?(input: { featureScope?: string }): Record<string, unknown>;
   /** Throws AgentConversationError when the stored conversation cannot run. */
   assertConversation?(metadata: unknown): void;
+  /** Allows chat media submissions and returns a user-facing reason when the request is refused. */
+  validateChatMedia?(userId: string, metadata: unknown, prompt: string): Promise<string | null>;
   resolveModel?(userId: string | undefined, requested?: string | null): Promise<ResolvedLlm>;
   beginTurn?(input: AgentTurnInput): Promise<AgentTurnContext>;
 }

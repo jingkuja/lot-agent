@@ -70,13 +70,15 @@ try {
   await db.createTask(untouched[1], "marketing.segment", { keep: "segment" }, owner, "marketing-segments");
   await db.createTask(untouched[2], "marketing.video", { keep: "custom-queue" }, owner, "custom-queue");
   const beforeMigration = (await db.pool.query("SELECT * FROM tasks ORDER BY id")).rows;
-  await db.migrate(); await db.migrate();
+  await runMigrations(db.pool, migrations.filter(m => m.version <= 46));
+  await runMigrations(db.pool, migrations.filter(m => m.version <= 46));
   const afterMigration = (await db.pool.query("SELECT * FROM tasks ORDER BY id")).rows;
   assert.deepEqual(afterMigration, beforeMigration.map(row => row.id === activeId ? { ...row, queue_name: MARKETING_VIDEO_QUEUE } : row), "0046 changes only marketing parent queue metadata; restart is idempotent");
   const migrated = (await db.pool.query("SELECT * FROM tasks WHERE id=$1", [activeId])).rows[0];
   assert.equal(migrated.queue_name, MARKETING_VIDEO_QUEUE);
   assert.deepEqual(migrated.input, legacyInput);
   assert.equal(migrated.vendor_task_id, "fixture-original-vendor-receipt");
+  await db.migrate();
   publisher = new BullmqJobQueue(db, publisherConnection);
   legacyQueue = new Queue(DEFAULT_TASK_QUEUE, { connection: publisherConnection });
   marketingQueue = new Queue(MARKETING_VIDEO_QUEUE, { connection: publisherConnection });
@@ -205,6 +207,25 @@ try {
   await until(async () => await db.getTaskStatus(waiting) === "succeeded", "delayed render runs after the owner's slot frees", 30_000);
   assert.ok((await Promise.all([...ownerRenders, otherRender].map(id => db.getTaskStatus(id)))).every(status => status === "succeeded"));
   await consumer.close(); consumer = undefined;
+  if (process.argv.includes("--baseline")) {
+    const count = 24;
+    const simulatedWorkMs = 100;
+    const owners = Array.from({ length: count }, () => randomUUID());
+    await db.pool.query("INSERT INTO users(id,name) SELECT unnest($1::uuid[]), 'baseline fixture'", [owners]);
+    consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw), { concurrency: 2, perUser: 1, segments: 2 });
+    consumer.process("marketing.video", async job => {
+      const waitMs = Math.max(0, Date.now() - Date.parse(job.createdAt));
+      await new Promise(resolve => setTimeout(resolve, simulatedWorkMs));
+      return { waitMs };
+    });
+    const ids = await Promise.all(owners.map(owner => publisher!.enqueue("marketing.video", {}, owner, { maxAttempts: 1 })));
+    await until(async () => (await Promise.all(ids.map(id => db.getTaskStatus(id)))).every(s => s === "succeeded"), "baseline jobs complete");
+    const tasks = await Promise.all(ids.map(id => db.getTask(id)));
+    const waits = tasks.map(task => (task?.output as { waitMs: number }).waitMs).sort((a, b) => a - b);
+    const percentile = (p: number) => waits[Math.ceil(count * p) - 1];
+    console.log("QUEUE_BASELINE", { count, concurrency: 2, simulatedWorkMs, p50Ms: percentile(.5), p95Ms: percentile(.95) });
+    await consumer.close(); consumer = undefined;
+  }
   const events = new Set<string>();
   child = fork(fileURLToPath(import.meta.url), ["--cancellation-worker"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
   child.on("message", message => events.add((message as { event: string }).event));

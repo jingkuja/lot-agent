@@ -30,7 +30,7 @@ export const IMAGE_MAX_EDGE = 3840;
 export const IMAGE_MAX_COUNT = 4;
 
 /** Pixel budget per tier. 4K is the vendor maximum (3840×2160 = 2880×2880). */
-export const IMAGE_RESOLUTION_PIXELS = { "1K": 1024 * 1024, "2K": 2048 * 2048, "4K": IMAGE_MAX_PIXELS } as const;
+export const IMAGE_RESOLUTION_PIXELS = { "1K": 1024 ** 2, "1.5K": 1536 ** 2, "2K": 2048 ** 2, "4K": IMAGE_MAX_PIXELS } as const;
 export type ImageResolution = keyof typeof IMAGE_RESOLUTION_PIXELS;
 export const IMAGE_RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"] as const;
 

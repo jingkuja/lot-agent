@@ -557,6 +557,9 @@ html, body, #root {
   padding-top: 10px;
 }
 
+.message-assistant:has(+ .message-chat-generation) { padding-bottom: 0; }
+.message-assistant.message-chat-generation { padding-top: 8px; }
+
 /* ── Collapsible Tool Cards ── */
 .tool-calls-section {
   /* Sits below the assistant text it belongs to (chronological order). */
@@ -4863,6 +4866,8 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
 .gen-set-open img { display: block; width: 100%; height: auto; transition: transform 0.2s; }
 .gen-set-open:hover img { transform: scale(1.03); }
 .gen-set-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.message-chat-generation .gen-asset { max-height: min(420px, 48dvh); object-fit: contain; }
+.message-chat-generation .gen-asset-frame .gen-asset { width: auto; }
 .gen-set-tile .gen-asset-role { left: 8px; top: 8px; padding: 3px 10px; z-index: 1; }
 .gen-set-download {
   position: absolute; right: 8px; top: 8px;

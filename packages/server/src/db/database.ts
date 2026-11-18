@@ -640,6 +640,7 @@ export class DB {
     // submission receipt survives worker updates and later download retries.
     await this.pool.query(
       `UPDATE messages m SET status = $1, metadata = $2::jsonb ||
+         CASE WHEN m.metadata @> '{"chatGeneration":true}' THEN '{"chatGeneration":true}'::jsonb ELSE '{}'::jsonb END ||
          CASE WHEN m.metadata ? 'requestId' THEN jsonb_build_object(
            'requestId', m.metadata->'requestId',
            'userMessageId', m.metadata->'userMessageId',
@@ -715,9 +716,9 @@ export class DB {
     messageId: string,
     conversationId: string,
     userId: string
-  ): Promise<{ status: string; metadata: Record<string, unknown> } | null> {
+  ): Promise<{ status: string; model?: string; metadata: Record<string, unknown> } | null> {
     const { rows } = await this.pool.query(
-      `SELECT m.status, m.metadata
+      `SELECT m.status, m.model, m.metadata
        FROM messages m
        JOIN conversations c ON c.id = m.conversation_id
        WHERE m.id = $1 AND m.conversation_id = $2 AND c.user_id = $3`,
@@ -727,7 +728,7 @@ export class DB {
     const r = rows[0];
     const metadata =
       typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata ?? {});
-    return { status: r.status, metadata };
+    return { status: r.status, ...(r.model ? { model: r.model } : {}), metadata };
   }
 
   /**
@@ -865,22 +866,32 @@ export class DB {
    * ordering). Uses `seq` rather than `created_at` (report #20) since seq is
    * the stable, gap-free-per-conversation order key; created_at ties within
    * the same conversation are exactly what seq exists to disambiguate.
-   * Returns whether the boundary message existed in this conversation (it
-   * deletes itself too, so a hit is always >= 1 row).
+   * Returns whether the boundary message was deleted, or paid_generation if
+   * replaying that part of the conversation could submit another paid request.
    */
-  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean> {
+  async deleteMessagesFromAndAfter(conversationId: string, messageId: string): Promise<boolean | "paid_generation"> {
     const { rowCount } = await this.pool.query(
       `WITH deleted AS (
          DELETE FROM messages
          WHERE conversation_id = $1
            AND seq >= (SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1)
+           AND NOT EXISTS (
+             SELECT 1 FROM messages WHERE conversation_id = $1 AND metadata @> '{"chatGeneration":true}'
+               AND seq >= (SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1)
+           )
          RETURNING id
        )
        UPDATE conversations SET metadata = COALESCE(metadata, '{}'::jsonb) - 'contextSummary'
        WHERE id = $1 AND EXISTS (SELECT 1 FROM deleted)`,
       [conversationId, messageId]
     );
-    return (rowCount ?? 0) > 0;
+    if (rowCount) return true;
+    const blocked = await this.pool.query(
+      `SELECT 1 FROM messages WHERE conversation_id = $1 AND metadata @> '{"chatGeneration":true}'
+         AND seq >= (SELECT seq FROM messages WHERE id = $2 AND conversation_id = $1) LIMIT 1`,
+      [conversationId, messageId],
+    );
+    return blocked.rowCount ? "paid_generation" : false;
   }
 
   async getRatingsForConversation(conversationId: string): Promise<Map<string, number>> {
@@ -1767,6 +1778,40 @@ export class DB {
 
   // ── Tasks ──
 
+  /** Keep the task and its visible receipt together under the current chat lease. */
+  async createChatGeneration(input: {
+    taskId: string; messageId: string; conversationId: string; userId: string; runId: string;
+    agentId: string; type: string; model: string; job: Record<string, unknown>; metadata: Record<string, unknown>;
+  }): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `WITH alloc AS (
+         UPDATE conversations SET next_seq = next_seq + 1
+         WHERE id = $3 AND user_id = $4 AND active_run_id = $5 AND agent_id = $6 RETURNING next_seq
+       ), receipt AS (
+         INSERT INTO messages (id, conversation_id, role, content, model, metadata, status, seq)
+         SELECT $2::uuid, $3, 'assistant', '', $8, $10::jsonb, 'generating', next_seq FROM alloc RETURNING id
+       )
+       INSERT INTO tasks (id, type, user_id, input) SELECT $1::uuid, $7, $4, $9::jsonb FROM receipt`,
+      [input.taskId, input.messageId, input.conversationId, input.userId, input.runId, input.agentId,
+        input.type, input.model, JSON.stringify(input.job), JSON.stringify(input.metadata)],
+    );
+    return rowCount === 1;
+  }
+
+  /** If Redis delivery failed, fence off late delivery unless a worker already claimed the task. */
+  async failUnpublishedChatGeneration(taskId: string, messageId: string, error: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `WITH failed AS (
+         UPDATE tasks SET status = 'failed', error = $3, updated_at = now()
+         WHERE id = $1 AND status = 'pending' AND attempts = 0 RETURNING id
+       )
+       UPDATE messages SET status = 'failed', metadata = metadata || jsonb_build_object('status', 'failed', 'error', $3::text)
+       WHERE id = $2 AND metadata->>'taskId' = $1::uuid::text AND status = 'generating' AND EXISTS (SELECT 1 FROM failed)`,
+      [taskId, messageId, error],
+    );
+    return rowCount === 1;
+  }
+
   async createTask(
     id: string,
     type: string,
@@ -1946,8 +1991,15 @@ export class DB {
   /** `errorCode` is always written, so a later failure never shows an earlier cause. */
   async setTaskError(id: string, error: string, errorCode?: string): Promise<void> {
     await this.pool.query(
-      `UPDATE tasks SET error = $1, error_code = $3, status = 'failed', updated_at = now()
-       WHERE id = $2 AND status IN ('pending','running')`,
+      `WITH failed AS (
+         UPDATE tasks SET error = $1, error_code = $3, status = 'failed', updated_at = now()
+         WHERE id = $2 AND status IN ('pending','running') RETURNING id, input, user_id
+       )
+       UPDATE messages m SET status = 'failed', metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', '生成任务失败')
+       FROM failed f, conversations c
+       WHERE m.id::text = f.input->>'assistantMessageId' AND m.conversation_id::text = f.input->>'conversationId'
+         AND m.conversation_id = c.id AND c.user_id = f.user_id
+         AND m.metadata @> '{"chatGeneration":true}' AND m.metadata->>'taskId' = f.id::text AND m.status = 'generating'`,
       [error, id, errorCode ?? null]
     );
   }

@@ -362,6 +362,7 @@ export function createConversationRoutes(service: AgentService) {
     }
     try {
       const deleted = await service.db.deleteMessagesFromAndAfter(id, body.afterMessageId);
+      if (deleted === "paid_generation") return c.json({ error: "此消息已提交生成任务。如需再次生成，请发送新消息。" }, 409);
       if (!deleted) return c.json({ error: "Not found" }, 404);
       return c.json({ ok: true });
     } finally {
@@ -1039,7 +1040,10 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
     // Identity fields spread LAST so nothing stored in settings can override them.
     const taskId = await service.jobQueue.enqueue(
       "generation.redownload",
-      { ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, ...scene, ...originalContext, conversationId, assistantMessageId: messageId },
+      {
+        ...settings, mediaType, sourceUrl, ...sourceUrls, prompt, ...scene, ...originalContext, conversationId, assistantMessageId: messageId,
+        ...(meta.chatGeneration === true && msg.model ? { modelId: msg.model, requireUserModelKey: true } : {}),
+      },
       userId
     );
     const metadata = { kind: "generation", mediaType, prompt, settings, ...scene, ...originalContext, status: "generating", taskId };

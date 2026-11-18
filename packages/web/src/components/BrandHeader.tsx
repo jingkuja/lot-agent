@@ -9,12 +9,13 @@ import { PointsBalance } from "./PointsBalance.js";
 interface BrandHeaderProps {
   user?: User;
   onLogout?: () => void;
-  onCollapse: () => void;
+  onCollapse?: () => void;
   onOpenDigitalTwin?: () => void;
   onOpenAssistant?: () => void;
   onOpenDigitalEmployee?: () => void;
+  onOpenComicDrama?: () => void;
   onOpenKnowledgeBase?: () => void;
-  activeModule?: "assistant" | "digitalEmployee";
+  activeModule?: "assistant" | "digitalEmployee" | "comicDrama";
   balanceRefreshKey?: number;
   /** Work waiting on the owner in the digital employee. */
   digitalEmployeeBadge?: number;
@@ -30,6 +31,7 @@ export function BrandHeader({
   onOpenDigitalTwin,
   onOpenAssistant,
   onOpenDigitalEmployee,
+  onOpenComicDrama,
   onOpenKnowledgeBase,
   activeModule = "assistant",
   balanceRefreshKey,
@@ -58,14 +60,14 @@ export function BrandHeader({
         </div>
 
         {user ? <AccountMenu user={user} onLogout={onLogout} /> : <LanguageSelect />}
-        <button
+        {onCollapse && <button
           className="brand-collapse"
           onClick={onCollapse}
           title={t("收起侧栏")}
           aria-label={t("收起侧栏")}
         >
           ‹
-        </button>
+        </button>}
       </div>
 
       {(onOpenDigitalTwin || onOpenKnowledgeBase || onOpenAssistant || onOpenDigitalEmployee) && (
@@ -135,9 +137,12 @@ export function BrandHeader({
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={false}
-                  className="brand-module-tab"
-                  onClick={() => setComingSoonTick((n) => n + 1)}
+                  aria-selected={activeModule === "comicDrama"}
+                  className={`brand-module-tab ${activeModule === "comicDrama" ? "active" : ""}`}
+                  onClick={() => {
+                    if (onOpenComicDrama) { setComingSoonTick(0); onOpenComicDrama(); }
+                    else setComingSoonTick(n => n + 1);
+                  }}
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="3" y="4" width="18" height="16" rx="2.5" />
@@ -148,7 +153,7 @@ export function BrandHeader({
               </div>
               {comingSoonTick > 0 && (
                 <div className="brand-module-notice" role="status">
-                  {t("即将发布")}
+                  {t("即将开放")}
                 </div>
               )}
             </div>

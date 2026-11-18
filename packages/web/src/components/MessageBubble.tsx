@@ -22,7 +22,8 @@ import { PptArtifactCard } from "./PptArtifactCard.js";
 import { parsePptArtifact, parsePptApproval } from "@lot-agent/core/presentation";
 import { parseDownloadArtifact } from "../lib/download-artifact.js";
 
-const localToolLabels: Record<string, string> = {
+const toolLabels: Record<string, string> = {
+  generate_image: "图片生成", generate_video: "视频生成",
   desktop_list_files: "本地目录列表", desktop_read_file: "读取本地文件",
   desktop_write_file: "新建本地文件", desktop_edit_file: "编辑本地文件", desktop_bash: "本地 Bash",
   desktop_powershell: "本地 PowerShell", desktop_delete_file: "删除本地文件",
@@ -113,7 +114,7 @@ export function MessageBubble({
   const { t } = useI18n();
   if (message.generation) {
     return (
-      <div className="message-wrapper message-assistant">
+      <div className={`message-wrapper message-assistant${message.generation.background ? " message-chat-generation" : ""}`}>
         <div className="message-wrapper-inner">
           <GenerationCard
             generation={message.generation}
@@ -219,7 +220,7 @@ export function MessageBubble({
       <div className="message-wrapper message-tool">
         <div className="message-wrapper-inner">
           <CollapsibleToolCard
-            title={t(localToolLabels[message.toolResult?.name ?? ""] ?? message.toolResult?.name ?? "tool")}
+            title={t(toolLabels[message.toolResult?.name ?? ""] ?? message.toolResult?.name ?? "tool")}
             type="result"
             isError={message.toolResult?.isError}
             defaultCollapsed={!!message.dbId}
@@ -329,7 +330,7 @@ export function MessageBubble({
               return (
                 <CollapsibleToolCard
                   key={i}
-                  title={t(localToolLabels[tc.name] ?? tc.name)}
+                  title={t(toolLabels[tc.name] ?? tc.name)}
                   type="call"
                   defaultCollapsed={!!message.dbId}
                 >
@@ -347,7 +348,8 @@ export function MessageBubble({
           <div className="tool-running" role="status">
             <TypingDots />
             <span className="tool-running-label">
-              {t("正在执行工具")}{t(localToolLabels[message.toolCalls![message.toolCalls!.length - 1].name] ?? message.toolCalls![message.toolCalls!.length - 1].name)}…
+              {t("正在执行工具")}
+              {t(toolLabels[message.toolCalls![message.toolCalls!.length - 1].name] ?? message.toolCalls![message.toolCalls!.length - 1].name)}…
             </span>
           </div>
         )}

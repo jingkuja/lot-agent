@@ -46,6 +46,7 @@ interface WorkspaceProps {
   modelCatalog: ModelCatalog;
   onLogout: () => void;
   onNavigateDigitalEmployee?: () => void;
+  onNavigateComicDrama?: () => void;
   onNavigateAssistant?: () => void;
   /** Agents with their own product entry, kept out of the launcher. */
   hiddenAgentIds?: string[];
@@ -76,6 +77,7 @@ export function Workspace({
   modelCatalog,
   onLogout,
   onNavigateDigitalEmployee,
+  onNavigateComicDrama,
   onNavigateAssistant,
   hiddenAgentIds,
   lockedAgentId,
@@ -489,6 +491,7 @@ export function Workspace({
           onOpenDigitalTwin={() => openKnowledge("digital-twin")}
           onOpenAssistant={isLocked ? onNavigateAssistant : () => {}}
           onOpenDigitalEmployee={onNavigateDigitalEmployee}
+          onOpenComicDrama={onNavigateComicDrama}
           activeModule={isLocked ? "digitalEmployee" : "assistant"}
           balanceRefreshKey={balanceRefreshKey}
           digitalEmployeeBadge={digitalEmployeeBadge}

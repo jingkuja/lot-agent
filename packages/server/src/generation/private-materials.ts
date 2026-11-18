@@ -15,6 +15,7 @@ export interface PrivateMaterialOptions {
   masterKey?: string;
   now?: () => number;
   publicBaseUrl?: string;
+  materialPath?: string;
 }
 
 interface UploadLookup {
@@ -74,7 +75,7 @@ export function signPrivateMaterial(asset: PrivateMaterialAsset, options: Privat
   const now = (options.now ?? Date.now)();
   const claim = { purpose: PURPOSE, id: asset.id, owner: asset.user_id, key: asset.storage_key, expires: now + TOKEN_TTL_MS };
   const token = Buffer.from(secretBox(options).seal(JSON.stringify(claim))).toString("base64url");
-  return `${publicBase(options)}${UPLOAD_PATH}${encodeURIComponent(asset.storage_key)}?${TOKEN_PARAMETER}=${token}`;
+  return `${publicBase(options)}${options.materialPath ?? UPLOAD_PATH}${encodeURIComponent(asset.storage_key)}?${TOKEN_PARAMETER}=${token}`;
 }
 
 /** A short-lived link to the owner's private generated file (`/static/assets/<key>`), such as a marketing clip or

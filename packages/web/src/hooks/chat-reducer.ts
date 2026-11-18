@@ -3,6 +3,8 @@ import type { GenerationComposite, GenerationRedo, WhiteBackgroundCheck } from "
 
 export interface GenerationView {
   mediaType: "image" | "video";
+  /** Generation requested through a chat tool leaves the text input available. */
+  background?: boolean;
   /** `download_failed`: the vendor produced the media but the server-side
    * download of it failed — recoverable, the card offers a re-download. */
   status: "generating" | "completed" | "failed" | "cancelled" | "download_failed";
@@ -38,6 +40,7 @@ export interface GenerationView {
 function keepGenerationContext(next: GenerationView, previous?: GenerationView): GenerationView {
   return {
     ...next,
+    background: next.background ?? previous?.background,
     settings: next.settings ?? previous?.settings,
     scene: next.scene ?? previous?.scene,
     composites: next.composites ?? previous?.composites,
@@ -151,8 +154,7 @@ export type ChatAction =
       generation: GenerationView;
     }
   | { type: "generation_progress"; messageId: string; progress?: number }
-  /** Terminal generation state (completed/failed/cancelled) — also ends the streaming lock. */
-  | { type: "generation_finished"; messageId: string; generation: GenerationView }
+  | { type: "generation_finished"; messageId: string; generation: GenerationView; background?: boolean }
   /** A picture joined from a finished generation's images was stored. */
   | { type: "generation_composited"; messageId: string; composite: GenerationComposite }
   /** One typeset image was rendered again with new wording; pictures joined from the old one are gone. */
@@ -291,7 +293,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "generation_finished":
       return {
         ...state,
-        isStreaming: false,
+        isStreaming: action.background ? state.isStreaming : false,
         messages: state.messages.map((m) =>
           m.id === action.messageId
             ? { ...m, generation: keepGenerationContext(action.generation, m.generation) }

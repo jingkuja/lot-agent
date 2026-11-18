@@ -39,6 +39,7 @@ function parallelSameNameScript(): ChatChunk[][] {
 function fakeService(opts: {
   script: ChatChunk[][];
   conversationModel?: string | null;
+  conversationMetadata?: Record<string, unknown>;
   apiKey?: string;
   catalogModels?: string[];
 }) {
@@ -90,7 +91,7 @@ function fakeService(opts: {
       getConversation: vi.fn(async () => ({
         id: "c1",
         model: opts.conversationModel ?? null,
-        metadata: {},
+        metadata: opts.conversationMetadata ?? {},
       })),
       setConversationModel: vi.fn(async () => {}),
       getUserApiKey: vi.fn(async () => opts.apiKey ?? null),
@@ -132,6 +133,66 @@ async function drain(events: AsyncIterable<unknown>): Promise<unknown[]> {
   for await (const e of events) out.push(e);
   return out;
 }
+
+describe("standalone chat video generation", () => {
+  function setup(agentId = "general") {
+    const { fake, repo, calls } = fakeService({
+      conversationMetadata: { digitalEmployeeFeatureScope: "employee" },
+      script: [[
+        { type: "text", content: "我不能直接生成视频文件，只能给出提示词。" },
+        { type: "done", usage: { promptTokens: 1, completionTokens: 1 } },
+      ]],
+    });
+    const execute = vi.fn<Tool["execute"]>().mockResolvedValue({ content: '{"status":"queued","taskId":"job"}' });
+    fake.toolRegistry.register({ name: "generate_video", description: "Generate a video", parameters: { type: "object" }, effect: "write", execute });
+    const definition = fake.agentRegistry.get("general")!;
+    vi.spyOn(fake.agentRegistry, "get").mockReturnValue({ ...definition, id: agentId, toolNames: ["generate_video"] });
+    if (agentId === "digital_employee") registerAgentExtension(createDigitalEmployeeExtension());
+    const run = (prompt: string, opts?: Parameters<AgentService["streamAgentResponse"]>[6]) =>
+      drain(fake.streamAgentResponse("c1", prompt, agentId, "u1", [], undefined, opts));
+    return { run, execute, repo, calls };
+  }
+
+  it.each(["general", "digital_employee"])("submits an explicit video request once in %s without a text-only response", async agentId => {
+    const { run, execute, repo, calls } = setup(agentId);
+    const prompt = "请生成一个8秒的小胖跳舞视频，1080P，9:16";
+    const events = await run(prompt);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0][0]).toEqual({ prompt, durationSec: 8, resolution: "1080p", ratio: "9:16" });
+    expect(events.map(event => (event as { type: string }).type)).toEqual(["tool_call", "tool_result", "text", "done"]);
+    expect(repo.saveToolResult).toHaveBeenCalledOnce();
+    expect(repo.saveFinalAssistant).toHaveBeenCalledWith("c1", "已提交视频生成，请查看下方生成卡片。", [], undefined, undefined,
+      expect.objectContaining({ status: "completed" }));
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    "生成一个小胖跳舞的视频提示词", "制作一份关于短视频，内容是小胖跳舞的策划", "生成两个小胖跳舞视频", "生成这个视频", "请生成一个视频",
+  ])("leaves ambiguous or text deliverables with the model: %s", async prompt => {
+    const { run, execute, calls } = setup();
+    await run(prompt);
+    expect(execute).not.toHaveBeenCalled();
+    expect(calls[0].find(msg => msg.role === "system")?.content).toEqual(expect.stringContaining("call generate_video to submit it"));
+  });
+
+  it("respects channel restrictions and does not advertise a blocked video tool", async () => {
+    const { run, execute, calls } = setup();
+    await run("生成一个小胖跳舞的视频", { channel: "feishu" });
+    expect(execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(calls[0])).not.toContain("generate_video");
+  });
+
+  it("does not report a submission or retry when the video model is unavailable", async () => {
+    const { run, execute, repo, calls } = setup();
+    execute.mockResolvedValueOnce({ content: "当前账号无法使用 spacebunny 视频模型", isError: true, errorKind: "permission" });
+    const events = await run("生成一个小胖跳舞的视频");
+    expect(events.at(-1)).toMatchObject({ type: "done", status: "failed" });
+    expect(repo.saveFinalAssistant).toHaveBeenCalledWith("c1", "当前账号无法使用 spacebunny 视频模型", [], undefined, undefined,
+      expect.objectContaining({ status: "failed" }));
+    expect(execute).toHaveBeenCalledOnce();
+    expect(calls).toHaveLength(0);
+  });
+});
 
 it("Feishu preserves the same Web Agent tool allowlist, including document tools", async () => {
   const { fake } = fakeService({ script: [[

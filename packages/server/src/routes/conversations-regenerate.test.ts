@@ -4,7 +4,7 @@ import { createConversationRoutes } from "./conversations.js";
 
 function fakeService(opts: {
   conversationOwner?: string | null;
-  deleteResult?: boolean;
+  deleteResult?: boolean | "paid_generation";
 } = {}) {
   const owner = opts.conversationOwner === undefined ? "u1" : opts.conversationOwner;
   return {
@@ -66,5 +66,12 @@ describe("POST /conversations/:id/regenerate", () => {
     const res = await regenerate(app(service), "some-other-convo-message");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Not found" });
+  });
+
+  it("rejects regenerating a turn that already submitted a media job", async () => {
+    const service = fakeService({ deleteResult: "paid_generation" });
+    const res = await regenerate(app(service), "m1");
+    expect(res.status).toBe(409);
+    expect(service.db.releaseConversationRun).toHaveBeenCalledTimes(1);
   });
 });

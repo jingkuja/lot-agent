@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { comicDramaCapabilitiesSchema } from "@lot-agent/core/comic-drama";
 import { api } from "../api/client.js";
 import { modelDisplayName } from "../lib/model-filter.js";
 import { LOCALE_STORAGE_KEY, isInternational, resolveLocale, translate, type Locale } from "./locale.js";
@@ -7,11 +8,13 @@ const LanguageContext = createContext({
   locale: "zh" as Locale,
   enabled: false,
   showCompliance: true,
+  comicDramaEnabled: false,
   setLocale: (_locale: Locale) => {},
 });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(false);
+  const [comicDramaEnabled, setComicDramaEnabled] = useState(false);
   const [showCompliance, setShowCompliance] = useState(true);
   const [locale, updateLocale] = useState<Locale>("zh");
   const [ready, setReady] = useState(false);
@@ -24,6 +27,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       let saved: string | null = null;
       try { saved = localStorage.getItem(LOCALE_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
       setEnabled(isInternational(config.globle));
+      setComicDramaEnabled(comicDramaCapabilitiesSchema.safeParse(config).data?.comicDramaEnabled === true);
       setShowCompliance(config.showCompliance !== false);
       updateLocale(resolveLocale(config.globle, saved));
     }).catch(() => { /* Older/offline servers keep the Chinese interface. */ })
@@ -41,7 +45,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : locale;
     document.title = translate("借势智算", locale);
   }, [locale]);
-  const value = useMemo(() => ({ locale, enabled, showCompliance, setLocale }), [locale, enabled, showCompliance, setLocale]);
+  const value = useMemo(() => ({ locale, enabled, showCompliance, comicDramaEnabled, setLocale }),
+    [locale, enabled, showCompliance, comicDramaEnabled, setLocale]);
   return <LanguageContext.Provider value={value}>{ready ? children : null}</LanguageContext.Provider>;
 }
 

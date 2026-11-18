@@ -104,9 +104,8 @@ function devProxyPlugin(mode: string): Plugin {
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), devProxyPlugin(mode)],
-  // Relative asset URLs so the same dist works when served from the nginx root,
-  // the desktop shell's loopback server, or opened via file:// for debugging.
-  base: "./",
+  // Nginx and Electron both serve assets at the origin root, including on nested workspace deep links.
+  base: "/",
   server: {
     // Let a phone or another machine on the LAN open the dev workspace via
     // this machine's IP address. The API remains behind the same Vite proxy.

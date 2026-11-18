@@ -27,9 +27,11 @@ describe.skipIf(process.env.REACT_PG_TEST !== "1")("durable ReAct state on Postg
     await pool.query(`CREATE SCHEMA ${schema}`);
     schemaCreated = true;
     await pool.query(`CREATE TABLE conversations(id UUID PRIMARY KEY,user_id TEXT,active_run_id UUID,run_started_at TIMESTAMPTZ,
-      next_seq BIGINT DEFAULT 0,metadata JSONB DEFAULT '{}');
+      next_seq BIGINT DEFAULT 0,metadata JSONB DEFAULT '{}',agent_id TEXT DEFAULT 'general');
       CREATE TABLE messages(id UUID PRIMARY KEY,conversation_id UUID,role TEXT,content TEXT,tool_call_id TEXT,
-        token_count INTEGER,model TEXT,latency_ms INTEGER,metadata JSONB,status TEXT,seq BIGINT);`);
+        token_count INTEGER,model TEXT,latency_ms INTEGER,metadata JSONB,status TEXT,seq BIGINT);
+      CREATE TABLE tasks(id UUID PRIMARY KEY,type TEXT,user_id TEXT,input JSONB,status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,error TEXT,error_code TEXT,updated_at TIMESTAMPTZ DEFAULT now());`);
     await agentRunState.up(pool);
     await pool.query(`INSERT INTO conversations(id,user_id,active_run_id,run_started_at) VALUES($1,'owner',$2,now())`, [conversationId, firstRun]);
     repository = new RunRepository(pool);
@@ -90,5 +92,36 @@ describe.skipIf(process.env.REACT_PG_TEST !== "1")("durable ReAct state on Postg
     expect((await pool.query("SELECT metadata FROM conversations WHERE id=$1", [conversationId])).rows[0].metadata.contextSummary).toBeDefined();
     expect(await db.deleteMessagesFromAndAfter(conversationId, messageId)).toBe(true);
     expect((await pool.query("SELECT metadata FROM conversations WHERE id=$1", [conversationId])).rows[0].metadata).toEqual({ keep: true });
+  });
+
+  it("creates media task and receipt together under the active lease, then fences late delivery", async () => {
+    const id = randomUUID(), runId = randomUUID(), messageId = randomUUID(), taskId = randomUUID(), userMessageId = randomUUID();
+    await pool.query("INSERT INTO conversations(id,user_id,active_run_id) VALUES($1,'owner',$2)", [id, runId]);
+    await db.addMessage(userMessageId, id, "user", "Generate a clip", { runId });
+    const request = {
+      taskId, messageId, runId, conversationId: id, userId: "owner", agentId: "general", type: "video.generate", model: "grok-imagine-video-1.5",
+      job: { conversationId: id, assistantMessageId: messageId }, metadata: { taskId, chatGeneration: true, status: "generating" },
+    };
+    expect(await db.createChatGeneration({ ...request, userId: "other" })).toBe(false);
+    expect(await db.createChatGeneration({ ...request, runId: randomUUID() })).toBe(false);
+    expect(await db.getTask(taskId)).toBeNull();
+    expect(await db.getGenerationMessage(messageId, id, "owner")).toBeNull();
+    expect(await db.createChatGeneration(request)).toBe(true);
+    expect(await db.deleteMessagesFromAndAfter(id, userMessageId)).toBe("paid_generation");
+    expect(await db.failUnpublishedChatGeneration(taskId, messageId, "Queue unavailable")).toBe(true);
+    expect(await db.getTask(taskId)).toMatchObject({ status: "failed" });
+    expect(await db.getGenerationMessage(messageId, id, "owner")).toMatchObject({
+      status: "failed", metadata: { status: "failed", chatGeneration: true, error: "Queue unavailable" },
+    });
+
+    const nextTaskId = randomUUID(), nextMessageId = randomUUID();
+    expect(await db.createChatGeneration({
+      ...request, taskId: nextTaskId, messageId: nextMessageId, job: { ...request.job, assistantMessageId: nextMessageId },
+      metadata: { ...request.metadata, taskId: nextTaskId },
+    })).toBe(true);
+    await pool.query("UPDATE tasks SET status='running', attempts=1 WHERE id=$1", [nextTaskId]);
+    expect(await db.failUnpublishedChatGeneration(nextTaskId, nextMessageId, "Late queue response")).toBe(false);
+    await db.setTaskError(nextTaskId, "Worker could not initialize", "MODEL_AUTH_REQUIRED");
+    expect(await db.getGenerationMessage(nextMessageId, id, "owner")).toMatchObject({ status: "failed", model: "grok-imagine-video-1.5" });
   });
 });

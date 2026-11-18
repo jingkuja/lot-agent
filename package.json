@@ -37,6 +37,8 @@
     "check:agent-navigation:ui": "node packages/server/scripts/check-agent-navigation-ui.mjs",
     "check:marketing-video:ui": "node packages/server/scripts/check-marketing-video-ui.mjs",
     "check:marketing-video:db": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-video-db.ts",
+    "check:comic-drama:workspace": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-comic-drama-workspace.ts",
+    "check:comic-drama:media": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-comic-drama-media.ts",
     "check:marketing-video:queue": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/check-marketing-video-queue.ts",
     "check:digital-twin:ui": "node packages/server/scripts/check-digital-twin-ui.mjs",
     "knowledge:backup": "pnpm --filter @lot-agent/server exec node --import tsx/esm scripts/knowledge-backup.ts",
