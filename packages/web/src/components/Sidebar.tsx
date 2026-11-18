@@ -108,13 +108,27 @@ export function Sidebar({
         disabled={switchDisabled}
       />
       <div className="sidebar-recent-header">
-        <button className="btn-new sidebar-create-project" onClick={() => { setCreating(true); setError(""); }} title={t("创建项目")}>{t("创建项目")}</button>
+        <button
+          className="btn-new sidebar-create-project"
+          onClick={() => {
+            setCreating(true);
+            setError("");
+          }}
+          title={t("创建项目")}
+        >
+          <svg className="btn-new-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+            <path d="M12 10.5v5M9.5 13h5" />
+          </svg>
+          {t("创建项目")}
+        </button>
         <button className="btn-new" onClick={onCreate} title={t("新建对话")}>
-          <svg className="btn-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+          <svg className="btn-new-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden>
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
             <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
-          {t("新对话")}</button>
+          {t("新对话")}
+        </button>
       </div>
       {creating && <form className="sidebar-project-form" onSubmit={async (e) => {
         e.preventDefault(); if (!name.trim() || busy) return;
