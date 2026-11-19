@@ -262,7 +262,7 @@ export function ImageSettingsPicker({
   const allRatios: string[] = [IMAGE_AUTO_RATIO, ...IMAGE_RATIOS];
   const firstRow = allRatios.slice(0, RATIO_ROW);
   const shownRatios = ratiosOpen ? allRatios : firstRow.includes(ratio) ? firstRow : [...firstRow.slice(0, -1), ratio];
-  const modelOptions = [...models].sort((a, b) => Number(isLingquImage(b.id)) - Number(isLingquImage(a.id)));
+  const modelOptions = [...models].sort((a, b) => Number(isLingquImage(a.id)) - Number(isLingquImage(b.id)));
 
   return (
     <div className="media-picker" ref={wrapRef}>
@@ -348,12 +348,11 @@ export function ImageSettingsPicker({
                   {modelOptions.map((model) => {
                     const description = imageModelDescription(model.id) ?? model.description;
                     const name = t(modelName(model.label ?? model.id));
-                    const featured = isLingquImage(model.id) ? " image-model-card--featured" : "";
                     return (
                       <button
                         key={model.id}
                         type="button"
-                        className={`image-model-card${featured}${model.id === selectedModel ? " active" : ""}`}
+                        className={`image-model-card${model.id === selectedModel ? " active" : ""}`}
                         onClick={() => onModelChange(model.id)}
                         aria-pressed={model.id === selectedModel}
                         aria-label={name}

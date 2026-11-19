@@ -82,11 +82,11 @@ describe("image composer settings", () => {
     expect(button("默认").getAttribute("aria-pressed")).toBe("true");
     expect(button("电商爆款").getAttribute("aria-pressed")).toBe("false");
     expect([...document.querySelectorAll(".image-model-card")].map((item) => item.getAttribute("aria-label"))).toEqual([
-      "电商爆款", "默认", "旗舰",
+      "默认", "旗舰", "电商爆款",
     ]);
-    expect(button("电商爆款").querySelector("small")?.textContent).toBe("复刻爆款，模特出镜无限制。");
+    expect(button("电商爆款").querySelector("small")?.textContent).toBe("复刻爆款，模特无限制");
     expect(button("默认").querySelector("small")?.textContent).toBe("快速高质量出图");
-    expect(button("旗舰").querySelector("small")?.textContent).toBe("追求更高品质的细节。");
+    expect(button("旗舰").querySelector("small")?.textContent).toBe("追求更高品质的细节");
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="宽度"]')).toBeNull();
     expect(document.querySelector('.input-box .model-picker')).toBeNull();

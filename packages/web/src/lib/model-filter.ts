@@ -37,8 +37,8 @@ export function isLingquImage(id: string | null | undefined): boolean {
 }
 
 export function imageModelDescription(id: string): string | undefined {
-  if (isLingquImage(id)) return "复刻爆款，模特出镜无限制。";
-  if (isGptImage25Sunburst(id)) return "追求更高品质的细节。";
+  if (isLingquImage(id)) return "复刻爆款，模特无限制";
+  if (isGptImage25Sunburst(id)) return "追求更高品质的细节";
   if (isGptImage25Flare(id) || isGptImage2(id)) return "快速高质量出图";
   return undefined;
 }
@@ -47,7 +47,7 @@ export function imageModelDescription(id: string): string | undefined {
  * Image-generation picker: never show vendor ids.
  * Prefer flare (默认) + sunburst (旗舰); if both are absent, gpt-image-2 as 默认;
  * Also expose linqu-image / lingqu-image as 电商爆款, after standard models so the initial selection stays 默认.
- * The settings panel places 电商爆款 visually above the standard pair.
+ * The settings panel places 电商爆款 in the third column alongside the standard pair.
  */
 export function visibleImageModels<T extends { id: string }>(models: T[]): Array<T & { label: string }> {
   const labeled = (model: T, label: string): T & { label: string } => ({ ...model, label });

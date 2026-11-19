@@ -6,6 +6,7 @@ import { encryptPassword } from "../lib/rsa.js";
 import { LegalModal } from "./LegalModal.js";
 import { PasswordReset } from "./PasswordReset.js";
 import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
+import { BRAND_LOGO_SRC } from "../assets/brand-logo.js";
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -188,55 +189,163 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
   return (
     <div className={`login-page login-page-${mode}`}>
-      <section className="login-showcase" aria-label={t("借势智算产品介绍")}>
+      <section className="login-showcase" aria-label={t("万象智枢产品介绍")}>
+        <div className="login-ai-canvas" aria-hidden="true">
+          <div className="login-ai-grid" />
+          <div className="login-ai-aurora login-ai-aurora-a" />
+          <div className="login-ai-aurora login-ai-aurora-b" />
+          <svg className="login-ai-network" viewBox="0 0 520 520" fill="none">
+            <defs>
+              <linearGradient id="loginAiOrbit" x1="60" y1="40" x2="460" y2="460" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.65" />
+                <stop offset="52%" stopColor="var(--accent-2)" stopOpacity="0.45" />
+                <stop offset="100%" stopColor="var(--gold)" stopOpacity="0.35" />
+              </linearGradient>
+              <radialGradient id="loginAiCoreGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.42" />
+                <stop offset="55%" stopColor="var(--accent-2)" stopOpacity="0.14" />
+                <stop offset="100%" stopColor="var(--accent-2)" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="330" cy="186" r="168" fill="url(#loginAiCoreGlow)" />
+            <circle cx="330" cy="186" r="154" stroke="url(#loginAiOrbit)" strokeWidth="1" strokeDasharray="4 8" />
+            <circle cx="330" cy="186" r="106" stroke="url(#loginAiOrbit)" strokeWidth="1.1" strokeOpacity="0.7" />
+            <circle cx="330" cy="186" r="56" stroke="var(--accent)" strokeWidth="1.2" strokeOpacity="0.55" />
+            <path
+              d="M176 186L274 186M330 32L330 130M386 186L484 186M221 77L290 146M439 77L370 146M221 295L290 226M439 295L370 226"
+              stroke="url(#loginAiOrbit)"
+              strokeWidth="1"
+              strokeOpacity="0.5"
+            />
+            <path
+              d="M330 162L336 180L354 186L336 192L330 210L324 192L306 186L324 180Z"
+              fill="var(--accent)"
+              fillOpacity="0.88"
+            />
+            <circle className="login-ai-node" cx="221" cy="77" r="4.5" fill="var(--accent)" />
+            <circle className="login-ai-node login-ai-node-delay" cx="439" cy="77" r="4" fill="var(--accent-2)" />
+            <circle className="login-ai-node login-ai-node-slow" cx="439" cy="295" r="5" fill="var(--gold)" />
+            <circle className="login-ai-node" cx="221" cy="295" r="4" fill="var(--accent-2)" />
+            <circle cx="176" cy="186" r="3" fill="var(--login-hero-text)" fillOpacity="0.7" />
+            <circle cx="484" cy="186" r="3" fill="var(--login-hero-text)" fillOpacity="0.6" />
+            <circle cx="330" cy="32" r="3.5" fill="var(--accent)" fillOpacity="0.85" />
+          </svg>
+        </div>
         <LandscapeBackdrop className="login-landscape" />
 
         <div className="login-brand">
-          <span className="login-brand-mark" aria-hidden>
-            <svg viewBox="0 0 48 48" width="28" height="28">
-              <defs>
-                <linearGradient id="loginCloud" x1="7" y1="10" x2="42" y2="39" gradientUnits="userSpaceOnUse">
-                  <stop offset="0" stopColor="currentColor" stopOpacity="0.82" />
-                  <stop offset="1" stopColor="currentColor" />
-                </linearGradient>
-              </defs>
-              <g fill="url(#loginCloud)">
-                <circle cx="18" cy="27" r="7" />
-                <circle cx="28" cy="22" r="9" />
-                <circle cx="34" cy="29" r="5.5" />
-                <rect x="15" y="27" width="21" height="8" rx="4" />
-              </g>
-              <path d="M20 28.5h8M24 24.5v8" stroke="var(--login-hero)" strokeWidth="2.4" strokeLinecap="round" />
-            </svg>
+          <span className="login-brand-mark" aria-hidden="true">
+            <img src={BRAND_LOGO_SRC} alt="" />
           </span>
-          <span>{t("借势智算")}</span>
+          <span className="login-brand-name">{t("万象智枢")}</span>
         </div>
 
         <div className="login-showcase-content">
-          <h1>{t("让每一个想法")}<br />{t("都有一支")} {t("AI 团队")}</h1>
+          <div className="login-ai-badge">
+            <span className="login-ai-badge-dot" aria-hidden="true" />
+            <span>{t("多模态 AI 智能体中枢")}</span>
+          </div>
+
+          <h1>
+            {t("让每一个想法")}
+            <br />
+            {t("都有一支")} <span className="login-headline-accent">{t("AI 团队")}</span>
+          </h1>
           <p className="login-showcase-copy">
-            {t("汇集创作、图像、视频与办公智能体，让复杂工作在一个流畅的工作空间里完成。")}</p>
+            {t("汇集创作、图像、视频与办公智能体，让复杂工作在一个流畅的工作空间里完成。")}
+          </p>
 
           <ul className="login-agents" aria-label={t("多智能体能力展示")}>
-            <li>{t("文案创作")}</li>
-            <li>{t("图片生成")}</li>
-            <li>{t("视频生成")}</li>
-            <li>{t("PPT 制作")}</li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-general" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3l1.8 4.6L18.5 9.4l-4.7 1.8L12 16l-1.8-4.8L5.5 9.4l4.7-1.8z" />
+                  <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("文案创作")}</strong>
+                <span>{t("灵感企划与多风格成稿")}</span>
+              </div>
+            </li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-image" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="3" />
+                  <circle cx="8.5" cy="9.5" r="1.5" />
+                  <path d="M21 16l-4.6-4.6a1.5 1.5 0 0 0-2.1 0L7 19" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("图片生成")}</strong>
+                <span>{t("海报设计与视觉出图")}</span>
+              </div>
+            </li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-video" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="5" width="18" height="14" rx="3" />
+                  <path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("视频生成")}</strong>
+                <span>{t("分镜脚本与成片生成")}</span>
+              </div>
+            </li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-ppt" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="12" rx="2.5" />
+                  <path d="M8 20h8M12 16v4M7.5 11.5l2.5-2.5 2 2 4-4" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("PPT 制作")}</strong>
+                <span>{t("大纲梳理与演示排版")}</span>
+              </div>
+            </li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-employee" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="8" r="3.5" />
+                  <path d="M4.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6" />
+                  <path d="M18.5 5.5h3M20 4v3" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("数字员工")}</strong>
+                <span>{t("企业经营与营销助手")}</span>
+              </div>
+            </li>
+            <li className="login-agent-card">
+              <span className="login-agent-icon login-agent-icon-comic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                  <path d="M9.5 4v16M15.5 4v16M3 10.5h6.5M15.5 13.5H21" />
+                </svg>
+              </span>
+              <div className="login-agent-meta">
+                <strong>{t("漫剧工厂")}</strong>
+                <span>{t("专业 AI 漫剧制作平台")}</span>
+              </div>
+            </li>
           </ul>
 
           <div className="login-showcase-points">
-            <span>{t("多模型，按需调用")}</span>
-            <span>{t("多智能体，协同交付")}</span>
+            <span><i aria-hidden="true" />{t("多模型，按需调用")}</span>
+            <span><i aria-hidden="true" />{t("多智能体，协同交付")}</span>
+            <span><i aria-hidden="true" />{t("知识库，专属沉淀")}</span>
           </div>
         </div>
-
-        <p className="login-showcase-note">{t("借势而为 · 智算未来")}</p>
       </section>
 
       <section className="login-access">
-        <div className="login-mobile-brand" aria-label={t("借势智算")}>
-          <span aria-hidden>✦</span>
-          {t("借势智算")}</div>
+        <div className="login-mobile-brand" aria-label={t("万象智枢")}>
+          <span className="login-mobile-brand-mark" aria-hidden="true">
+            <img src={BRAND_LOGO_SRC} alt="" />
+          </span>
+          {t("万象智枢")}</div>
         <div className="login-card">
           <LanguageSelect />
           <div className="login-card-heading">
