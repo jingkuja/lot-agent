@@ -1,268 +1,2174 @@
+/* ── Comic Drama Studio Workbench (漫剧工厂创作工作台) ── */
+/* Uses only theme CSS variables + color-mix so light & dark modes stay harmonious and vibrant. */
+
 .comic-workspace {
+  --cd-jade: var(--accent);
+  --cd-azure: var(--accent-2);
+  --cd-gold: var(--gold);
+  --cd-violet: var(--tag-image-fg);
+  --cd-coral: var(--error);
+  --cd-surface: color-mix(in srgb, var(--bg-card) 92%, var(--bg));
+  --cd-glass: color-mix(in srgb, var(--bg-card) 78%, transparent);
+  --cd-line: color-mix(in srgb, var(--border) 86%, var(--accent) 14%);
+  --cd-glow: 0 14px 34px -18px color-mix(in srgb, var(--accent) 34%, transparent);
+
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
   height: 100%;
   overflow: auto;
   color: var(--text);
-  background: var(--bg);
-}
-.comic-sidebar { background: var(--bg-sidebar); border-inline-end: 1px solid var(--border); }
-.comic-sidebar nav { display: grid; gap: 4px; padding: 16px 12px; }
-.comic-sidebar nav button { display: grid; gap: 4px; width: 100%; text-align: start; padding: 10px 12px; border-color: transparent; }
-.comic-sidebar nav button[aria-current] { background: var(--bg-active); border-color: var(--border); }
-.comic-sidebar nav strong { overflow-wrap: anywhere; }
-.comic-sidebar nav small, .comic-heading small, .comic-history-title small, .comic-script small { color: var(--text-secondary); }
-.comic-page { width: 100%; max-width: 1450px; margin-inline: auto; padding: clamp(18px, 4vw, 48px); min-width: 0; }
-.comic-heading { display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 22px; flex-wrap: wrap; }
-.comic-heading h1, .comic-empty h1 { margin: 0; font-size: clamp(24px, 4vw, 42px); line-height: 1.16; overflow-wrap: anywhere; }
-.comic-heading p { max-width: 64ch; margin-block: 10px 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
-.comic-heading small { display: block; margin-bottom: 5px; }
-.comic-heading .comic-actions small { margin: 0; }
-.comic-ratio { padding: 4px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 5px; font-variant-numeric: tabular-nums; }
-.comic-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.comic-page button, .comic-sidebar nav button, .comic-dialog button {
-  cursor: pointer; padding: 7px 12px; border: 1px solid var(--border-input); border-radius: 8px;
-  background: var(--bg-card); color: var(--text); font: inherit;
-}
-.comic-page button:hover:not(:disabled), .comic-sidebar nav button:hover:not(:disabled), .comic-dialog button:hover:not(:disabled) { background: var(--bg-hover); }
-.comic-workspace button:disabled { opacity: .64; cursor: default; }
-.comic-page button.primary, .comic-sidebar nav button.primary, .comic-dialog button.primary {
-  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); font-weight: 650;
-}
-.comic-page button.primary:hover, .comic-sidebar nav button.primary:hover, .comic-dialog button.primary:hover { background: var(--accent-hover); }
-.comic-workspace :focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
-.comic-workspace label { display: grid; gap: 5px; min-width: 0; }
-.comic-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.comic-page :is(input:not([type=checkbox]), select, textarea), .comic-dialog :is(input, select, textarea) {
-  width: 100%; min-width: 0; padding: 9px; color: var(--text); background: var(--bg-input);
-  border: 1px solid var(--border-input); border-radius: 7px; font: inherit; box-sizing: border-box;
-}
-.comic-workspace textarea { resize: vertical; }
-.comic-workspace fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-.comic-empty { border: 1px dashed var(--border-input); border-radius: 12px; padding: clamp(18px, 5vw, 58px); background: var(--bg-card); }
-.comic-empty p { color: var(--text-secondary); margin-block: 10px 18px; }
-.comic-steps { display: flex; gap: 2px; overflow: auto; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-.comic-steps button { display: inline-flex; align-items: center; gap: 7px; background: transparent; border-color: transparent; white-space: nowrap; }
-.comic-steps button[aria-pressed=true] { background: var(--bg-active); border-radius: 8px 8px 0 0; box-shadow: inset 0 -2px var(--accent); font-weight: 650; }
-.comic-steps span, .comic-cut-number { font-variant-numeric: tabular-nums; font-size: .88em; }
-.comic-board { display: grid; grid-template-columns: minmax(126px, 200px) minmax(0, 1fr); gap: 16px; align-items: start; }
-.comic-strip { display: grid; gap: 7px; }
-.comic-cut { padding-left: 3px; border-left: 2px solid transparent; }
-.comic-cut.selected { border-color: var(--accent); }
-.comic-cut button { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 6px; width: 100%; text-align: start; overflow-wrap: anywhere; }
-.comic-cut.selected button { background: var(--bg-active); border-color: var(--accent); }
-.comic-cut-number { color: var(--text-secondary); }
-.comic-edit-card { padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
-.comic-edit-card header, .comic-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-.comic-edit-card h2, .comic-edit-card h3 { margin: 0; }
-.comic-edit-card header { margin-bottom: 15px; }
-.comic-section-heading { margin-top: 18px; }
-.comic-subcard { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; display: grid; gap: 9px; }
-.comic-shot-share { font-size: .88em; color: var(--text-secondary); }
-.comic-script small { display: block; margin-top: 8px; }
-.comic-history-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
-.comic-history-controls input:not([type=checkbox]) { width: min(100%, 310px); }
-.comic-history-controls label { display: inline-flex; align-items: center; }
-.comic-history-list { display: grid; gap: 8px; margin-bottom: 12px; }
-.comic-history-list article {
-  display: flex; min-width: 0; justify-content: space-between; align-items: center; flex-wrap: wrap;
-  gap: 8px; padding: 8px 12px; background: var(--bg-card); border-bottom: 1px solid var(--border);
-}
-.comic-history-list .comic-history-title { border: 0; display: grid; text-align: start; gap: 4px; overflow-wrap: anywhere; }
-.comic-error {
-  padding: 10px; margin-bottom: 12px; border: 1px solid var(--border-input); border-inline-start: 3px solid var(--accent-2);
-  background: var(--bg-card);
-}
-.comic-error > button { margin-inline-start: 8px; }
-.comic-compare pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
-.comic-dialog {
-  width: min(500px, calc(100% - 30px)); max-height: calc(100% - 30px); padding: 22px;
-  color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-}
-.comic-dialog::backdrop { background: color-mix(in srgb, var(--text) 40%, transparent); }
-.comic-dialog h2 { margin: 0 0 14px; }
-.comic-dialog fieldset { display: grid; gap: 12px; }
-.comic-dialog .comic-actions { justify-content: end; }
-@media (max-width: 820px) {
-  .comic-workspace { grid-template-columns: minmax(0, 1fr); }
-  .comic-sidebar .brand-card { padding-inline-end: 48px; }
-  .comic-sidebar nav { display: flex; flex-wrap: wrap; }
-  .comic-sidebar nav button { width: auto; }
-  .comic-sidebar { border-inline-end: 0; border-bottom: 1px solid var(--border); }
-}
-@media (max-width: 540px) {
-  .comic-board { grid-template-columns: minmax(0, 1fr); }
-  .comic-strip { grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); }
-  .comic-edit-card { padding: 12px; }
+  background:
+    radial-gradient(48% 36% at 92% 4%, color-mix(in srgb, var(--cd-gold) 12%, transparent), transparent 72%),
+    radial-gradient(42% 38% at 14% 96%, color-mix(in srgb, var(--cd-violet) 10%, transparent), transparent 72%),
+    radial-gradient(38% 34% at 62% 16%, color-mix(in srgb, var(--cd-azure) 9%, transparent), transparent 70%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent) 12%, transparent) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg);
 }
 
+[data-theme="dark"] .comic-workspace {
+  --cd-surface: color-mix(in srgb, var(--bg-card) 92%, var(--bg));
+  --cd-glass: color-mix(in srgb, var(--bg-card) 82%, transparent);
+  --cd-line: color-mix(in srgb, var(--border) 80%, var(--accent) 20%);
+  background:
+    radial-gradient(48% 36% at 92% 4%, color-mix(in srgb, var(--cd-gold) 10%, transparent), transparent 72%),
+    radial-gradient(44% 40% at 14% 96%, color-mix(in srgb, var(--cd-violet) 12%, transparent), transparent 74%),
+    radial-gradient(40% 34% at 60% 14%, color-mix(in srgb, var(--cd-azure) 10%, transparent), transparent 72%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent) 14%, transparent) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg);
+}
+
+/* ── Studio Sidebar Dock ── */
+.comic-sidebar {
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg-sidebar)) 0%, var(--bg-sidebar) 36%, color-mix(in srgb, var(--cd-gold) 3%, var(--bg-sidebar)) 100%);
+  border-inline-end: 1px solid var(--border);
+  min-width: 0;
+}
+
+.comic-nav {
+  display: grid;
+  gap: 14px;
+  padding: 14px 12px 22px;
+  align-content: start;
+}
+
+.comic-nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.comic-nav-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.comic-nav-section::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+
+.comic-sidebar .comic-nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: start;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 550;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.comic-sidebar .comic-nav button:hover:not(:disabled):not(.primary) {
+  background: color-mix(in srgb, var(--bg-card) 82%, var(--accent) 8%);
+  border-color: color-mix(in srgb, var(--border) 75%, var(--accent) 25%);
+  color: var(--text);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] {
+  background: var(--bg-card);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  color: var(--text);
+  font-weight: 650;
+  box-shadow: var(--shadow-sm), inset 3px 0 0 var(--accent);
+}
+
+.comic-sidebar .comic-nav button.comic-nav-new {
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent-grad);
+  color: var(--icon-on-grad);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 10px 22px -10px color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+.comic-sidebar .comic-nav button.comic-nav-new:hover:not(:disabled) {
+  background: var(--accent-grad);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px -10px color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.comic-nav-new-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--icon-on-grad) 20%, transparent);
+}
+
+.comic-sidebar .comic-nav button.comic-nav-current {
+  padding: 10px 11px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  color: var(--text);
+}
+
+.comic-sidebar .comic-nav button.comic-nav-current[aria-current="page"] {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 14%, var(--bg-card)),
+    color-mix(in srgb, var(--cd-azure) 10%, var(--bg-card))
+  );
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: var(--shadow-sm), inset 3px 0 0 var(--accent);
+}
+
+.comic-nav-current-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.comic-nav-current-copy small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.comic-nav-current-copy strong {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.comic-nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--accent);
+  transition: transform 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.comic-nav-icon[data-tone="violet"] {
+  background: color-mix(in srgb, var(--cd-violet) 13%, var(--bg-card));
+  color: var(--cd-violet);
+}
+
+.comic-nav-icon[data-tone="azure"] {
+  background: color-mix(in srgb, var(--cd-azure) 13%, var(--bg-card));
+  color: var(--cd-azure);
+}
+
+.comic-nav-icon[data-tone="gold"] {
+  background: color-mix(in srgb, var(--cd-gold) 18%, var(--bg-card));
+  color: var(--gold-strong);
+}
+
+.comic-nav-icon[data-tone="coral"] {
+  background: color-mix(in srgb, var(--cd-coral) 13%, var(--bg-card));
+  color: var(--cd-coral);
+}
+
+.comic-nav-icon[data-tone="slate"] {
+  background: color-mix(in srgb, var(--text-secondary) 12%, var(--bg-card));
+  color: var(--text-secondary);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon {
+  background: var(--agent-icon-general);
+  color: var(--icon-on-grad);
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon[data-tone="violet"] {
+  background: var(--agent-icon-digital_presenter);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon[data-tone="azure"] {
+  background: var(--agent-icon-image);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon[data-tone="gold"] {
+  background: var(--agent-icon-ppt);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon[data-tone="coral"] {
+  background: var(--agent-icon-video);
+}
+
+.comic-sidebar .comic-nav button[aria-current="page"] .comic-nav-icon[data-tone="slate"] {
+  background: var(--agent-icon-contract);
+}
+
+.comic-sidebar .comic-nav button:hover:not(:disabled) .comic-nav-icon {
+  transform: scale(1.05);
+}
+
+.comic-heading small,
+.comic-history-title small,
+.comic-script small {
+  color: var(--text-secondary);
+}
+
+/* ── Main Workbench Stage ── */
+.comic-page {
+  width: 100%;
+  max-width: 1380px;
+  margin-inline: auto;
+  padding: clamp(22px, 3.6vw, 48px) clamp(16px, 3.4vw, 44px) clamp(28px, 4vw, 56px);
+  min-width: 0;
+}
+
+/* ── Shared Interactive Controls ── */
+.comic-page button,
+.comic-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px 14px;
+  border: 1px solid var(--border-input);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  box-shadow: var(--shadow-sm);
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.comic-page button:hover:not(:disabled),
+.comic-dialog button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-input));
+}
+
+.comic-workspace button:disabled {
+  opacity: 0.56;
+  cursor: default;
+  box-shadow: none;
+}
+
+.comic-page button.primary,
+.comic-dialog button.primary {
+  background: var(--accent-grad);
+  border-color: transparent;
+  color: var(--icon-on-grad);
+  font-weight: 650;
+  box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--accent) 68%, transparent);
+}
+
+.comic-page button.primary:hover:not(:disabled),
+.comic-dialog button.primary:hover:not(:disabled) {
+  background: var(--accent-grad);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px -12px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.comic-workspace :focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+.comic-workspace label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+.comic-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.comic-page :is(input:not([type=checkbox]), select, textarea),
+.comic-dialog :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 450;
+  box-sizing: border-box;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.comic-page :is(input:not([type=checkbox]), select, textarea):focus,
+.comic-dialog :is(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.comic-workspace textarea {
+  resize: vertical;
+  line-height: 1.65;
+}
+
+.comic-workspace fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.comic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Studio Landing Workbench (Empty State Hero) ── */
+.comic-landing {
+  display: grid;
+  gap: 28px;
+  padding-top: 12px;
+}
+
+.comic-empty {
+  border: 1px solid var(--cd-line);
+  border-radius: 20px;
+  padding: clamp(20px, 4vw, 44px);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-empty p {
+  color: var(--text-secondary);
+  margin-block: 10px 18px;
+}
+
+.comic-hero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: clamp(20px, 3vw, 40px);
+  padding: clamp(24px, 3.6vw, 44px);
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background:
+    radial-gradient(62% 80% at 100% 0%, color-mix(in srgb, var(--cd-gold) 15%, transparent), transparent 68%),
+    radial-gradient(54% 72% at 0% 100%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 70%),
+    var(--bg-card);
+  box-shadow: var(--shadow-md), var(--cd-glow);
+}
+
+.comic-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--cd-jade), var(--cd-azure), var(--cd-gold), var(--cd-violet));
+}
+
+.comic-hero-copy {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+.comic-studio-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.comic-kicker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cd-gold);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--cd-gold) 28%, transparent);
+}
+
+.comic-hero h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4.4vw, 52px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  background: linear-gradient(125deg, var(--text) 18%, var(--accent) 68%, var(--cd-azure) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.comic-hero .comic-hero-lead {
+  margin: 0;
+  font-size: clamp(16px, 1.5vw, 19px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.comic-hero .comic-hero-sub {
+  margin: 0;
+  max-width: 48ch;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.comic-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.comic-page button.comic-hero-cta {
+  padding: 12px 22px;
+  border-radius: 13px;
+  font-size: 15px;
+}
+
+.comic-page button.comic-hero-ghost {
+  padding: 11px 16px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg-card) 75%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  color: var(--text);
+}
+
+.comic-hero-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.comic-hero-pills span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--overlay-raise);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.comic-hero-stage {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.comic-hero-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 16px 28px color-mix(in srgb, var(--text) 10%, transparent));
+}
+
+@keyframes comic-float-a {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes comic-float-b {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .comic-art-panel-a { animation: comic-float-a 6.5s ease-in-out infinite; }
+  .comic-art-panel-b { animation: comic-float-b 7.4s ease-in-out infinite; }
+}
+
+/* ── Landing Pipeline & Workbench Dock Sections ── */
+.comic-section-bar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.comic-section-bar small {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.comic-section-bar h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.comic-pipeline-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.comic-pipeline-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: transform 170ms ease, border-color 170ms ease, box-shadow 170ms ease;
+}
+
+.comic-pipeline-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--accent);
+}
+
+.comic-pipeline-card[data-tone="violet"]::before { background: var(--cd-violet); }
+.comic-pipeline-card[data-tone="azure"]::before { background: var(--cd-azure); }
+.comic-pipeline-card[data-tone="gold"]::before { background: var(--cd-gold); }
+.comic-pipeline-card[data-tone="coral"]::before { background: var(--cd-coral); }
+
+.comic-pipeline-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-pipeline-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comic-pipeline-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--agent-icon-general);
+  color: var(--icon-on-grad);
+}
+
+.comic-pipeline-card[data-tone="violet"] .comic-pipeline-icon { background: var(--agent-icon-digital_presenter); }
+.comic-pipeline-card[data-tone="azure"] .comic-pipeline-icon { background: var(--agent-icon-image); }
+.comic-pipeline-card[data-tone="gold"] .comic-pipeline-icon { background: var(--agent-icon-ppt); }
+.comic-pipeline-card[data-tone="coral"] .comic-pipeline-icon { background: var(--agent-icon-video); }
+
+.comic-pipeline-no {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text-muted) 48%, transparent);
+}
+
+.comic-pipeline-card strong {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.comic-pipeline-card p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.comic-shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.comic-page button.comic-shortcut-card {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  text-align: start;
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-page button.comic-shortcut-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-shortcut-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 13px;
+  color: var(--icon-on-grad);
+  background: var(--agent-icon-general);
+}
+
+.comic-shortcut-card[data-tone="violet"] .comic-shortcut-icon { background: var(--agent-icon-digital_presenter); }
+.comic-shortcut-card[data-tone="azure"] .comic-shortcut-icon { background: var(--agent-icon-image); }
+.comic-shortcut-card[data-tone="coral"] .comic-shortcut-icon { background: var(--agent-icon-video); }
+
+.comic-shortcut-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.comic-shortcut-body strong {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.comic-shortcut-body small {
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.comic-shortcut-arrow {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+  transition: transform 160ms ease, color 160ms ease;
+}
+
+.comic-page button.comic-shortcut-card:hover .comic-shortcut-arrow {
+  transform: translateX(3px);
+  color: var(--accent);
+}
+
+/* ── Page Headers & Episode Slate ── */
+.comic-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.comic-heading h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 3.2vw, 36px);
+  font-weight: 800;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.comic-heading p {
+  max-width: 64ch;
+  margin-block: 8px 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.comic-heading small {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.comic-heading .comic-actions small {
+  margin: 0;
+}
+
+.comic-episode-slate {
+  position: relative;
+  overflow: hidden;
+  padding: 20px 24px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, var(--bg-card)) 0%, var(--bg-card) 58%, color-mix(in srgb, var(--cd-gold) 7%, var(--bg-card)) 100%);
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-episode-slate::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--cd-jade), var(--cd-azure), var(--cd-gold));
+}
+
+.comic-episode-meta {
+  min-width: 0;
+}
+
+.comic-episode-series {
+  display: inline-block;
+  padding: 2px 9px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.comic-ratio {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  background: color-mix(in srgb, var(--cd-azure) 10%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--cd-azure) 28%, var(--border));
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-save-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--overlay-raise);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.comic-save-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.comic-save-pill[data-state="saving"]::before { background: var(--cd-gold); }
+.comic-save-pill[data-state="issue"]::before { background: var(--error); }
+.comic-save-pill[data-state="archived"]::before { background: var(--text-muted); }
+
+/* ── Production Stage Ribbon / Stepper Dock ── */
+.comic-steps {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px;
+  margin-bottom: 22px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-card) 72%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-steps button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.comic-steps button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-card) 85%, var(--accent) 8%);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.comic-steps button[aria-pressed="true"] {
+  background: var(--bg-card);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm), inset 0 -2px 0 var(--accent);
+}
+
+.comic-step-index,
+.comic-cut-number {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.comic-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 7px;
+  background: var(--overlay-raise);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.comic-steps button[aria-pressed="true"] .comic-step-index {
+  background: var(--accent-grad);
+  color: var(--icon-on-grad);
+}
+
+.comic-step-icon {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.comic-steps button[aria-pressed="true"] .comic-step-icon {
+  color: var(--accent);
+}
+
+/* ── Storyboard Filmstrip & Shot Sheet ── */
+.comic-board {
+  display: grid;
+  grid-template-columns: minmax(168px, 232px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.comic-strip {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 84%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-strip > p {
+  margin: 4px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.comic-cut {
+  position: relative;
+}
+
+.comic-cut button {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: start;
+  overflow-wrap: anywhere;
+  border-radius: 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.comic-cut.selected button {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--bg-card)), color-mix(in srgb, var(--cd-azure) 7%, var(--bg-card)));
+  border-color: var(--accent);
+  box-shadow: 0 6px 16px -10px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.comic-cut-number {
+  display: inline-grid;
+  place-items: center;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--overlay-raise);
+  color: var(--text-secondary);
+  font-weight: 750;
+}
+
+.comic-cut.selected .comic-cut-number {
+  background: var(--accent-grad);
+  color: var(--icon-on-grad);
+}
+
+.comic-strip .comic-add {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-input));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  color: var(--accent);
+  font-weight: 650;
+  box-shadow: none;
+}
+
+.comic-edit-card {
+  padding: 20px 22px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.comic-edit-card header,
+.comic-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.comic-edit-card h2,
+.comic-edit-card h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 750;
+}
+
+.comic-edit-card header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.comic-section-heading {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.comic-subcard {
+  margin-top: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  border-radius: 13px;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid color-mix(in srgb, var(--accent) 72%, var(--cd-azure));
+  background: color-mix(in srgb, var(--bg) 52%, var(--bg-card));
+}
+
+.comic-shot-share {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cd-gold) 16%, var(--bg-card));
+  color: var(--gold-strong);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-script small {
+  display: block;
+  margin-top: 8px;
+}
+
+/* ── Toolbars & History Lists ── */
+.comic-history-controls,
+.comic-library-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 88%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-history-controls input:not([type=checkbox]) {
+  width: min(100%, 300px);
+}
+
+.comic-history-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comic-library-controls label {
+  min-width: min(200px, 100%);
+}
+
+.comic-history-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.comic-history-list article {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.comic-history-list article:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-history-list .comic-history-title {
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  box-shadow: none;
+  display: grid;
+  justify-items: start;
+  text-align: start;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.comic-history-list .comic-history-title:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent);
+}
+
+.comic-history-list .comic-history-title strong {
+  font-size: 15.5px;
+  font-weight: 700;
+}
+
+.comic-error {
+  padding: 12px 15px;
+  margin-bottom: 14px;
+  border: 1px solid color-mix(in srgb, var(--cd-azure) 32%, var(--border));
+  border-inline-start: 4px solid var(--accent-2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cd-azure) 7%, var(--bg-card));
+}
+
+.comic-error > button {
+  margin-inline-start: 8px;
+}
+
+.comic-compare pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  margin-block: 8px;
+  border-radius: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+/* ── Elevated Studio Dialogs ── */
+.comic-dialog {
+  width: min(520px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  margin: auto;
+  padding: 24px 26px;
+  color: var(--text);
+  background: var(--bg-card);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+}
+
+.comic-dialog::backdrop {
+  background: color-mix(in srgb, var(--text) 42%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.comic-dialog h2 {
+  margin: 0 0 16px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.comic-dialog fieldset {
+  display: grid;
+  gap: 13px;
+}
+
+.comic-dialog .comic-actions {
+  justify-content: end;
+  margin-top: 6px;
+}
+
+/* ── Character & Material Galleries ── */
 .comic-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 1fr));
+  gap: 16px;
   margin-block: 16px;
 }
+
 .comic-library-card {
-  min-width: 0; display: grid; gap: 8px; align-content: start; padding: 9px;
-  overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card);
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
-.comic-library-card small, .comic-dictionary-list small, .comic-audio small { color: var(--text-secondary); }
-.comic-library-card .comic-library-title { border: 0; padding: 4px 0; text-align: start; font-weight: 700; background: transparent; }
+
+.comic-library-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-library-card small,
+.comic-dictionary-list small,
+.comic-audio small {
+  color: var(--text-secondary);
+}
+
+.comic-library-card .comic-library-title {
+  border: 0;
+  padding: 2px 0;
+  justify-content: flex-start;
+  text-align: start;
+  font-size: 15px;
+  font-weight: 750;
+  background: transparent;
+  box-shadow: none;
+}
+
+.comic-library-card .comic-library-title:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent);
+}
+
 .comic-media-well {
-  display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 5px; background: var(--bg-hover);
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 65%),
+    var(--bg-hover);
 }
-.comic-media-well img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
-.comic-character-initial { color: var(--accent); font-size: 2.4rem; font-weight: 700; }
-.comic-audio { display: grid; gap: 6px; padding: 8px 0; }
-.comic-audio audio { width: 100%; min-width: 0; }
-.comic-library-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 16px; }
-.comic-library-controls label { min-width: min(200px, 100%); }
-.comic-library-back { margin-bottom: 16px; }
+
+.comic-media-well img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  min-height: 0;
+}
+
+.comic-character-initial {
+  font-family: var(--font-display);
+  color: var(--accent);
+  font-size: 2.6rem;
+  font-weight: 800;
+  background:
+    radial-gradient(75% 75% at 24% 20%, color-mix(in srgb, var(--cd-violet) 16%, transparent), transparent 70%),
+    radial-gradient(75% 75% at 84% 84%, color-mix(in srgb, var(--cd-gold) 18%, transparent), transparent 70%),
+    color-mix(in srgb, var(--accent) 7%, var(--bg-hover));
+}
+
+.comic-audio {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.comic-audio audio {
+  width: 100%;
+  min-width: 0;
+}
+
+.comic-library-back {
+  margin-bottom: 16px;
+}
+
 .comic-character-profile {
-  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 20px; padding: 14px 0;
-  border-top: 1px solid var(--border); margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 20px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--bg-card);
+  margin-bottom: 16px;
 }
-.comic-character-profile dt { color: var(--text-secondary); }
-.comic-character-profile dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.comic-version-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); gap: 12px; }
-.comic-version-list article { display: grid; gap: 8px; }
-.comic-dialog-actions { margin-top: 12px; }
+
+.comic-character-profile dt {
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.comic-character-profile dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comic-version-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 12px;
+}
+
+.comic-version-list article {
+  display: grid;
+  gap: 8px;
+}
+
+.comic-dialog-actions {
+  margin-top: 12px;
+}
+
+.comic-dictionary-list {
+  display: grid;
+  gap: 8px;
+}
+
 .comic-dictionary-list article {
-  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 12px; background: var(--bg-card); border-bottom: 1px solid var(--border); overflow-wrap: anywhere;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  overflow-wrap: anywhere;
 }
-.comic-dictionary-list small { display: block; margin-top: 4px; }
-.comic-dictionary-list code { font-size: 0.85em; color: var(--text-secondary); }
 
-.comic-cast-heading, .comic-cast-card header {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+.comic-dictionary-list small {
+  display: block;
+  margin-top: 4px;
 }
-.comic-cast-heading { margin-bottom: 14px; }
-.comic-cast-heading h2, .comic-cast-card h3, .comic-cast-card p { margin: 0; }
-.comic-cast-list { display: grid; gap: 14px; }
-.comic-cast-card { padding: 16px; display: grid; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
-.comic-cast-card p, .comic-cast-card figcaption { color: var(--text-secondary); }
-.comic-cast-update { padding: 4px 7px; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); }
-.comic-cast-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 122px), 1fr)); gap: 10px; }
-.comic-cast-assets:empty { display: none; }
-.comic-cast-assets figure { margin: 0; min-width: 0; }
-.comic-cast-assets figcaption { margin-top: 4px; overflow-wrap: anywhere; }
-.comic-actor-add { margin-top: 10px; }
-.comic-workspace .comic-sequel-option { display: flex; align-items: center; gap: 9px; }
-.comic-dialog .comic-sequel-option input { width: auto; }
 
-.comic-generation-picker { align-self: start; }
-.comic-generation-targets, .comic-generation-status-list, .comic-quote-list { list-style: none; padding: 0; margin: 0; }
-.comic-generation-targets { display: grid; gap: 6px; max-height: 50vh; overflow: auto; }
-.comic-generation-targets li, .comic-generation-status-list li { display: flex; align-items: center; gap: 10px; }
-.comic-generation-targets li button { flex: 1; min-width: 0; text-align: start; overflow-wrap: anywhere; }
-.comic-generation-targets button[aria-pressed=true] { border-color: var(--accent); background: var(--bg-hover); }
-.comic-generation-results { display: grid; gap: 14px; min-width: 0; align-content: start; }
-.comic-generation-note, .comic-quote-list small { color: var(--text-secondary); font-size: .85rem; }
-.comic-generation-status-list li { padding: 8px 0; flex-wrap: wrap; }
-.comic-generation-status-list li + li { border-top: 1px solid var(--border); }
-.comic-take-status { color: var(--text-secondary); }
-.comic-character-jobs { margin-bottom: 16px; }
-.comic-quote { width: min(540px, calc(100% - 26px)); max-height: 90vh; margin: auto; overflow: auto; }
-.comic-quote-list li, .comic-quote-total { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.comic-quote-list li > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.comic-quote-amount, .comic-quote-total { font-variant-numeric: tabular-nums; }
-.comic-quote-amount { white-space: nowrap; }
-.comic-quote-total { border-bottom: 0; padding-bottom: 0; }
+.comic-dictionary-list code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--code-inline-bg);
+  font-size: 0.84em;
+  color: var(--accent);
+}
 
-.comic-generation-modes { margin-bottom: 14px; }
-.comic-generation-modes button[aria-pressed=true] { border-color: var(--accent); background: var(--bg-hover); }
-.comic-video-replace { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.comic-video-references { margin-top: 10px; }
-.comic-video-references summary { cursor: pointer; }
-.comic-video-references > div { margin-top: 8px; }
-.comic-video-card video { width: 100%; max-height: 340px; background: var(--bg-hover); border-radius: 8px; }
-.comic-video-card a { color: var(--accent); overflow-wrap: anywhere; }
+/* ── Cast Pinboard ── */
+.comic-cast-heading,
+.comic-cast-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
-.comic-editor-source { display: grid; gap: 12px; justify-items: start; max-width: 660px; }
-.comic-editor-source .comic-video-card { width: 100%; padding: 14px; }
-.comic-editor-source .comic-video-card video { display: block; max-height: min(60vh, 580px); }
+.comic-cast-heading {
+  margin-bottom: 16px;
+}
 
-.comic-edit-grid { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.4fr); gap: 16px; margin-bottom: 16px; }
-.comic-editor-fields { display: grid; gap: 12px; border: 0; padding: 0; min-width: 0; }
-.comic-editor-fields label, .comic-trim-controls label { display: grid; gap: 4px; }
-.comic-timeline-preview { align-self: start; }
-.comic-timeline-player { display: grid; place-items: center; width: 100%; max-height: min(58vh, 550px); margin-bottom: 10px; background: var(--bg-hover); }
-.comic-timeline-player video { display: block; width: 100%; height: 100%; max-height: min(58vh, 550px); object-fit: contain; }
-.comic-video-track { display: grid; gap: 7px; padding: 0; margin: 0; list-style: none; }
-.comic-video-track li { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
-.comic-video-track .comic-track-label { min-width: 0; text-align: start; display: grid; gap: 3px; flex: 1 1 180px; overflow-wrap: anywhere; }
-.comic-track-label[aria-pressed=true] { border-color: var(--accent); background: var(--bg-hover); }
-.comic-track-label small { color: var(--text-secondary); }
-.comic-trim-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 8px; }
-.comic-dialogue-line { padding: 10px 0; border-top: 1px solid var(--border); display: grid; gap: 8px; }
-.comic-dialogue-line p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.comic-multitrack, .comic-render-panel { margin-block: 16px; }
-.comic-multitrack { --track-label-width: min(7rem, 24%); }
-.comic-multitrack output { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.comic-track-ruler { margin-inline-start: var(--track-label-width); padding-inline: 8px; }
-.comic-track-ruler label { display: grid; gap: 4px; }
-.comic-track-ruler input { width: 100%; margin: 0; accent-color: var(--accent); }
-.comic-track-ruler div { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: .72rem; }
-.comic-track-row { display: grid; grid-template-columns: var(--track-label-width) minmax(0, 1fr); align-items: center; border-top: 1px solid var(--border); }
-.comic-track-row > span { padding-inline-end: 6px; font-size: .85rem; overflow-wrap: anywhere; }
-.comic-track-lane { position: relative; height: 2rem; margin: 3px 8px; background: var(--bg-hover); border-radius: 5px; }
-.comic-track-lane button { position: absolute; height: calc(2rem - 4px); min-width: 4px; padding: 0 5px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.comic-track-lane[data-track=video] button { border-color: var(--accent); }
-.comic-track-lane button[aria-pressed=true] { z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
-.comic-track-lane button[data-overflow=true] { border-style: dashed; }
-.comic-track-lane i { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--accent); z-index: 2; pointer-events: none; }
-.comic-track-editor { display: grid; gap: 12px; border: 0; padding: 10px 0 0; min-width: 0; margin: 0; }
-.comic-track-editor input, .comic-track-editor select, .comic-track-editor textarea, .comic-overlay-fields input,
-.comic-overlay-fields select { min-width: 0; max-width: 100%; }
-.comic-track-inspector, .comic-track-picker, .comic-caption-style { padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
-.comic-track-inspector h3 { margin-bottom: 10px; }
-.comic-track-picker ul { padding: 0; list-style: none; }
-.comic-track-picker li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-block: 6px; }
-.comic-overlay-fields, .comic-caption-style { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
-.comic-overlay-fields label, .comic-caption-style label { flex: 0 1 10rem; display: grid; gap: 4px; min-width: 0; }
-.comic-overlay-fields .comic-track-loop { display: flex; align-items: center; }
-.comic-timeline-player { position: relative; }
-.comic-preview-caption { position: absolute; bottom: 17%; max-width: 90%; text-align: center; padding: 3px 6px;
-  color: var(--video-caption); -webkit-text-stroke: 2px var(--video-caption-outline); paint-order: stroke fill;
-  pointer-events: none; overflow-wrap: anywhere; }
+.comic-cast-heading h2,
+.comic-cast-card h3,
+.comic-cast-card p {
+  margin: 0;
+}
+
+.comic-cast-heading h2 {
+  font-family: var(--font-display);
+}
+
+.comic-cast-list {
+  display: grid;
+  gap: 16px;
+}
+
+.comic-cast-card {
+  padding: 18px 20px;
+  display: grid;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-cast-card p,
+.comic-cast-card figcaption {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.comic-cast-update {
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--cd-gold) 55%, var(--accent));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cd-gold) 15%, var(--bg-card));
+  color: var(--gold-strong);
+  font-weight: 700;
+}
+
+.comic-cast-assets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
+  gap: 12px;
+}
+
+.comic-cast-assets:empty {
+  display: none;
+}
+
+.comic-cast-assets figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.comic-cast-assets figcaption {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.comic-actor-add {
+  margin-top: 10px;
+}
+
+.comic-workspace .comic-sequel-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.comic-dialog .comic-sequel-option input {
+  width: auto;
+}
+
+/* ── Generation Studio ── */
+.comic-generation-picker {
+  align-self: start;
+}
+
+.comic-generation-targets,
+.comic-generation-status-list,
+.comic-quote-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.comic-generation-targets {
+  display: grid;
+  gap: 7px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.comic-generation-targets li,
+.comic-generation-status-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.comic-generation-targets li button {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: start;
+  overflow-wrap: anywhere;
+  box-shadow: none;
+}
+
+.comic-generation-targets button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-card));
+  color: var(--text);
+  font-weight: 650;
+}
+
+.comic-generation-results {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  align-content: start;
+}
+
+.comic-generation-note,
+.comic-quote-list small {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.comic-generation-status-list li {
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+
+.comic-generation-status-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.comic-take-status {
+  color: var(--text-secondary);
+}
+
+.comic-character-jobs {
+  margin-bottom: 16px;
+}
+
+.comic-quote {
+  width: min(540px, calc(100% - 26px));
+  max-height: 90vh;
+  margin: auto;
+  overflow: auto;
+}
+
+.comic-quote-list li,
+.comic-quote-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.comic-quote-list li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.comic-quote-amount,
+.comic-quote-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-quote-amount {
+  white-space: nowrap;
+}
+
+.comic-quote-total {
+  border-bottom: 0;
+  padding-bottom: 0;
+  font-weight: 750;
+}
+
+.comic-generation-modes {
+  margin-bottom: 14px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--overlay-sink);
+  border: 1px solid var(--border);
+}
+
+.comic-generation-modes button {
+  flex: 1 1 auto;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12.5px;
+}
+
+.comic-generation-modes button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--bg-card);
+  color: var(--accent);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-video-replace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.comic-video-references {
+  margin-top: 10px;
+}
+
+.comic-video-references summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.comic-video-references > div {
+  margin-top: 8px;
+}
+
+.comic-video-card video {
+  width: 100%;
+  max-height: 340px;
+  background: var(--bg-hover);
+  border-radius: 11px;
+}
+
+.comic-video-card a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+/* ── Editing Workbench & Multi-Track NLE Console ── */
+.comic-editor-source {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  max-width: 680px;
+}
+
+.comic-editor-source .comic-video-card {
+  width: 100%;
+  padding: 16px;
+}
+
+.comic-editor-source .comic-video-card video {
+  display: block;
+  max-height: min(60vh, 580px);
+}
+
+.comic-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.82fr) minmax(0, 1.38fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.comic-editor-fields {
+  display: grid;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.comic-editor-fields label,
+.comic-trim-controls label {
+  display: grid;
+  gap: 5px;
+}
+
+.comic-timeline-preview {
+  align-self: start;
+}
+
+.comic-timeline-player {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-height: min(58vh, 550px);
+  margin-bottom: 12px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--text) 8%, var(--bg-hover));
+}
+
+.comic-timeline-player video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: min(58vh, 550px);
+  object-fit: contain;
+}
+
+.comic-video-track {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.comic-video-track li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.comic-video-track .comic-track-label {
+  min-width: 0;
+  text-align: start;
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
+}
+
+.comic-track-label[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-card));
+}
+
+.comic-track-label small {
+  color: var(--text-secondary);
+}
+
+.comic-trim-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.comic-dialogue-line {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+.comic-dialogue-line p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comic-multitrack,
+.comic-render-panel {
+  margin-block: 18px;
+}
+
+.comic-multitrack {
+  --track-label-width: min(7.2rem, 24%);
+}
+
+.comic-multitrack output {
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-track-ruler {
+  margin-inline-start: var(--track-label-width);
+  padding-inline: 8px;
+  margin-bottom: 4px;
+}
+
+.comic-track-ruler label {
+  display: grid;
+  gap: 4px;
+}
+
+.comic-track-ruler input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.comic-track-ruler div {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-track-row {
+  display: grid;
+  grid-template-columns: var(--track-label-width) minmax(0, 1fr);
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+
+.comic-track-row > span {
+  padding-inline-end: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.comic-track-lane {
+  position: relative;
+  height: 2.25rem;
+  margin: 4px 8px;
+  background: color-mix(in srgb, var(--bg) 72%, var(--bg-hover));
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 8px;
+}
+
+.comic-track-lane button {
+  position: absolute;
+  top: 2px;
+  height: calc(2.25rem - 6px);
+  min-width: 4px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.comic-track-lane[data-track="video"] button {
+  border-color: var(--cd-jade);
+  background: color-mix(in srgb, var(--cd-jade) 18%, var(--bg-card));
+}
+
+.comic-track-lane[data-track="voice"] button {
+  border-color: var(--cd-azure);
+  background: color-mix(in srgb, var(--cd-azure) 18%, var(--bg-card));
+}
+
+.comic-track-lane[data-track="music"] button {
+  border-color: var(--cd-violet);
+  background: color-mix(in srgb, var(--cd-violet) 18%, var(--bg-card));
+}
+
+.comic-track-lane[data-track="sfx"] button {
+  border-color: var(--cd-gold);
+  background: color-mix(in srgb, var(--cd-gold) 22%, var(--bg-card));
+}
+
+.comic-track-lane[data-track="subtitles"] button {
+  border-color: var(--cd-coral);
+  background: color-mix(in srgb, var(--cd-coral) 16%, var(--bg-card));
+}
+
+.comic-track-lane button[aria-pressed="true"] {
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  font-weight: 700;
+}
+
+.comic-track-lane button[data-overflow="true"] {
+  border-style: dashed;
+}
+
+.comic-track-lane i {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--cd-coral);
+  border-radius: 999px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.comic-track-editor {
+  display: grid;
+  gap: 12px;
+  border: 0;
+  padding: 12px 0 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.comic-track-editor input,
+.comic-track-editor select,
+.comic-track-editor textarea,
+.comic-overlay-fields input,
+.comic-overlay-fields select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.comic-track-inspector,
+.comic-track-picker,
+.comic-caption-style {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg) 52%, var(--bg-card));
+}
+
+.comic-track-inspector h3 {
+  margin-bottom: 10px;
+}
+
+.comic-track-picker ul {
+  padding: 0;
+  list-style: none;
+}
+
+.comic-track-picker li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-block: 7px;
+}
+
+.comic-overlay-fields,
+.comic-caption-style {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.comic-overlay-fields label,
+.comic-caption-style label {
+  flex: 0 1 10rem;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.comic-overlay-fields .comic-track-loop {
+  display: flex;
+  align-items: center;
+}
+
+.comic-preview-caption {
+  position: absolute;
+  bottom: 17%;
+  max-width: 90%;
+  text-align: center;
+  padding: 3px 6px;
+  color: var(--video-caption);
+  -webkit-text-stroke: 2px var(--video-caption-outline);
+  paint-order: stroke fill;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
 .comic-preview-caption:is([data-color=box], [data-color=yellow-box]) {
-  background: color-mix(in srgb, var(--video-caption-outline) 60%, transparent); -webkit-text-stroke: 0; }
-.comic-preview-caption[data-color=black] { color: var(--video-caption-outline); -webkit-text-stroke-color: var(--video-caption); }
-.comic-preview-caption:is([data-color=yellow], [data-color=yellow-box]) { color: var(--gold); }
+  background: color-mix(in srgb, var(--video-caption-outline) 60%, transparent);
+  -webkit-text-stroke: 0;
+}
+
+.comic-preview-caption[data-color=black] {
+  color: var(--video-caption-outline);
+  -webkit-text-stroke-color: var(--video-caption);
+}
+
+.comic-preview-caption:is([data-color=yellow], [data-color=yellow-box]) {
+  color: var(--gold);
+}
+
 .comic-preview-caption[data-position=high] { bottom: 27%; }
 .comic-preview-caption[data-position=low] { bottom: 10%; }
-.comic-preview-caption[data-size=small] { font-size: .85rem; }
+.comic-preview-caption[data-size=small] { font-size: 0.85rem; }
 .comic-preview-caption[data-size=large] { font-size: 1.2rem; }
-.comic-render-result { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.comic-render-panel video { display: block; width: 100%; max-height: 48vh; margin-block-start: 12px; background: var(--bg-hover); }
-.comic-breakdown-sample { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
-.comic-breakdown-sample summary { cursor: pointer; }
-.comic-breakdown-diff { display: flex; flex-wrap: wrap; gap: 16px; }
-.comic-breakdown-diff > div { flex: 1 1 15rem; background: var(--bg-hover); padding: 12px; }
-.comic-export-history { margin: 0; padding: 0; list-style: none; }
-.comic-export-history li { padding: 12px 0; border-top: 1px solid var(--border); }
-.comic-export-history li > div:first-child { display: grid; flex: 1 1 12rem; gap: 3px; overflow-wrap: anywhere; min-width: 0; }
-.comic-export-history small, .comic-director-proposal small { color: var(--text-secondary); }
-.comic-script-layout { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-items: start; gap: 16px; }
-.comic-director fieldset { display: grid; gap: 10px; padding: 0; margin: 0; border: 0; min-width: 0; }
-.comic-director label { display: grid; gap: 5px; min-width: 0; }
-.comic-director :is(textarea, select, input) { max-width: 100%; min-width: 0; }
-.comic-director > label, .comic-director-proposal { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-.comic-director-proposal header { margin-bottom: 6px; }
-.comic-director-proposal details { margin-block: 12px; }
-.comic-director-proposal pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 0; max-height: 24rem; overflow-y: auto; }
-.comic-director-proposal h4 { margin: 0 0 6px; }
-.comic-script-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-block: 12px; }
-.comic-script-compare section { background: var(--bg-hover); padding: 10px; border-radius: 6px; min-width: 0; }
-.comic-director-proposal ul { padding-inline-start: 20px; }
+
+.comic-render-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.comic-render-panel video {
+  display: block;
+  width: 100%;
+  max-height: 48vh;
+  margin-block-start: 14px;
+  border-radius: 12px;
+  background: var(--bg-hover);
+}
+
+/* ── Script & AI Director Dual Studio ── */
+.comic-breakdown-sample {
+  margin-top: 14px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.comic-breakdown-sample summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.comic-breakdown-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.comic-breakdown-diff > div {
+  flex: 1 1 15rem;
+  background: color-mix(in srgb, var(--bg) 56%, var(--bg-card));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.comic-export-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.comic-export-history li {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg) 45%, var(--bg-card));
+}
+
+.comic-export-history li > div:first-child {
+  display: grid;
+  flex: 1 1 12rem;
+  gap: 3px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.comic-export-history small,
+.comic-director-proposal small {
+  color: var(--text-secondary);
+}
+
+.comic-script-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.comic-script {
+  border-top: 3px solid var(--cd-jade);
+}
+
+.comic-director {
+  border-top: 3px solid var(--cd-violet);
+}
+
+.comic-director fieldset {
+  display: grid;
+  gap: 11px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.comic-director label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.comic-director :is(textarea, select, input) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.comic-director > label,
+.comic-director-proposal {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.comic-director-proposal header {
+  margin-bottom: 8px;
+}
+
+.comic-director-proposal details {
+  margin-block: 12px;
+}
+
+.comic-director-proposal pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  margin: 0;
+  max-height: 24rem;
+  overflow-y: auto;
+  line-height: 1.65;
+}
+
+.comic-director-proposal h4 {
+  margin: 0 0 6px;
+}
+
+.comic-script-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-block: 12px;
+}
+
+.comic-script-compare section {
+  background: color-mix(in srgb, var(--bg) 56%, var(--bg-card));
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.comic-director-proposal ul {
+  padding-inline-start: 20px;
+}
+
+/* ── Responsive Breakpoints (390px Mobile Safe, Zero Horizontal Overflow) ── */
+@media (max-width: 1180px) {
+  .comic-pipeline-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1050px) {
-  .comic-script-layout { grid-template-columns: minmax(0, 1fr); }
+  .comic-script-layout,
+  .comic-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comic-shortcut-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
-@media (max-width: 550px) {
-  .comic-script-compare { grid-template-columns: minmax(0, 1fr); }
+
+@media (max-width: 820px) {
+  .comic-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comic-sidebar {
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .comic-sidebar .brand-card {
+    padding-inline-end: 48px;
+  }
+  .comic-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px 14px;
+  }
+  .comic-nav-group {
+    display: contents;
+  }
+  .comic-nav-section {
+    display: none;
+  }
+  .comic-sidebar .comic-nav button {
+    width: auto;
+    padding: 7px 11px;
+  }
+  .comic-pipeline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
+
 @media (max-width: 680px) {
-  .comic-edit-grid { grid-template-columns: minmax(0, 1fr); }
-  .comic-trim-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .comic-edit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comic-trim-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 550px) {
+  .comic-script-compare,
+  .comic-board,
+  .comic-fields,
+  .comic-pipeline-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comic-strip {
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  }
+  .comic-edit-card,
+  .comic-episode-slate {
+    padding: 14px;
+  }
+  .comic-hero {
+    padding: 18px;
+  }
 }

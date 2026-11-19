@@ -22,6 +22,11 @@ import { ComicBreakdownSample } from "./ComicBreakdownSample.js";
 import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
 import type { DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
+import { ComicStudioLanding } from "./ComicStudioLanding.js";
+import {
+  CharactersIcon, ClapperboardIcon, EpisodesIcon, ExportBoxIcon, MaterialsIcon, NewEpisodeIcon,
+  ScriptIcon, SettingsIcon, SparklesIcon, StoryboardIcon, TimelineEditIcon, VideoReelIcon,
+} from "./ComicStudioIcons.js";
 import { comicDirectorApi } from "./director-api.js";
 import { useComicDramaDraft } from "./useComicDramaDraft.js";
 import "./comic-drama.css";
@@ -41,8 +46,18 @@ type Props = {
   models: readonly ComicDramaModel[];
 };
 
-const steps = ["剧本", "选角", "分镜", "生成", "剪辑"] as const;
-const libraryPaths = [["/characters", "角色素材库"], ["/materials", "素材库"], ["/settings", "设置"]] as const;
+const steps = [
+  { key: "剧本", Icon: ScriptIcon },
+  { key: "选角", Icon: CharactersIcon },
+  { key: "分镜", Icon: StoryboardIcon },
+  { key: "生成", Icon: SparklesIcon },
+  { key: "剪辑", Icon: TimelineEditIcon },
+] as const;
+const libraryPaths = [
+  { suffix: "/characters", label: "角色素材库", tone: "violet", Icon: CharactersIcon },
+  { suffix: "/materials", label: "素材库", tone: "azure", Icon: MaterialsIcon },
+  { suffix: "/settings", label: "设置", tone: "slate", Icon: SettingsIcon },
+] as const;
 const videosPath = COMIC_DRAMA_ROOT + "/clips";
 const editorPath = COMIC_DRAMA_ROOT + "/editor";
 const editorSourcesPath = editorPath + "/sources";
@@ -79,8 +94,8 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
   const editGuard = useRef<(() => boolean) | null>(null);
   const setEditGuard = useCallback((guard: (() => boolean) | null) => { editGuard.current = guard; }, []);
   const directId = pathname.startsWith(historyPath + "/") ? pathname.slice(historyPath.length + 1) : null;
-  const library = libraryPaths.find(([suffix]) => pathname === COMIC_DRAMA_ROOT + suffix ||
-    (suffix === "/characters" && pathname.startsWith(COMIC_DRAMA_ROOT + suffix + "/")))?.[0];
+  const library = libraryPaths.find(({ suffix }) => pathname === COMIC_DRAMA_ROOT + suffix ||
+    (suffix === "/characters" && pathname.startsWith(COMIC_DRAMA_ROOT + suffix + "/")))?.suffix;
   const characterId = library === "/characters" ? pathname.split("/")[3] : undefined;
   const workspace = !history && !editorRoute && !library && !videoHistory;
   const locked = !!series?.archivedAt || busy;
@@ -198,19 +213,83 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
       <BrandHeader user={user} onLogout={() => void leave(onLogout)} onOpenAssistant={() => void leave(onOpenAssistant)}
         onOpenDigitalEmployee={() => void leave(onOpenDigitalEmployee)} onOpenComicDrama={() => void leave(() => navigate(COMIC_DRAMA_ROOT))}
         activeModule="comicDrama" />
-      <nav aria-label={t("漫剧工厂")}>
-        <button className="comic-nav-new primary" type="button" onClick={() => showDialog("create")}>＋ {t("新建剧集")}</button>
-        <button type="button" aria-current={workspace ? "page" : undefined} onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT))}>
-          <small>{t("当前剧集")}</small><strong>{series && !series.archivedAt ? series.title : t("工作区")}</strong>
+      <nav className="comic-nav" aria-label={t("漫剧工厂")}>
+        <button className="comic-nav-new primary" type="button" onClick={() => showDialog("create")}>
+          <span className="comic-nav-new-icon" aria-hidden="true"><NewEpisodeIcon size={16} /></span>
+          <span>{t("新建剧集")}</span>
         </button>
-        <button type="button" aria-current={history ? "page" : undefined} onClick={() => void leave(() => navigate(historyPath))}>{t("历史剧集")}</button>
-        {libraryPaths.map(([suffix, label]) => <button type="button" key={suffix} aria-current={library === suffix ? "page" : undefined}
-          onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT + suffix))}>{t(label)}</button>)}
-        <button type="button" aria-current={videoHistory ? "page" : undefined} onClick={() => void leave(() => navigate(videosPath))}>{t("历史成片")}</button>
-        <button type="button" aria-current={editorRoute && !renderHistory ? "page" : undefined}
-          onClick={() => void leave(() => navigate(editorPath))}>{t("剪辑工作台")}</button>
-        <button type="button" aria-current={renderHistory ? "page" : undefined}
-          onClick={() => void leave(() => navigate(renderHistoryPath))}>{t("导出历史")}</button>
+
+        <div className="comic-nav-group">
+          <span className="comic-nav-section" aria-hidden="true">{t("创作工坊")}</span>
+          <button
+            type="button"
+            className={`comic-nav-current${series && !series.archivedAt ? " has-series" : ""}`}
+            aria-current={workspace ? "page" : undefined}
+            onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT))}
+          >
+            <span className="comic-nav-icon" data-tone="jade" aria-hidden="true"><ClapperboardIcon size={16} /></span>
+            <span className="comic-nav-current-copy">
+              <small>{t("当前剧集")}</small>
+              <strong>{series && !series.archivedAt ? series.title : t("工作区")}</strong>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="comic-nav-item"
+            aria-current={history ? "page" : undefined}
+            onClick={() => void leave(() => navigate(historyPath))}
+          >
+            <span className="comic-nav-icon" data-tone="jade" aria-hidden="true"><EpisodesIcon size={15} /></span>
+            <span>{t("历史剧集")}</span>
+          </button>
+        </div>
+
+        <div className="comic-nav-group">
+          <span className="comic-nav-section" aria-hidden="true">{t("美术与资产")}</span>
+          {libraryPaths.map(({ suffix, label, tone, Icon }) => (
+            <button
+              type="button"
+              key={suffix}
+              className="comic-nav-item"
+              aria-current={library === suffix ? "page" : undefined}
+              onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT + suffix))}
+            >
+              <span className="comic-nav-icon" data-tone={tone} aria-hidden="true"><Icon size={15} /></span>
+              <span>{t(label)}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="comic-nav-group">
+          <span className="comic-nav-section" aria-hidden="true">{t("成片与剪辑")}</span>
+          <button
+            type="button"
+            className="comic-nav-item"
+            aria-current={videoHistory ? "page" : undefined}
+            onClick={() => void leave(() => navigate(videosPath))}
+          >
+            <span className="comic-nav-icon" data-tone="gold" aria-hidden="true"><VideoReelIcon size={15} /></span>
+            <span>{t("历史成片")}</span>
+          </button>
+          <button
+            type="button"
+            className="comic-nav-item"
+            aria-current={editorRoute && !renderHistory ? "page" : undefined}
+            onClick={() => void leave(() => navigate(editorPath))}
+          >
+            <span className="comic-nav-icon" data-tone="coral" aria-hidden="true"><TimelineEditIcon size={15} /></span>
+            <span>{t("剪辑工作台")}</span>
+          </button>
+          <button
+            type="button"
+            className="comic-nav-item"
+            aria-current={renderHistory ? "page" : undefined}
+            onClick={() => void leave(() => navigate(renderHistoryPath))}
+          >
+            <span className="comic-nav-icon" data-tone="slate" aria-hidden="true"><ExportBoxIcon size={15} /></span>
+            <span>{t("导出历史")}</span>
+          </button>
+        </div>
       </nav>
     </aside>
     <main className="comic-page" aria-busy={loading || busy}>
@@ -259,31 +338,56 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
           browse={() => navigate(editorSourcesPath)} />
         : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo} choose={choose} />
         : editorRoute ? <ComicEditsIndex currentSeries={series?.id} open={openEdit} browse={() => navigate(editorSourcesPath)} />
-        : !series || !detail ? <div className="comic-empty">
-          <h1>{t("漫剧工厂")}</h1><p>{t("新建剧集，开始编排分镜")}</p>
-          <button type="button" className="primary" onClick={() => showDialog("create")}>{t("新建剧集")}</button>
-        </div> : <>
-          <header className="comic-heading">
-            <div>
-              {series.seriesGroup && <small>{series.seriesGroup}{series.episodeNo ? " / " + series.episodeNo : ""}</small>}
+        : !series || !detail ? (
+          <ComicStudioLanding
+            onCreateSeries={() => showDialog("create")}
+            onOpenHistory={() => void leave(() => navigate(historyPath))}
+            onOpenCharacters={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
+            onOpenMaterials={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/materials"))}
+            onOpenEditor={() => void leave(() => navigate(editorPath))}
+          />
+        ) : <>
+          <header className="comic-heading comic-episode-slate">
+            <div className="comic-episode-meta">
+              {series.seriesGroup && (
+                <small className="comic-episode-series">
+                  {series.seriesGroup}{series.episodeNo ? " / " + series.episodeNo : ""}
+                </small>
+              )}
               <h1>{series.title}</h1>
               {series.logline && <p>{series.logline}</p>}
             </div>
             <div className="comic-actions">
-              <span className="comic-ratio">{series.aspectRatio} · {styles.find(style => style.key === series.styleKey)?.labels[locale] ?? series.styleKey}</span>
-              <small role="status">{t(series.archivedAt ? "已归档" : editor.saving || dirty && !editor.issue ? "保存中…" : editor.issue ? "未保存" : "已保存")}</small>
+              <span className="comic-ratio">
+                {series.aspectRatio} · {styles.find(style => style.key === series.styleKey)?.labels[locale] ?? series.styleKey}
+              </span>
+              <small
+                className="comic-save-pill"
+                data-state={series.archivedAt ? "archived" : editor.issue ? "issue" : editor.saving || dirty ? "saving" : "saved"}
+                role="status"
+              >
+                {t(series.archivedAt ? "已归档" : editor.saving || dirty && !editor.issue ? "保存中…" : editor.issue ? "未保存" : "已保存")}
+              </small>
               <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑剧集")}</button>
             </div>
           </header>
-          <nav className="comic-steps" aria-label={t("制作步骤")}>
-            {steps.map((step, index) => <button key={step} type="button" aria-pressed={stage === step}
-              onClick={() => {
-                if (step === "生成") void leave(() => { if (stage !== step) setOpenVideos(false); setStage(step); });
-                else if (step === "剪辑") void leave(() => navigate(editorPath));
-                else setStage(step);
-              }}>
-              <span>{index + 1}</span>{t(step)}
-            </button>)}
+          <nav className="comic-steps comic-stage-dock" aria-label={t("制作步骤")}>
+            {steps.map(({ key: step, Icon }, index) => (
+              <button
+                key={step}
+                type="button"
+                aria-pressed={stage === step}
+                onClick={() => {
+                  if (step === "生成") void leave(() => { if (stage !== step) setOpenVideos(false); setStage(step); });
+                  else if (step === "剪辑") void leave(() => navigate(editorPath));
+                  else setStage(step);
+                }}
+              >
+                <span className="comic-step-index">{index + 1}</span>
+                <span className="comic-step-icon" aria-hidden="true"><Icon size={14} /></span>
+                {t(step)}
+              </button>
+            ))}
           </nav>
           {stage === "剧本" ? <div className="comic-script-layout">
             <section className="comic-edit-card comic-script">
