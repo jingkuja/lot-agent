@@ -1,5 +1,6 @@
 import {
-  COMIC_SCRIPT_DOCX, type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorState, type ComicScriptImport,
+  COMIC_SCRIPT_DOCX, type ComicDirectorDecision, type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleDecision,
+  type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicScriptImport,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
 import { editError } from "./edit-api.js";
@@ -15,11 +16,17 @@ export const comicDirectorApi = {
   }),
   propose: (series: string, input: ComicDirectorInput, signal?: AbortSignal) => request<ComicDirectorProposal>(root(series) + "/proposals",
     { method: "POST", body: JSON.stringify(input), signal }),
-  apply: (series: string, id: string, expectedRevision: number) => action(series, id, "apply", { expectedRevision }),
+  apply: (series: string, id: string, expectedRevision: number, decision?: ComicDirectorDecision) => action(series, id, "apply", { expectedRevision, decision }),
   dismiss: (series: string, id: string) => action(series, id, "dismiss", {}),
+  role: (series: string, id: string, index: number, input: ComicDirectorRoleDecision) => request<ComicDirectorRoleOutcome>(
+    root(series) + "/proposals/" + encodeURIComponent(id) + "/roles/" + index, { method: "POST", body: JSON.stringify(input) }),
+  quote: (series: string, input: ComicGenerationPreviewRequest, signal: AbortSignal) => request<ComicGenerationQuote>(
+    root(series) + "/generation-preview", { method: "POST", body: JSON.stringify(input), signal }),
 };
 
 const errors: Record<string, string> = {
+  COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
+  QUOTE_STALE: "素材或分镜已更新，请重新询价",
   DIRECTOR_FILE_TOO_LARGE: "剧本文件最大为 2 MB",
   DIRECTOR_FILE_TYPE: "请选择 TXT 或 DOCX 剧本文件",
   DIRECTOR_FILE_INVALID: "无法读取剧本，请检查文件格式和正文",

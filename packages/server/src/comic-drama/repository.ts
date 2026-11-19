@@ -125,7 +125,10 @@ export class PgComicDramaRepository implements ComicDramaRepository {
   }
 
   derive(owner: string, id: string, sequel: boolean, inheritCastAndStyle = true): Promise<ComicDramaDetail> {
-    return this.transaction(async client => {
+    return this.transaction(client => this.deriveOn(client, owner, id, sequel, inheritCastAndStyle));
+  }
+
+  async deriveOn(client: PoolClient, owner: string, id: string, sequel: boolean, inheritCastAndStyle = true): Promise<ComicDramaDetail> {
       const source = await this.series(client, owner, id, true);
       const seriesGroup = source.seriesGroup ?? source.title;
       const episodeNo = sequel ? Math.min((source.episodeNo ?? 1) + 1, 2_147_483_647) : source.episodeNo;
@@ -150,7 +153,17 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       await this.setCurrent(client, owner, series.id);
       const { clips, script, cast } = await this.content(client, series.id, series.revision);
       return { series, clips, script, cast };
-    });
+  }
+
+  async writeBreakdown(client: PoolClient, owner: string, id: string, expected: number, drafts: ComicDramaClipDraft[], replace: boolean) {
+    const series = await this.series(client, owner, id, true);
+    requireRevision(series.revision, expected);
+    // Generation takes and edit/render references remain attached to their original immutable take IDs.
+    if (replace) await client.query("DELETE FROM lot_comic_drama.cd_clips WHERE series_id=$1", [id]);
+    await client.query(`INSERT INTO lot_comic_drama.cd_clips(series_id,ordinal,draft)
+      SELECT $1,(SELECT coalesce(max(ordinal),0) FROM lot_comic_drama.cd_clips WHERE series_id=$1)+d.ordinal,d.draft
+      FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS d(draft,ordinal)`, [id, JSON.stringify(drafts)]);
+    return this.bump(client, id);
   }
 
   update(owner: string, id: string, fields: ComicDramaSeriesUpdate): Promise<ComicDramaSeries> {

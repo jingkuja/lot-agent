@@ -137,6 +137,9 @@ export class PgComicGeneration {
         if (!result.rowCount) throw new ComicLibraryError("BUSY", 409);
       }
       await db.query(`UPDATE ${namespace}.cd_generation_requests SET confirmed_at=now(),task_id=$2 WHERE id=$1`, [id, taskId]);
+      await db.query(`UPDATE messages m SET metadata=m.metadata || jsonb_build_object('status','confirmed','taskId',$2::text)
+        FROM ${namespace}.cd_director_quotes q WHERE q.confirmation_id=$1 AND q.owner_id=$3
+        AND m.conversation_id=q.conversation_id AND m.metadata->>'comicDirectorQuoteId'=q.confirmation_id::text`, [id, taskId, owner]);
       return { taskId, type, created: true };
     });
   }

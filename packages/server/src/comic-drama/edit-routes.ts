@@ -8,7 +8,7 @@ import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
 import type { ComicEditSpeech } from "./edit-speech.js";
 
-export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeech) {
+export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeech, accepting?: () => void) {
   const app = new Hono<{ Variables: { userId: string } }>();
   app.onError((error, c) => {
     if (error instanceof ComicEditConflict) return c.json({ code: error.code, currentRevision: error.currentRevision }, 409);
@@ -69,7 +69,8 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
   app.post("/edits/:id/items/:itemId/lines/:lineId/speech", limit, async c => {
     const input = comicSpeechRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
-    const data = await speech.speak(c.get("userId"), id(c.req.param("id")), id(c.req.param("itemId")), id(c.req.param("lineId")), input.data, c.req.raw.signal);
+    const data = await speech.speak(c.get("userId"), id(c.req.param("id")), id(c.req.param("itemId")), id(c.req.param("lineId")),
+      input.data, c.req.raw.signal, accepting);
     return c.json(data);
   });
   return app;

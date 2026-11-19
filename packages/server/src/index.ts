@@ -83,6 +83,7 @@ import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
 import { ComicDirector, createComicDirectorExtension } from "./comic-drama/director-agent.js";
 import { PgComicDirector } from "./comic-drama/director-repository.js";
 import { createComicDirectorRoutes } from "./comic-drama/director-routes.js";
+import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
 import { createOwnerLlmResolver } from "./digital-employee/runtime.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
@@ -273,7 +274,8 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
-  const comicDramaEnabled = process.env.COMIC_DRAMA_FACTORY === "1";
+  const rollout = comicRollout();
+  const comicDramaEnabled = rollout.enabled;
   const directorRepo = new PgComicDirector(service.db.pool);
   const directorExtension = createComicDirectorExtension(directorRepo, createOwnerLlmResolver({
     db: service.db, managedKeysEnabled: service.managedKeysEnabled,
@@ -282,7 +284,12 @@ async function main() {
   }), comicDramaEnabled);
   registerAgentExtension(directorExtension);
   service.agentRegistry.register(comicDirectorDefinition);
-  app.route("/api/public/product", createProductRoutes(() => ({ ...digitalEmployeeProductFlags(), comicDramaEnabled })));
+  app.route("/api/public/product", createProductRoutes(async c => {
+    c.header("Cache-Control", "private, no-store");
+    const token = c.req.header("Authorization")?.match(/^Bearer (.+)$/)?.[1].trim();
+    const session = rollout.personalized && token ? await service.sessions.resolve(token).catch(() => null) : null;
+    return { ...digitalEmployeeProductFlags(), comicDramaEnabled: rollout.showEntry(session?.userId) };
+  }));
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
   app.route("/api/public/feishu", createFeishuPublicRoutes(feishu));
@@ -426,17 +433,21 @@ async function main() {
     }
   }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
+  const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(service.db.pool));
+  app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
   if (comicDramaEnabled) {
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
       store: rateLimitStore, keyFn: c => c.get("userId"), prefix: "rl:comic-drama", limit: 180, windowMs: 60_000,
     }));
+    app.use(`${COMIC_DRAMA_API_ROOT}/*`, async (c, next) => {
+      if (!rollout.admits(c.get("userId"))) return c.notFound();
+      await next();
+    });
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/characters/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/upload`,
     ], uploadRateLimit);
     const library = new PgComicLibrary(service.db.pool);
     const series = new PgComicDramaRepository(service.db.pool);
-    const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), library);
-    app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
     const edits = new PgComicEdits(service.db.pool);
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
       presetModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || undefined,
@@ -460,13 +471,13 @@ async function main() {
       } : undefined,
     });
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`, generationRateLimit);
-    app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech));
+    app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech, rollout.accepting));
     app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(new PgComicRenders(service.db.pool, edits), comicMedia,
-      service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined));
+      service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined, rollout.accepting));
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`, generationRateLimit);
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`, uploadRateLimit);
     const parser = fileURLToPath(new URL(`./workers/knowledge-parser.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
-    app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(directorRepo, new ComicDirector(directorRepo, directorExtension), parser));
+    app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(directorRepo, new ComicDirector(directorRepo, directorExtension, rollout.accepting), parser));
     app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
       const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
@@ -474,12 +485,14 @@ async function main() {
       return catalog?.video.some(item => item.id === model) === true;
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
+      app.on("POST", [`${COMIC_DRAMA_API_ROOT}/series/:id/generate`, `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`], generationRateLimit);
       const repo = new PgComicGeneration(service.db.pool);
       const pruneQuotes = () => void repo.pruneExpiredQuotes().catch(() => console.warn("[comic-drama] quote cleanup unavailable"));
       pruneQuotes();
       setInterval(pruneQuotes, 60 * 60_000).unref();
       app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
         pool: service.db.pool, library, series, media: comicMedia, queue: service.jobQueue,
+        accepting: rollout.accepting,
         quotePrice: async (owner, modelId = process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2") => {
           const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
           if (!key || resolveProvider(service.modelCatalog, modelId, "image") !== "openai-images") return null;

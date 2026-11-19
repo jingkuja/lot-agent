@@ -25,6 +25,7 @@ type FixtureApp = Hono<{ Variables: { userId: string } }>;
 export async function mountComicGenerationFixture(deps: {
   app: FixtureApp; database: URL; redisUrl: string; pool: Pool; series: PgComicDramaRepository; library: PgComicLibrary;
   media: ComicMediaLibrary; receiptPath: string; mediaRoot: string; owner: string;
+  accepting?: () => void;
 }) {
   const redis = new URL(deps.redisUrl);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(redis.hostname) && redis.port && redis.port !== "6379",

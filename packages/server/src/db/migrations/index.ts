@@ -133,6 +133,8 @@ export const migrations: Migration[] = [
   comicDramaEdits,
   comicDramaRenders,
   comicDramaDelivery,
+  comicDramaDirectorActions,
+  comicDramaOperations,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -186,3 +188,5 @@ import { comicDramaVideo } from "./0088-comic-drama-video.js";
 import { comicDramaEdits } from "./0089-comic-drama-edits.js";
 import { comicDramaRenders } from "./0090-comic-drama-renders.js";
 import { comicDramaDelivery } from "./0091-comic-drama-delivery.js";
+import { comicDramaDirectorActions } from "./0092-comic-drama-director-actions.js";
+import { comicDramaOperations } from "./0093-comic-drama-operations.js";

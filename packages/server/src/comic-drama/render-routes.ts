@@ -12,7 +12,7 @@ export function createComicRenderRoutes(repo: PgComicRenders, media: ComicMediaL
   canResumePersisted(id: string): Promise<boolean>;
   resumePersisted(id: string, type: string): Promise<void>;
   stopCancelled(id: string): Promise<void>;
-}) {
+}, accepting?: () => void) {
   const app = new Hono<{ Variables: { userId: string } }>();
   app.onError((error, c) => {
     if (error instanceof ComicEditConflict) return c.json({ code: error.code, currentRevision: error.currentRevision }, 409);
@@ -31,7 +31,7 @@ export function createComicRenderRoutes(repo: PgComicRenders, media: ComicMediaL
     if (!fields.success) return c.json({ code: "INVALID_INPUT" }, 400);
     if (!queue) throw new ComicLibraryError("RENDER_QUEUE_UNAVAILABLE", 503);
     media.assertAvailable();
-    const render = await repo.start(owner, id(c.req.param("id")), fields.data);
+    const render = await repo.start(owner, id(c.req.param("id")), fields.data, accepting);
     if (render.created) await queue.publishNewTask(render.id, COMIC_RENDER_TASK)
       .catch(() => console.warn("[comic-drama] render pending delivery", { renderId: render.id }));
     return c.json(await repo.status(owner, render.id), 202);

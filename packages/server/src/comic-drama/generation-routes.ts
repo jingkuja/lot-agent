@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { PgComicDirector } from "./director-repository.js";
 import { bodyLimit } from "hono/body-limit";
 import type { Pool } from "pg";
 import { MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
@@ -30,12 +31,14 @@ type Dependencies = {
   quotePrice: (owner: string, model?: string) => Promise<ComicPrice | null>;
   quoteVideoPrice?: (owner: string, model: string) => Promise<ComicPrice | null>;
   queue: GenerationQueue;
+  accepting?: () => void;
 };
 
 export function createComicGenerationRoutes(deps: Dependencies) {
   const { pool, library, series, media, quotePrice, queue } = deps;
   const repo = new PgComicGeneration(pool);
   const video = new PgComicVideo(pool);
+  const director = new PgComicDirector(pool, series);
   const app = new Hono<{ Variables: { userId: string } }>();
   const limit = bodyLimit({ maxSize: 16 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
   app.onError((error, c) => {
@@ -122,6 +125,15 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     return repo.quote(owner, scope, stamp, price, [input], []);
   }
 
+  app.post("/series/:id/director/generation-preview", limit, async c => {
+    const owner = c.get("userId"), id = pathId(c.req.param("id"));
+    const body = comicGenerationPreviewSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    media.assertAvailable();
+    const quote = await previewSeries(owner, { kind: "series", id }, body.data);
+    await director.recordQuote(owner, id, quote);
+    return c.json(quote);
+  });
   for (const resource of ["series", "characters"] as const) {
     const kind = resource === "series" ? "series" : "character";
     app.post(`/${resource}/:id/generation-preview`, limit, async c => {
@@ -142,6 +154,7 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
       const { confirmationId } = body.data;
       const { taskId, type, created } = await repo.confirm(owner, { kind, id: pathId(c.req.param("id")) }, confirmationId, async (model, mediaKind) => {
+        deps.accepting?.();
         media.assertAvailable();
         return mediaKind === "video" ? await deps.quoteVideoPrice?.(owner, model) ?? null : quotePrice(owner, model);
       });

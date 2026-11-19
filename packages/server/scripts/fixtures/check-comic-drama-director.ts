@@ -16,19 +16,33 @@ import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js
 
 type App = Hono<{ Variables: { userId: string } }>;
 export const directorDraft = "W10 导演草稿\n\n林夏推开便利店的门。\n老板：今天还营业。";
-export function mountComicDirector(app: App, pool: Pool, owner: string) {
+export function mountComicDirector(app: App, pool: Pool, owner: string, accepting?: () => void) {
   const calls: string[] = [];
   const llm: LLMProvider = {
     async *chat(messages, tools) {
-      assert.equal(tools, undefined);
       const input = JSON.parse(String(messages.at(-1)!.content));
       calls.push(input.source);
       if (input.source === "fixture disconnect") throw new Error("fixture disconnected");
+      const characters = [
+        { name: "夜访者", description: "来访者" }, { name: "老板", description: "便利店老板" }, { name: "陌生人", description: "新面孔" },
+      ];
+      if (tools?.[0]?.name === "breakdown_script") {
+        assert.equal(tools.length, 1);
+        if (input.source === "fixture unauthorized tool") {
+          yield { type: "tool_call", toolCall: { id: "refused", name: "request_generation", arguments: {} } };
+        } else {
+          const value = { clips: [{ scene: "W11 雨夜相逢", durationMs: 4000, shots: input.source === "fixture empty shot" ? [] : ["店主推开窗。"],
+            lines: [{ speaker: "老板", text: "营业到凌晨。" }] }], characters };
+          if (input.source === "fixture JSON adapter") yield { type: "text", content: JSON.stringify(value) };
+          else yield { type: "tool_call", toolCall: { id: "fixture-breakdown", name: "breakdown_script", arguments: value } };
+        }
+        yield { type: "done", finishReason: "stop" };
+        return;
+      }
+      assert.ok(!tools || tools[0].name === "continue_series");
       yield { type: "text", content: input.source === "fixture invalid" ? "{bad" : JSON.stringify({
         script: directorDraft,
-        characters: [
-          { name: "夜访者", description: "来访者" }, { name: "老板", description: "便利店老板" }, { name: "陌生人", description: "新面孔" },
-        ],
+        characters,
       }) };
       yield { type: "done", finishReason: "stop" };
     },
@@ -39,7 +53,7 @@ export function mountComicDirector(app: App, pool: Pool, owner: string) {
     return { llm, usedModelId: "fixture-director", modelIds: ["fixture-director"] };
   }, true);
   const parser = fileURLToPath(new URL("../../src/workers/knowledge-parser.ts", import.meta.url));
-  app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(repo, new ComicDirector(repo, extension), parser));
+  app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(repo, new ComicDirector(repo, extension, accepting), parser));
   return { calls, extension };
 }
 
@@ -56,11 +70,11 @@ export async function verifyComicDirector(app: App, pool: Pool, episodes: PgComi
     assert.equal(response.status, expected, JSON.stringify(value));
     return value as T;
   }
-  const createRole = (name: string, aliases: string[], account = "fixture-one") => json<{ id: string }>("/characters", "POST",
-    { name, aliases, roleKey: null, tags: [], age: "", personality: "", appearance: "" }, 201, account);
+  const createRole = (name: string, aliases: string[], account = "fixture-one", appearance = "") => json<{ id: string }>("/characters", "POST",
+    { name, aliases, roleKey: null, tags: [], age: "", personality: "", appearance }, 201, account);
   const lin = await createRole("林夏", ["夜访者"]);
-  await createRole("老板", []);
-  await createRole("店主", ["老板"]);
+  await createRole("老板", [], "fixture-one", "圆框眼镜");
+  await createRole("老板", ["店主"], "fixture-one", "左脸有疤");
   await createRole("陌生人", [], "fixture-two");
   assert.deepEqual(await json<ComicDirectorState>(route), { conversationId: null, proposals: [] });
   await json(route, "GET", undefined, 404, "fixture-two");
@@ -96,7 +110,8 @@ export async function verifyComicDirector(app: App, pool: Pool, episodes: PgComi
   const turn = { userId: owner, conversationId: proposal.conversationId, metadata: { comicSeriesId: series.id },
     agentId: COMIC_DIRECTOR_AGENT_ID, toolNames: ["generate_video", "generate_image"] };
   assert.deepEqual((await fixture.extension.beginTurn!(turn)).allowedToolNames, []);
-  assert.deepEqual((await fixture.extension.beginTurn!(turn)).blockedToolNames, turn.toolNames);
+  const awaitedBlocked = (await fixture.extension.beginTurn!(turn)).blockedToolNames ?? [];
+  assert.ok(turn.toolNames.every(name => (awaitedBlocked).includes(name)));
   await assert.rejects(fixture.extension.beginTurn!({ ...turn, userId: other }));
   await assert.rejects(fixture.extension.beginTurn!({ ...turn, metadata: { comicSeriesId: randomUUID() } }));
   assert.throws(() => fixture.extension.conversationMetadata!({}));
@@ -129,4 +144,5 @@ export async function verifyComicDirector(app: App, pool: Pool, episodes: PgComi
   assert.equal(state.conversationId, proposal.conversationId);
   assert.equal(state.proposals.length, 5);
   console.log("PASS W10 director PG/HTTP: real TXT/DOCX extraction, owner and session isolation, replay, role ambiguity, revision CAS and persisted decisions");
+  return series.id;
 }

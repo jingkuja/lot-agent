@@ -37,6 +37,7 @@ export const comicEditApi = {
   downloadRender: (id: string) => request<ComicRenderDownload>(root + "/renders/" + encodeURIComponent(id) + "/download"),
 };
 const errors: Record<string, string> = {
+  COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
   REVISION_CONFLICT: "其他窗口已保存工程，本地修改仍在本页",
   INVALID_TIMELINE: "请检查时间线中的裁切和素材",
   EDIT_ADOPTION_CHANGED: "采用版本已更换，请重新读取工程",

@@ -18,6 +18,7 @@ const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"],
   REFERENCE_UNSUPPORTED: "参考图的格式、尺寸或大小超出模型限制",
 };
 const errors: Record<string, string> = {
+  COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
   QUOTE_EXPIRED: "报价已过期，请重新询价",
   PRICE_CHANGED: "模型或价格已更新，请重新询价",
   QUOTE_STALE: "素材或分镜已更新，请重新询价",

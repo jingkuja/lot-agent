@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { COMIC_DRAMA_ROOT, type ComicDirectorProposal, type ComicDramaContent, type ComicDramaDetail, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
+import { COMIC_DRAMA_ROOT, type ComicDirectorDecision, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDramaContent,
+  type ComicDramaDetail, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
 import { ApiClientError, type User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useI18n } from "../../i18n/index.js";
@@ -19,6 +20,7 @@ import { ComicEditsIndex } from "./ComicEditList.js";
 import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
 import { ComicBreakdownSample } from "./ComicBreakdownSample.js";
 import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
+import type { DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
 import { comicDirectorApi } from "./director-api.js";
 import { useComicDramaDraft } from "./useComicDramaDraft.js";
@@ -167,7 +169,7 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
   });
   const choose = (id: string) => void leave(() => navigate(editorPath + "/" + id));
   const openEdit = (id: string) => navigate(projectPrefix + id);
-  const applyProposal = async (proposal: ComicDirectorProposal) => {
+  const applyProposal = async (proposal: ComicDirectorProposal, decision?: ComicDirectorDecision) => {
     let result: ComicDirectorProposal | undefined;
     await run(async () => {
       const current = getDetail();
@@ -175,10 +177,21 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
         setNotice(t("剧集已更新，请基于最新修订生成提案"));
         return;
       }
-      result = await comicDirectorApi.apply(current.series.id, proposal.id, proposal.baseRevision);
-      load(await comicDramaApi.get(current.series.id));
+      result = await comicDirectorApi.apply(current.series.id, proposal.id, proposal.baseRevision, decision);
+      if (result.sequelId) saved(await comicDramaApi.get(result.sequelId));
+      else load(await comicDramaApi.get(current.series.id));
     });
     return result;
+  };
+  const applyDirectorRole = async (proposal: ComicDirectorProposal, index: number, input: DirectorRoleChoiceInput) => {
+    let outcome: ComicDirectorRoleOutcome | undefined;
+    await run(async () => {
+      const current = getDetail();
+      if (!current) return;
+      outcome = await comicDirectorApi.role(current.series.id, proposal.id, index, { ...input, expectedRevision: current.series.revision });
+      load(await comicDramaApi.get(current.series.id));
+    });
+    return outcome;
   };
   return <div className="comic-workspace">
     <aside className="comic-sidebar">
@@ -279,8 +292,9 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
               {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
               <ComicBreakdownSample />
             </section>
-            <ComicDirectorPanel key={series.id} seriesId={series.id} revision={series.revision} locked={locked || !!editor.issue}
-              prepare={async () => await flush() ? getDetail()?.series.revision ?? null : null} apply={applyProposal} />
+            <ComicDirectorPanel key={series.id} detail={detail} locked={locked || !!editor.issue}
+              getSaved={async () => await flush() ? getDetail() : null} apply={applyProposal} applyRole={applyDirectorRole}
+              openClip={id => openVideo(series.id, id)} />
           </div> : stage === "选角" ? <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
             disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
           : stage === "生成" ? <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}

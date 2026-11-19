@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DB } from "../../src/db/database.js";
 import { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
 import { createRedisConnection } from "../../src/jobs/redis.js";
-import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue } from "../../src/jobs/task-queues.js";
+import { COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue } from "../../src/jobs/task-queues.js";
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 
 export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: URL, redis: string) {
@@ -14,8 +14,8 @@ export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: 
   assert.equal(marketingPoolIssue(limits, poolMax), "");
   const db = new DB({ host: database.hostname, port: Number(database.port), user: decodeURIComponent(database.username),
     password: decodeURIComponent(database.password), database: database.pathname.slice(1), max: poolMax });
-  const all = ["marketing.video", COMIC_VIDEO_TASK, COMIC_IMAGE_TASK, DIGITAL_PRESENTER_TASK];
-  const types = Array.from({ length: 24 }, (_, i) => i % 2 === 0 ? all[0] : all[1 + Math.floor(i / 2) % 3]);
+  const all = ["marketing.video", COMIC_VIDEO_TASK, COMIC_IMAGE_TASK, COMIC_RENDER_TASK, DIGITAL_PRESENTER_TASK];
+  const types = Array.from({ length: 24 }, (_, i) => i % 2 === 0 ? all[0] : all[1 + Math.floor(i / 2) % (all.length - 1)]);
   try {
     await phase("marketing-100ms", types.map(() => all[0]), false);
     await phase("mixed-100ms", types, false);

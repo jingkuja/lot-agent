@@ -18,7 +18,7 @@ import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 
 type App = Hono<{ Variables: { userId: string } }>;
-export async function mountComicEdits(app: App, pool: Pool, media: ComicMediaLibrary, root: string, owner: string) {
+export async function mountComicEdits(app: App, pool: Pool, media: ComicMediaLibrary, root: string, owner: string, accepting?: () => void) {
   const wav = join(root, "w8.wav");
   await mediaProcess(ffmpeg(), ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=750:duration=1", "-c:a", "pcm_s16le", wav]);
   const audio = new Uint8Array(await readFile(wav));
@@ -46,7 +46,7 @@ export async function mountComicEdits(app: App, pool: Pool, media: ComicMediaLib
       },
     },
   });
-  app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(repo, speech));
+  app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(repo, speech, accepting));
   return { calls, cloneId, state };
 }
 

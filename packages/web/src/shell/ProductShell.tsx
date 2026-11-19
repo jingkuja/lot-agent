@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { COMIC_DIRECTOR_AGENT_ID, COMIC_DRAMA_ROOT } from "@lot-agent/core/comic-drama";
+import { COMIC_DIRECTOR_AGENT_ID, COMIC_DRAMA_ROOT, comicDramaCapabilitiesSchema } from "@lot-agent/core/comic-drama";
 import { ComicDramaWorkspace } from "../modules/comic-drama/ComicDramaWorkspace.js";
-import { useI18n } from "../i18n/index.js";
-import type { User } from "../api/client.js";
+import { api, type User } from "../api/client.js";
 import { Workspace } from "../pages/Workspace.js";
 import { DIGITAL_EMPLOYEE_AGENT_ID } from "../modules/digital-employee/conversation-scope.js";
 import { EmployeeWorkspace } from "../modules/digital-employee/EmployeeWorkspace.js";
@@ -35,9 +34,20 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
   const [llmNoticeTitle, setLlmNoticeTitle] = useState<string | null>(null);
   const employeeFlags = useEmployeeFlags();
   const employeeSummary = useEmployeeSummary();
-  const { comicDramaEnabled } = useI18n();
+  const [comicAccess, setComicAccess] = useState<{ owner: string; enabled: boolean }>();
+  const comicDramaEnabled = comicAccess?.owner === user.id ? comicAccess.enabled : undefined;
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const deadline = window.setTimeout(() => controller.abort(), 8000);
+    void api.getProductLinks(controller.signal).then(flags => {
+      const enabled = comicDramaCapabilitiesSchema.safeParse(flags).data?.comicDramaEnabled === true;
+      if (active && !controller.signal.aborted) setComicAccess({ owner: user.id, enabled });
+    }).catch(() => { if (active) setComicAccess({ owner: user.id, enabled: false }); }).finally(() => window.clearTimeout(deadline));
+    return () => { active = false; window.clearTimeout(deadline); controller.abort(); };
+  }, [user.id]);
   const isComicPath = pathname === COMIC_DRAMA_ROOT || pathname.startsWith(COMIC_DRAMA_ROOT + "/");
-  const isComicDrama = comicDramaEnabled && isComicPath;
+  const isComicDrama = comicDramaEnabled === true && isComicPath;
   const isDigitalEmployee = pathname.startsWith("/digital-employee");
 
   useEffect(() => {
@@ -58,12 +68,12 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
 
   // Old links, bookmarks and past chat messages reach their new place.
   useEffect(() => {
-    if (isComicPath && !comicDramaEnabled) replacePath("/assistant");
+    if (isComicPath && comicDramaEnabled === false) replacePath("/assistant");
     else replacePath(normalizeEmployeePath(pathname));
   }, [pathname, replacePath, comicDramaEnabled, isComicPath]);
 
   const openComicDrama = comicDramaEnabled ? () => navigate(COMIC_DRAMA_ROOT) : undefined;
-  const showAssistant = !isDigitalEmployee && !isComicDrama;
+  const showAssistant = !isDigitalEmployee && !isComicDrama && !(isComicPath && comicDramaEnabled === undefined);
 
   const handleOpenDigitalEmployee = useCallback(() => {
     const open = (catalog: { llm: unknown[] }) => {

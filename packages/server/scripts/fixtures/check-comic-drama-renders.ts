@@ -19,7 +19,7 @@ import { ffmpeg, ffprobe, inspectMedia, mediaProcess } from "../../src/marketing
 import type { verifyComicEdits } from "./check-comic-drama-edits.js";
 
 type App = Hono<{ Variables: { userId: string } }>;
-export function mountComicRenderFixture(app: App, pool: Pool, media: ComicMediaLibrary, queue: BullmqJobQueue) {
+export function mountComicRenderFixture(app: App, pool: Pool, media: ComicMediaLibrary, queue: BullmqJobQueue, accepting?: () => void) {
   let hold: Promise<void> | undefined;
   let skipNext = false;
   queue.process(COMIC_RENDER_TASK, async (job, ctl) => {
@@ -33,7 +33,7 @@ export function mountComicRenderFixture(app: App, pool: Pool, media: ComicMediaL
     },
     stopCancelled: id => queue.stopCancelled(id), canResumePersisted: id => queue.canResumePersisted(id),
     resumePersisted: (id, type) => queue.resumePersisted(id, type),
-  }));
+  }, accepting));
   const pause = () => {
     let release: () => void = () => {};
     hold = new Promise<void>(resolve => { release = resolve; });

@@ -24,6 +24,8 @@ import { verifyComicVideo, w6Kling } from "./fixtures/check-comic-drama-video.js
 import { mountComicEdits, verifyComicEdits } from "./fixtures/check-comic-drama-edits.js";
 import { mountComicRenderFixture, verifyComicRenders } from "./fixtures/check-comic-drama-renders.js";
 import { directorDraft, mountComicDirector, verifyComicDirector } from "./fixtures/check-comic-drama-director.js";
+import { verifyComicRelease } from "./fixtures/check-comic-drama-release.js";
+import { comicRollout } from "../src/comic-drama/rollout.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 
@@ -37,12 +39,18 @@ const owner = randomUUID(), other = randomUUID();
 const model = "grok-imagine-video-1.5";
 const fields = { title: "雨夜便利店", styleKey: "thick_painting", aspectRatio: "9:16", videoModel: model };
 let enabled = true;
-app.get("/api/public/product", c => c.json({ globle: 1, comicDramaEnabled: enabled }));
+const rolloutEnv: NodeJS.ProcessEnv = { COMIC_DRAMA_FACTORY: "1" };
+const accepting = () => comicRollout(rolloutEnv).accepting();
+const fixtureOwner = (token?: string) => token === "Bearer fixture-one" ? owner : token === "Bearer fixture-two" ? other : undefined;
+app.get("/api/public/product", c => c.json({
+  globle: 1, comicDramaEnabled: enabled && comicRollout(rolloutEnv).showEntry(fixtureOwner(c.req.header("Authorization"))),
+}));
 app.use(`${COMIC_DRAMA_API_ROOT}/*`, async (c, next) => {
   if (!enabled) return c.notFound();
-  const token = c.req.header("Authorization");
-  if (!["Bearer fixture-one", "Bearer fixture-two"].includes(token ?? "")) return c.json({ code: "UNAUTHORIZED" }, 401);
-  c.set("userId", token === "Bearer fixture-one" ? owner : other);
+  const user = fixtureOwner(c.req.header("Authorization"));
+  if (!user) return c.json({ code: "UNAUTHORIZED" }, 401);
+  if (!comicRollout(rolloutEnv).admits(user)) return c.notFound();
+  c.set("userId", user);
   await next();
 });
 const seriesRepo = new PgComicDramaRepository(pool);
@@ -90,16 +98,16 @@ try {
   await runMigrations(pool, migrations);
   assert.equal((await pool.query("SELECT legacy_draft FROM public.cd_series")).rows[0].legacy_draft, "retained");
   await pool.query("INSERT INTO users(id,name) VALUES ($1,'Owner one'),($2,'Owner two')", [owner, other]);
-  const edits = await mountComicEdits(app, pool, files, fixtureMediaDir, owner);
-  const director = mountComicDirector(app, pool, owner);
+  const edits = await mountComicEdits(app, pool, files, fixtureMediaDir, owner, accepting);
+  const director = mountComicDirector(app, pool, owner, accepting);
   const redisUrl = process.env.COMIC_DRAMA_TEST_REDIS_URL;
   if (redisUrl) {
     generation = await mountComicGenerationFixture({
       app, database: url, redisUrl, pool, library, series: seriesRepo, media: files, mediaRoot: fixtureMediaDir,
-      receiptPath: join(fixtureMediaDir, "receipts"), owner,
+      receiptPath: join(fixtureMediaDir, "receipts"), owner, accepting,
     });
   }
-  const pauseRender = generation && mountComicRenderFixture(app, pool, files, generation.queue);
+  const pauseRender = generation && mountComicRenderFixture(app, pool, files, generation.queue, accepting);
   assert.equal((await req("", "GET", undefined, "bad")).status, 401);
   assert.equal((await req("", "POST", { ...fields, ownerId: other })).status, 400);
   assert.equal((await req("", "POST", fields, "fixture-two")).status, 400);
@@ -151,7 +159,8 @@ try {
   const videoEpisode = generation ? await verifyComicVideo(app, pool, generation.video) : null;
   const editFixture = await verifyComicEdits(app, pool, seriesRepo, files, fixtureMediaDir, owner, other, edits);
   if (pauseRender) await verifyComicRenders(app, pool, files, fixtureMediaDir, owner, editFixture, pauseRender);
-  await verifyComicDirector(app, pool, seriesRepo, owner, other, director);
+  const directorEpisode = await verifyComicDirector(app, pool, seriesRepo, owner, other, director);
+  await verifyComicRelease(app, pool, directorEpisode, generation, rolloutEnv, owner, editFixture.b1);
 
   if (process.argv.includes("--ui")) {
     const project = fileURLToPath(new URL("../../../packages/web", import.meta.url));
@@ -653,6 +662,33 @@ try {
           await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
           await page.goto(deepLink);
           console.log("PASS W10 Web: revision downloads after edits, cancellation and recovery, global history, director import, ambiguity and persisted approval");
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await directorPanel.getByLabel("导演任务", { exact: true }).selectOption("breakdown");
+          await directorPanel.getByRole("button", { name: "生成拆分镜提案", exact: true }).click();
+          await directorPanel.getByRole("heading", { name: "建议分镜", exact: true }).waitFor();
+          page.once("dialog", (dialog: { accept(): Promise<void> }) => { void dialog.accept(); });
+          await directorPanel.getByRole("button", { name: "只追加分镜", exact: true }).click();
+          await directorPanel.getByText("已应用分镜", { exact: true }).waitFor();
+          const casting = directorPanel.getByLabel("选择角色候选", { exact: true }).filter({ has: page.locator("option").filter({ hasText: "圆框眼镜" }) });
+          assert.equal(await casting.locator("option").filter({ hasText: /^老板 · (圆框眼镜|左脸有疤) · [\da-f]{8}$/ }).count(), 2);
+          const sends = generation!.counts.submits;
+          await directorPanel.getByText("导演生成确认", { exact: true }).click();
+          await directorPanel.getByLabel("选择生成分镜", { exact: true }).selectOption({ label: "W11 雨夜相逢" });
+          await directorPanel.getByRole("button", { name: "预览生成费用", exact: true }).click();
+          await page.getByRole("dialog", { name: "生成费用预览" }).getByRole("button", { name: "取消", exact: true }).click();
+          await page.reload();
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await directorPanel.getByText("导演生成确认", { exact: true }).click();
+          await directorPanel.getByRole("button", { name: "查看费用确认", exact: true }).click();
+          await page.getByRole("dialog", { name: "生成费用预览" }).getByRole("button", { name: "取消", exact: true }).click();
+          assert.equal(generation!.counts.submits, sends);
+          await page.evaluate(() => localStorage.setItem("lot:language", "id"));
+          await page.reload();
+          await page.getByRole("navigation", { name: "Tahap produksi" }).getByRole("button", { name: /Naskah/ }).click();
+          await directorPanel.getByRole("heading", { name: "Usulan pembagian adegan", exact: true }).waitFor();
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.goto(deepLink);
+          console.log("PASS W11 Web: breakdown append, quote restored after reload, zero submissions, Indonesian director card");
         }
 
         const desktopBinary = process.env.COMIC_DRAMA_ELECTRON_PATH;
@@ -719,7 +755,7 @@ try {
                 await desktopPage.locator(".comic-export-history li").first().getByRole("button", { name: "下载 MP4", exact: true }).waitFor();
                 await desktopPage.goto(new URL(new URL(deepLink).pathname, desktopPage.url()).href);
                 await desktopPage.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
-                await desktopPage.locator(".comic-director").getByText("已采用剧本", { exact: true }).waitFor();
+                await desktopPage.locator(".comic-director").getByText("已应用分镜", { exact: true }).waitFor();
                 console.log("PASS W10 Electron: export history with download, saved director proposal and applied script");
               }
               await desktopPage.getByRole("button", { name: "素材库", exact: true }).click();

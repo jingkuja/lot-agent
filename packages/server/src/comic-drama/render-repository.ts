@@ -23,7 +23,7 @@ const renderView = ({ createdAt, stamp: _stamp, ...row }: RenderRow): ComicRende
 export class PgComicRenders {
   constructor(private readonly pool: Pool, private readonly edits = new PgComicEdits(pool)) {}
 
-  start(owner: string, editId: string, input: ComicRenderRequest) {
+  start(owner: string, editId: string, input: ComicRenderRequest, accepting?: () => void) {
     return libraryTransaction(this.pool, async db => {
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`comic-render-request:${owner}:${input.requestId}`]);
       const { rows: [existing] } = await db.query<{ id: string; edit_id: string; edit_revision: number }>(
@@ -32,6 +32,7 @@ export class PgComicRenders {
         if (existing.edit_id !== editId || existing.edit_revision !== input.expectedRevision) throw new ComicLibraryError("RENDER_REQUEST_CONFLICT", 409);
         return { id: existing.id, created: false };
       }
+      accepting?.();
       const { timeline, sources, media, title, seriesId } = await this.edits.snapshot(db, owner, editId, input.expectedRevision);
       const issue = comicRenderIssue(timeline);
       if (issue) throw new ComicLibraryError(issue, 400);

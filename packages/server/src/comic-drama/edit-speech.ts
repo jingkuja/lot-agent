@@ -118,7 +118,7 @@ export class ComicEditSpeech {
     return null;
   }
 
-  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal) {
+  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
     const source = await this.lines(owner, editId, itemId, fields.expectedRevision);
     if (source.clipRevision !== fields.expectedClipRevision) throw new ComicLibraryError("EDIT_DIALOGUE_CHANGED", 409);
     const line = source.lines.find(line => line.id === lineId);
@@ -132,6 +132,7 @@ export class ComicEditSpeech {
     const fingerprint = digest([1, scope, version, voice, input, "wav"]);
     const existing = await this.cached(owner, fingerprint);
     if (existing) return existing;
+    accepting?.();
     this.media.assertAvailable();
     const provider = await this.deps.ownerSpeech(owner);
     if (!provider) throw new ComicLibraryError("EDIT_SPEECH_UNAVAILABLE", 503);
