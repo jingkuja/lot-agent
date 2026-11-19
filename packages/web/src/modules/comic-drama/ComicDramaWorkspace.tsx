@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { COMIC_DRAMA_ROOT, type ComicDramaContent, type ComicDramaDetail, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { COMIC_DRAMA_ROOT, type ComicDirectorProposal, type ComicDramaContent, type ComicDramaDetail, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
 import { ApiClientError, type User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useI18n } from "../../i18n/index.js";
@@ -14,6 +14,13 @@ import { DictionarySettings } from "./DictionarySettings.js";
 import { Storyboard } from "./Storyboard.js";
 import { ComicImageGeneration } from "./ComicImageGeneration.js";
 import { ComicVideoHistory } from "./ComicVideoHistory.js";
+import { ComicEditorSource } from "./ComicEditorSource.js";
+import { ComicEditsIndex } from "./ComicEditList.js";
+import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
+import { ComicBreakdownSample } from "./ComicBreakdownSample.js";
+import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
+import { ComicRenderPanel } from "./ComicRenderPanel.js";
+import { comicDirectorApi } from "./director-api.js";
 import { useComicDramaDraft } from "./useComicDramaDraft.js";
 import "./comic-drama.css";
 
@@ -35,6 +42,10 @@ type Props = {
 const steps = ["剧本", "选角", "分镜", "生成", "剪辑"] as const;
 const libraryPaths = [["/characters", "角色素材库"], ["/materials", "素材库"], ["/settings", "设置"]] as const;
 const videosPath = COMIC_DRAMA_ROOT + "/clips";
+const editorPath = COMIC_DRAMA_ROOT + "/editor";
+const editorSourcesPath = editorPath + "/sources";
+const renderHistoryPath = editorPath + "/exports";
+const projectPrefix = editorPath + "/projects/";
 
 export function ComicDramaWorkspace({ user, pathname, active, navigate, replacePath, onOpenAssistant, onOpenDigitalEmployee, onLogout, models }: Props) {
   const { t, locale } = useI18n();
@@ -58,12 +69,18 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
   const loadedPath = useRef(COMIC_DRAMA_ROOT);
   const history = pathname === historyPath;
   const videoHistory = pathname === videosPath;
-  const parked = pathname === COMIC_DRAMA_ROOT + "/editor";
+  const editId = pathname.startsWith(projectPrefix) ? pathname.slice(projectPrefix.length) : "";
+  const pickingSource = pathname === editorSourcesPath;
+  const renderHistory = pathname === renderHistoryPath;
+  const takeId = !editId && !pickingSource && !renderHistory && pathname.startsWith(editorPath + "/") ? pathname.slice(editorPath.length + 1) : "";
+  const editorRoute = pathname === editorPath || pathname.startsWith(editorPath + "/");
+  const editGuard = useRef<(() => boolean) | null>(null);
+  const setEditGuard = useCallback((guard: (() => boolean) | null) => { editGuard.current = guard; }, []);
   const directId = pathname.startsWith(historyPath + "/") ? pathname.slice(historyPath.length + 1) : null;
   const library = libraryPaths.find(([suffix]) => pathname === COMIC_DRAMA_ROOT + suffix ||
     (suffix === "/characters" && pathname.startsWith(COMIC_DRAMA_ROOT + suffix + "/")))?.[0];
   const characterId = library === "/characters" ? pathname.split("/")[3] : undefined;
-  const workspace = !history && !parked && !library && !videoHistory;
+  const workspace = !history && !editorRoute && !library && !videoHistory;
   const locked = !!series?.archivedAt || busy;
 
   useEffect(() => {
@@ -95,7 +112,7 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
   }, [active, directId, flush, getDetail, load, pathname, replacePath, retry, workspace]);
 
   const leave = async (callback: () => void) => {
-    if (!busyRef.current && await flush()) callback();
+    if (!busyRef.current && (editGuard.current?.() ?? true) && await flush()) callback();
   };
   const handleError = (error: unknown) => {
     if (error instanceof ApiClientError && error.code === "MODEL_UNAVAILABLE") return t("视频模型不可用，请重新选择");
@@ -145,6 +162,24 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
   };
   const issueClip = latest?.clips.find(clip => clip.id === editor.issue?.target);
   const issueIsScript = editor.issue?.target === "script";
+  const openVideo = (id: string, clipId: string) => void leave(() => {
+    setSelected(clipId); setOpenVideos(true); setStage("生成"); navigate(seriesPath(id));
+  });
+  const choose = (id: string) => void leave(() => navigate(editorPath + "/" + id));
+  const openEdit = (id: string) => navigate(projectPrefix + id);
+  const applyProposal = async (proposal: ComicDirectorProposal) => {
+    let result: ComicDirectorProposal | undefined;
+    await run(async () => {
+      const current = getDetail();
+      if (!current || current.series.revision !== proposal.baseRevision) {
+        setNotice(t("剧集已更新，请基于最新修订生成提案"));
+        return;
+      }
+      result = await comicDirectorApi.apply(current.series.id, proposal.id, proposal.baseRevision);
+      load(await comicDramaApi.get(current.series.id));
+    });
+    return result;
+  };
   return <div className="comic-workspace">
     <aside className="comic-sidebar">
       <BrandHeader user={user} onLogout={() => void leave(onLogout)} onOpenAssistant={() => void leave(onOpenAssistant)}
@@ -159,7 +194,10 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
         {libraryPaths.map(([suffix, label]) => <button type="button" key={suffix} aria-current={library === suffix ? "page" : undefined}
           onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT + suffix))}>{t(label)}</button>)}
         <button type="button" aria-current={videoHistory ? "page" : undefined} onClick={() => void leave(() => navigate(videosPath))}>{t("历史成片")}</button>
-        <button type="button" disabled>{t("剪辑工作台")}</button>
+        <button type="button" aria-current={editorRoute && !renderHistory ? "page" : undefined}
+          onClick={() => void leave(() => navigate(editorPath))}>{t("剪辑工作台")}</button>
+        <button type="button" aria-current={renderHistory ? "page" : undefined}
+          onClick={() => void leave(() => navigate(renderHistoryPath))}>{t("导出历史")}</button>
       </nav>
     </aside>
     <main className="comic-page" aria-busy={loading || busy}>
@@ -201,10 +239,13 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
           open={id => navigate(COMIC_DRAMA_ROOT + "/characters" + (id ? "/" + id : ""))} />
         : library === "/materials" ? <MaterialLibrary />
         : library === "/settings" ? <DictionarySettings />
-        : videoHistory ? <ComicVideoHistory open={(id, clipId) => {
-          setSelected(clipId); setOpenVideos(true); setStage("生成"); navigate(seriesPath(id));
-        }} />
-        : parked ? <div className="comic-empty"><h1>{t("剪辑工作台")}</h1><p>{t("即将发布")}</p></div>
+        : renderHistory ? <ComicRenderPanel />
+        : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
+          exit={() => void leave(() => navigate(editorPath))} />
+        : editorRoute && takeId ? <ComicEditorSource key={takeId} takeId={takeId} open={openVideo} openEdit={openEdit}
+          browse={() => navigate(editorSourcesPath)} />
+        : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo} choose={choose} />
+        : editorRoute ? <ComicEditsIndex currentSeries={series?.id} open={openEdit} browse={() => navigate(editorSourcesPath)} />
         : !series || !detail ? <div className="comic-empty">
           <h1>{t("漫剧工厂")}</h1><p>{t("新建剧集，开始编排分镜")}</p>
           <button type="button" className="primary" onClick={() => showDialog("create")}>{t("新建剧集")}</button>
@@ -223,21 +264,27 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
           </header>
           <nav className="comic-steps" aria-label={t("制作步骤")}>
             {steps.map((step, index) => <button key={step} type="button" aria-pressed={stage === step}
-              disabled={step === "剪辑"} onClick={() => {
+              onClick={() => {
                 if (step === "生成") void leave(() => { if (stage !== step) setOpenVideos(false); setStage(step); });
-                else if (step !== "剪辑") setStage(step);
+                else if (step === "剪辑") void leave(() => navigate(editorPath));
+                else setStage(step);
               }}>
               <span>{index + 1}</span>{t(step)}
             </button>)}
           </nav>
-          {stage === "剧本" ? <section className="comic-edit-card comic-script">
-            <label>{t("剧本正文")}<textarea rows={16} maxLength={20000} disabled={locked}
-              value={editor.script?.content ?? detail.script?.content ?? ""} onChange={event => editScript(event.target.value)} /></label>
-            {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
-          </section> : stage === "选角" ? <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
+          {stage === "剧本" ? <div className="comic-script-layout">
+            <section className="comic-edit-card comic-script">
+              <label>{t("剧本正文")}<textarea aria-label={t("剧本正文")} rows={16} maxLength={20000} disabled={locked}
+                value={editor.script?.content ?? detail.script?.content ?? ""} onChange={event => editScript(event.target.value)} /></label>
+              {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
+              <ComicBreakdownSample />
+            </section>
+            <ComicDirectorPanel key={series.id} seriesId={series.id} revision={series.revision} locked={locked || !!editor.issue}
+              prepare={async () => await flush() ? getDetail()?.series.revision ?? null : null} apply={applyProposal} />
+          </div> : stage === "选角" ? <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
             disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
           : stage === "生成" ? <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}
-            initialMode={openVideos ? "from_keyframe" : "keyframe"} disabled={locked || !!editor.issue}
+            choose={choose} initialMode={openVideos ? "from_keyframe" : "keyframe"} disabled={locked || !!editor.issue}
             getSaved={async () => await flush() ? getDetail() : null} />
           : <Storyboard clips={detail.clips} cast={detail.cast} drafts={editor.clips} locked={locked} disabled={locked || !!editor.issue}
             selected={selected} select={setSelected} edit={editClip}

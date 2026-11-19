@@ -180,6 +180,11 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal((await receipt(bad.id)).gatewayRequestId, "fixture-rejected");
   assert.equal((await receipt(uncertain.id)).gatewayRequestId, "fixture-unknown-video");
   assert.equal((await request(`/video-takes/${uncertain.id}/receipt`, "GET", undefined, "fixture-two")).status, 404);
+  assert.equal((await request(`/video-takes/${uncertain.id}`)).status, 404, "unfinished takes cannot be picked as editing sources");
+  assert.equal((await request(`/video-takes/${good.id}`, "GET", undefined, "fixture-two")).status, 404);
+  const source = await json<ComicVideoTake & { taskId?: string }>(`/video-takes/${good.id}`);
+  assert.equal(source.mediaId, good.mediaId);
+  assert.equal(source.taskId, undefined);
   assert.equal((await request(`/video-takes/${uncertain.id}/recover`, "POST", {})).status, 409);
   assert.equal((await preview(ep, [unknown])).skipped[0].reason, "BUSY");
   await json(`/video-takes/${uncertain.id}/release`, "POST", { acknowledgePossibleCharge: true });

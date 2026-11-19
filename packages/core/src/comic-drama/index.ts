@@ -125,7 +125,7 @@ export type ComicDramaListQuery = z.infer<typeof comicDramaSeriesListSchema>;
 export type ComicDramaScript = { version: number; content: string };
 export type ComicDramaDetail = { series: ComicDramaSeries; clips: ComicDramaClip[]; script: ComicDramaScript | null; cast: ComicSeriesCast[] };
 export type ComicDramaListing = {
-  entries: Array<ComicDramaSeries & { updatedAt: string; clipCount: number }>;
+  entries: Array<ComicDramaSeries & { updatedAt: string; clipCount: number; hasRender: boolean }>;
   nextCursor: string | null;
 };
 export type ComicDramaContent = Pick<ComicDramaDetail, "clips" | "script" | "cast"> & { seriesRevision: number };
@@ -154,3 +154,5 @@ export * from "./library.js";
 export * from "./cast.js";
 export * from "./generation.js";
 export * from "./timeline.js";
+export * from "./edit.js";
+export * from "./director.js";

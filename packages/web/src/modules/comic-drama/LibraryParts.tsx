@@ -89,9 +89,9 @@ export function MediaPreview({ media, title, thumbOnly = false, openOriginal = f
   </div>;
 }
 
-export function LibraryDialog({ title, submitLabel, close, save, children }: {
+export function LibraryDialog({ title, submitLabel, close, save, children, describeError = libraryError }: {
   title: string; submitLabel: string; close: () => void;
-  save: (form: FormData, signal: AbortSignal) => Promise<unknown>; children: ReactNode;
+  save: (form: FormData, signal: AbortSignal) => Promise<unknown>; children: ReactNode; describeError?: (error: unknown) => string;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
@@ -108,7 +108,7 @@ export function LibraryDialog({ title, submitLabel, close, save, children }: {
     setSaving(true);
     setFailure("");
     try { await save(form, controller.signal); if (!controller.signal.aborted) close(); }
-    catch (error) { if (!controller.signal.aborted) setFailure(libraryError(error)); }
+    catch (error) { if (!controller.signal.aborted) setFailure(describeError(error)); }
     finally { running.current = null; if (!controller.signal.aborted) setSaving(false); }
   };
   return <dialog className="comic-dialog" ref={ref} aria-label={title} onCancel={event => { event.preventDefault(); close(); }}>

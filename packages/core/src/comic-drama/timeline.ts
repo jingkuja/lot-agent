@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MarketingCaptionsSchema } from "../marketing-video/index.js";
 
 const id = z.string().uuid();
 const ms = z.number().int().min(0).max(2_147_483_647);
@@ -15,14 +16,16 @@ const anchor = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clip"), videoItemId: id, offsetMs: ms }).strict(),
 ]);
 const audio = z.object({
-  id, mediaId: id, anchor, durationMs: ms.min(1), sourceInMs: ms, volume,
+  id, mediaId: id, lineId: id.optional(), anchor, durationMs: ms.min(1), sourceInMs: ms, volume,
   fadeInMs: ms, fadeOutMs: ms, loop: z.boolean(),
 }).strict();
-const subtitle = z.object({ id, anchor, durationMs: ms.min(1), text: z.string().trim().min(1).max(2000) }).strict();
+const subtitle = z.object({ id, lineId: id.optional(), anchor, durationMs: ms.min(1), text: z.string().trim().min(1).max(2000) }).strict();
+const captionStyle = MarketingCaptionsSchema.pick({ size: true, position: true, color: true });
 
 export const comicTimelineSchema = z.object({
   schemaVersion: z.literal(1), aspectRatio: z.enum(["9:16", "16:9", "1:1"]),
   video: z.array(video), voice: z.array(audio), sfx: z.array(audio), music: z.array(audio), subtitles: z.array(subtitle),
+  captionStyle: captionStyle.optional(),
 }).strict().superRefine((timeline, ctx) => {
   const all = [...timeline.video, ...timeline.voice, ...timeline.sfx, ...timeline.music, ...timeline.subtitles];
   if (new Set(all.map(item => item.id)).size !== all.length) ctx.addIssue({ code: "custom", message: "Timeline item IDs must be unique" });
@@ -50,6 +53,7 @@ export const comicTimelineSchema = z.object({
 });
 
 export type ComicTimeline = z.infer<typeof comicTimelineSchema>;
+export const comicOverlayTracks = ["voice", "music", "sfx", "subtitles"] as const;
 
 export function layoutComicTimeline(timeline: ComicTimeline) {
   let durationMs = 0;
@@ -70,8 +74,48 @@ export function layoutComicTimeline(timeline: ComicTimeline) {
   };
 }
 
-export const comicRenderRequestSchema = z.object({ expectedRevision: z.number().int().positive(), requestId: id }).strict();
+export const COMIC_RENDER_FPS = 30;
+export const COMIC_RENDER_MAX_MS = 300_000;
+export const COMIC_RENDER_MAX_INPUTS = 64;
+export const comicFrame = (timeMs: number) => Math.round(timeMs * COMIC_RENDER_FPS / 1000);
+
+export function comicTimelineOverflow(timeline: ComicTimeline) {
+  const layout = layoutComicTimeline(timeline);
+  const lengths = new Map(timeline.video.map(item => [item.id, item.outMs - item.inMs]));
+  return comicOverlayTracks.flatMap(track => timeline[track].filter(item => {
+    const end = item.anchor.offsetMs + item.durationMs;
+    return end > (item.anchor.kind === "clip" ? lengths.get(item.anchor.videoItemId) ?? 0 : layout.durationMs);
+  }).map(item => item.id));
+}
+
+export function comicRenderIssue(timeline: ComicTimeline) {
+  const layout = layoutComicTimeline(timeline);
+  if (!timeline.video.length) return "RENDER_NO_VIDEO";
+  if (layout.durationMs > COMIC_RENDER_MAX_MS ||
+    timeline.video.length + timeline.voice.length + timeline.sfx.length + timeline.music.length > COMIC_RENDER_MAX_INPUTS) return "RENDER_LIMIT";
+  if (comicTimelineOverflow(timeline).length) return "RENDER_TRACK_OVERFLOW";
+  if (layout.video.some((item, index) => {
+    const start = comicFrame(item.startMs), end = comicFrame(item.endMs);
+    const priorEnd = index ? comicFrame(layout.video[index - 1].endMs) : start;
+    const nextStart = index + 1 < layout.video.length ? comicFrame(layout.video[index + 1].startMs) : end;
+    return end <= start || nextStart <= priorEnd || (timeline.video[index].transitionIn.kind !== "cut" && priorEnd <= start);
+  })) return "RENDER_FRAME_RANGE";
+  return null;
+}
+
+export const comicRenderRequestSchema = z.object({
+  expectedRevision: z.number().int().min(1).max(2_147_483_647),
+  requestId: id.transform(value => value.toLowerCase()),
+}).strict();
 export const comicFrozenRenderSchema = z.object({
   schemaVersion: z.literal(1), editId: id, editRevision: z.number().int().positive(), timeline: comicTimelineSchema,
 }).strict();
 export type ComicFrozenRenderInput = z.infer<typeof comicFrozenRenderSchema>;
+export type ComicRenderRequest = z.infer<typeof comicRenderRequestSchema>;
+export type ComicRender = {
+  id: string; editId: string; editRevision: number; durationMs: number;
+  status: "pending" | "running" | "ready" | "failed" | "cancelled"; error: string | null; mediaId: string | null;
+  title: string | null; createdAt: string; recoverable: boolean;
+};
+export type ComicRenderHistory = { entries: ComicRender[]; nextCursor: string | null };
+export type ComicRenderDownload = { url: string; filename: string };

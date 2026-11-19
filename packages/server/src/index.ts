@@ -46,7 +46,7 @@ import { createAuthRoutes } from "./routes/auth.js";
 import { createConversationRoutes, createGenerationRoutes } from "./routes/conversations.js";
 import { createPosterLibraryRoutes } from "./routes/poster-library.js";
 import { PosterLibrary, startPosterLibraryRefresh } from "./generation/poster-library.js";
-import { LocalStorage } from "@lot-agent/core";
+import { LocalStorage, OpenAISpeechProvider } from "@lot-agent/core";
 import { staticPrefix } from "./util/public-base.js";
 import { createSkillRoutes } from "./routes/skills.js";
 import { createTraceRoutes } from "./routes/traces.js";
@@ -62,12 +62,12 @@ import { createPlatformRoutes, createPublishRoutes } from "./routes/publish.js";
 import { createKnowledgeBaseRoutes } from "./routes/knowledge-bases.js";
 import { digitalEmployeeProductFlags } from "./digital-employee/feature-scope.js";
 import { registerDigitalEmployeeJobs } from "./digital-employee/jobs.js";
-import { internationalModelsEnabled } from "./tokenhub/model-access.js";
+import { gatewayModelHeaders, internationalModelsEnabled } from "./tokenhub/model-access.js";
 import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
-import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicVideoProfile } from "@lot-agent/core/comic-drama";
+import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicVideoProfile } from "@lot-agent/core/comic-drama";
 import { PgComicDramaRepository } from "./comic-drama/repository.js";
 import { PgComicDictionary } from "./comic-drama/dictionary.js";
 import { PgComicLibrary } from "./comic-drama/library-repository.js";
@@ -76,6 +76,16 @@ import { createComicLibraryRoutes } from "./comic-drama/library-routes.js";
 import { createComicDramaRoutes } from "./comic-drama/routes.js";
 import { createComicGenerationRoutes } from "./comic-drama/generation-routes.js";
 import { PgComicGeneration } from "./comic-drama/generation-repository.js";
+import { PgComicEdits } from "./comic-drama/edit-repository.js";
+import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
+import { PgComicRenders } from "./comic-drama/render-repository.js";
+import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
+import { ComicDirector, createComicDirectorExtension } from "./comic-drama/director-agent.js";
+import { PgComicDirector } from "./comic-drama/director-repository.js";
+import { createComicDirectorRoutes } from "./comic-drama/director-routes.js";
+import { registerAgentExtension } from "./services/agent-extensions.js";
+import { createOwnerLlmResolver } from "./digital-employee/runtime.js";
+import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
 import { resolvePricing, resolveProvider } from "./models/catalog.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
@@ -264,6 +274,14 @@ async function main() {
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
   app.route("/api/auth", createAuthRoutes(service));
   const comicDramaEnabled = process.env.COMIC_DRAMA_FACTORY === "1";
+  const directorRepo = new PgComicDirector(service.db.pool);
+  const directorExtension = createComicDirectorExtension(directorRepo, createOwnerLlmResolver({
+    db: service.db, managedKeysEnabled: service.managedKeysEnabled,
+    listLlmModels: async (owner, key) => (await service.getUserModelCatalog(owner, key))?.llm.map(model => model.id) ?? [],
+    llm: (model, key) => service.providerFactory.llm(model, key),
+  }), comicDramaEnabled);
+  registerAgentExtension(directorExtension);
+  service.agentRegistry.register(comicDirectorDefinition);
   app.route("/api/public/product", createProductRoutes(() => ({ ...digitalEmployeeProductFlags(), comicDramaEnabled })));
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
@@ -419,6 +437,36 @@ async function main() {
     const series = new PgComicDramaRepository(service.db.pool);
     const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), library);
     app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
+    const edits = new PgComicEdits(service.db.pool);
+    const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
+      presetModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || undefined,
+      ownerSpeech: async owner => {
+        const apiKey = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+        return apiKey ? new OpenAISpeechProvider({ apiKey, headers: gatewayModelHeaders(),
+          baseUrl: process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1" }) : null;
+      },
+      clones: knowledgeManagement ? {
+        ready: (owner, id) => knowledgeManagement.voices.ready(owner, id),
+        speak: (owner, voice, input, signal) => knowledgeManagement.voices.speakAs(owner, voice, input, "wav", signal),
+        list: async owner => {
+          const { data } = await knowledgeManagement.repository.listItems(owner, 30, undefined, undefined,
+            { sourceTypes: ["audio"], tags: ["digital-twin:voice"] });
+          const ready = await Promise.allSettled(data.map(async item => {
+            await knowledgeManagement.voices.ready(owner, item.id);
+            return { id: item.id, title: item.title };
+          }));
+          return ready.flatMap(item => item.status === "fulfilled" ? [item.value] : []);
+        },
+      } : undefined,
+    });
+    app.on("POST", `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`, generationRateLimit);
+    app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech));
+    app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(new PgComicRenders(service.db.pool, edits), comicMedia,
+      service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined));
+    app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`, generationRateLimit);
+    app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`, uploadRateLimit);
+    const parser = fileURLToPath(new URL(`./workers/knowledge-parser.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
+    app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(directorRepo, new ComicDirector(directorRepo, directorExtension), parser));
     app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
       const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);

@@ -530,14 +530,14 @@ try {
   // F02: the per-owner render cap counts only renders still live in the queue.
   const renders = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   for (const [index, id] of renders.entries()) await db.pool.query("INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,'marketing.video','{}',$2,'lot-marketing-video')", [id, index === 3 ? other : owner]);
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[0], 1, owner, [], 1), "claimed");
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, [renders[0]], 1), "busy");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[0], 1, owner, async () => [], 1), "claimed");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, async () => [renders[0]], 1), "busy");
   assert.deepEqual([(await db.getTask(renders[1]))!.status, (await db.getTask(renders[1]))!.stage], ["pending", "排队中：同账号已有视频在制作"]);
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[3], 1, other, [renders[0]], 1), "claimed", "another owner is not blocked");
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, [], 1), "claimed", "an orphaned running row does not block");
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, [renders[0], renders[1]], 2), "busy");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[3], 1, other, async () => [renders[0]], 1), "claimed", "another owner is not blocked");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[1], 1, owner, async () => [], 1), "claimed", "an orphaned running row does not block");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, async () => [renders[0], renders[1]], 2), "busy");
   await db.cancelTask(renders[2]);
-  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, [], 2), "stopped");
+  assert.equal(await db.claimTaskWithinOwnerLimit(renders[2], 1, owner, async () => [], 2), "stopped");
   // F03: a parent render can own a shared voice checkpoint; the claim stays single-writer.
   const voices = new PgKlingVoiceStore(db.pool);
   const voiceScope = { taskId: renders[0], userId: owner, slot: 0, fingerprint: "fixture" };

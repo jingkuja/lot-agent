@@ -156,7 +156,8 @@ describe("runMigrations", () => {
         [74, "marketing-product-documents"], [75, "product-document-imports"], [76, "product-document-ocr-pages"],
         [77, "employee-assignments"], [78, "assignment-decisions"], [79, "assignment-team"],
         [80, "business-profile"], [81, "marketing-product-images"], [82, "image-call-receipts"], [83, "image-asset-roles"],
-        [84, "comic-drama-workspace"], [85, "comic-drama-library"], [86, "comic-drama-cast"], [87, "comic-drama-generation"], [88, "comic-drama-video"]]);
+        [84, "comic-drama-workspace"], [85, "comic-drama-library"], [86, "comic-drama-cast"], [87, "comic-drama-generation"], [88, "comic-drama-video"],
+        [89, "comic-drama-edits"], [90, "comic-drama-renders"], [91, "comic-drama-delivery"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

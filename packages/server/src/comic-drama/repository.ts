@@ -63,16 +63,18 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     if (cursor && (cursor.split(",").length !== 2 || !Number.isFinite(Date.parse(at)) || !comicDramaIdSchema.safeParse(id).success)) {
       throw new ComicDramaError("INVALID_CURSOR");
     }
-    const { rows } = await this.pool.query<SeriesRow & { updatedAt: Date; clipCount: number }>(
+    const { rows } = await this.pool.query<SeriesRow & { updatedAt: Date; clipCount: number; hasRender: boolean }>(
       `SELECT ${seriesFields}, updated_at AS "updatedAt",
-       (SELECT count(*)::int FROM lot_comic_drama.cd_clips WHERE series_id=series.id) AS "clipCount"
+       (SELECT count(*)::int FROM lot_comic_drama.cd_clips WHERE series_id=series.id) AS "clipCount",
+       EXISTS (SELECT 1 FROM lot_comic_drama.cd_renders r WHERE (r.owner_id,r.series_id)=(series.owner_id,series.id)
+         AND r.media_id IS NOT NULL) AS "hasRender"
        FROM lot_comic_drama.cd_series AS series WHERE owner_id=$1 AND deleted_at IS NULL AND (archived_at IS NOT NULL)=$2
        AND (strpos(lower(title),lower($3))>0 OR strpos(lower(coalesce(series_group,'')),lower($3))>0 OR $3='')
        AND ($4::timestamptz IS NULL OR (updated_at,id)<($4::timestamptz,$5::uuid))
        ORDER BY updated_at DESC,id DESC LIMIT 25`, [owner, archived === "true", query ?? "", at ?? null, id ?? null],
     );
-    const entries = rows.slice(0, 24).map(({ updatedAt, clipCount, ...row }) => ({
-      ...asSeries(row), updatedAt: updatedAt.toISOString(), clipCount,
+    const entries = rows.slice(0, 24).map(({ updatedAt, clipCount, hasRender, ...row }) => ({
+      ...asSeries(row), updatedAt: updatedAt.toISOString(), clipCount, hasRender,
     }));
     const last = entries.at(-1);
     return { entries, nextCursor: rows.length > 24 && last ? `${last.updatedAt},${last.id}` : null };
@@ -203,8 +205,18 @@ export class PgComicDramaRepository implements ComicDramaRepository {
   }
 
   saveScript(owner: string, id: string, expected: number, content: string) {
-    return this.editContent(owner, id, expected, client => client.query(`INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source)
-      SELECT $1,coalesce(max(version),0)+1,$2,'user' FROM lot_comic_drama.cd_scripts WHERE series_id=$1`, [id, content]));
+    return this.transaction(async client => {
+      const revision = await this.writeScript(client, owner, id, expected, content, "user");
+      return this.content(client, id, revision);
+    });
+  }
+
+  async writeScript(client: PoolClient, owner: string, id: string, expected: number, content: string, source: "user" | "assistant") {
+    const series = await this.series(client, owner, id, true);
+    requireRevision(series.revision, expected);
+    await client.query(`INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source)
+      SELECT $1,coalesce(max(version),0)+1,$2,$3 FROM lot_comic_drama.cd_scripts WHERE series_id=$1`, [id, content, source]);
+    return this.bump(client, id);
   }
 
   addClip(owner: string, id: string, expected: number) {

@@ -1867,18 +1867,21 @@ export class DB {
   }
 
   /**
-   * markTaskRunning with a per-owner cap. Only rows still active in BullMQ
-   * (`liveIds`) count, so an orphaned running row cannot block the owner.
+   * markTaskRunning with a per-owner queue cap. Only rows still active in
+   * the caller's BullMQ queue count, so an orphaned running row cannot block the owner.
    * The owner lock makes the check and the claim one step across workers.
    */
-  async claimTaskWithinOwnerLimit(id: string, attempts: number, userId: string, liveIds: string[], limit: number): Promise<"claimed" | "busy" | "stopped"> {
+  async claimTaskWithinOwnerLimit(
+    id: string, attempts: number, userId: string, readLiveIds: () => Promise<string[]>, limit: number,
+  ): Promise<"claimed" | "busy" | "stopped"> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`task-owner:${userId}`]);
+      // Read Redis after taking the owner lock. An earlier snapshot can omit a job that has just claimed the other slot.
+      const liveIds = await readLiveIds();
       const busy = await client.query(
-        `SELECT count(*)::int AS n FROM tasks t JOIN tasks self ON self.id=$1
-         WHERE t.user_id=$2 AND t.type=self.type AND t.status='running' AND t.id<>$1 AND t.id::text=ANY($3::text[])`,
+        `SELECT count(*)::int AS n FROM tasks WHERE user_id=$2 AND status='running' AND id<>$1 AND id::text=ANY($3::text[])`,
         [id, userId, liveIds]
       );
       if (busy.rows[0].n >= limit) {
@@ -1888,8 +1891,8 @@ export class DB {
       }
       const { rowCount } = await client.query(
         `UPDATE tasks SET status = 'running', attempts = $2, stage = NULL, error = NULL, error_code = NULL, updated_at = now()
-         WHERE id = $1 AND status IN ('pending','running')`,
-        [id, attempts]
+         WHERE id=$1 AND user_id=$3 AND status IN ('pending','running')`,
+        [id, attempts, userId]
       );
       await client.query("COMMIT");
       return rowCount ? "claimed" : "stopped";

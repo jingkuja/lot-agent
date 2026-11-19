@@ -21,6 +21,7 @@ export const comicGenerationApi = {
   characterTakes: (id: string, signal?: AbortSignal) => request<ComicImageTake[]>(root + `/characters/${id}/generations`, { signal }),
   videos: (id: string, clipId: string, signal?: AbortSignal) => request<ComicVideoTake[]>(root + series(id, clipId) + "/videos", { signal }),
   videoHistory: (filters: URLSearchParams, signal?: AbortSignal) => request<ComicVideoHistory>(root + "/videos?" + filters, { signal }),
+  videoTake: (id: string, signal?: AbortSignal) => request<ComicVideoTake>(root + "/video-takes/" + encodeURIComponent(id), { signal }),
   adopt: (id: string, clipId: string, takeId: string, expectedClipRevision: number) =>
     post<{ ok: true }>(series(id, clipId) + "/video/adopt", { takeId, expectedClipRevision }),
   videoAction: (id: string, action: "cancel" | "release" | "recover") =>

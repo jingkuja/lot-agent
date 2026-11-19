@@ -21,6 +21,9 @@ import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-dram
 import { verifyComicCast } from "./fixtures/check-comic-drama-cast.js";
 import { mountComicGenerationFixture, verifyComicGeneration } from "./fixtures/check-comic-drama-generation.js";
 import { verifyComicVideo, w6Kling } from "./fixtures/check-comic-drama-video.js";
+import { mountComicEdits, verifyComicEdits } from "./fixtures/check-comic-drama-edits.js";
+import { mountComicRenderFixture, verifyComicRenders } from "./fixtures/check-comic-drama-renders.js";
+import { directorDraft, mountComicDirector, verifyComicDirector } from "./fixtures/check-comic-drama-director.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { runMigrations } from "../src/db/migration-runner.js";
 
@@ -87,6 +90,8 @@ try {
   await runMigrations(pool, migrations);
   assert.equal((await pool.query("SELECT legacy_draft FROM public.cd_series")).rows[0].legacy_draft, "retained");
   await pool.query("INSERT INTO users(id,name) VALUES ($1,'Owner one'),($2,'Owner two')", [owner, other]);
+  const edits = await mountComicEdits(app, pool, files, fixtureMediaDir, owner);
+  const director = mountComicDirector(app, pool, owner);
   const redisUrl = process.env.COMIC_DRAMA_TEST_REDIS_URL;
   if (redisUrl) {
     generation = await mountComicGenerationFixture({
@@ -94,6 +99,7 @@ try {
       receiptPath: join(fixtureMediaDir, "receipts"), owner,
     });
   }
+  const pauseRender = generation && mountComicRenderFixture(app, pool, files, generation.queue);
   assert.equal((await req("", "GET", undefined, "bad")).status, 401);
   assert.equal((await req("", "POST", { ...fields, ownerId: other })).status, 400);
   assert.equal((await req("", "POST", fields, "fixture-two")).status, 400);
@@ -143,6 +149,9 @@ try {
   await verifyComicCast(app);
   if (generation) await verifyComicGeneration(app, pool, generation);
   const videoEpisode = generation ? await verifyComicVideo(app, pool, generation.video) : null;
+  const editFixture = await verifyComicEdits(app, pool, seriesRepo, files, fixtureMediaDir, owner, other, edits);
+  if (pauseRender) await verifyComicRenders(app, pool, files, fixtureMediaDir, owner, editFixture, pauseRender);
+  await verifyComicDirector(app, pool, seriesRepo, owner, other, director);
 
   if (process.argv.includes("--ui")) {
     const project = fileURLToPath(new URL("../../../packages/web", import.meta.url));
@@ -409,9 +418,241 @@ try {
           await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
           if (process.env.COMIC_VIDEO_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_VIDEO_SCREENSHOT, fullPage: true });
+          await newest.getByRole("button", { name: "选作剪辑片源", exact: true }).click();
+          await page.waitForURL(/\/editor\/[a-f0-9-]+$/);
+          const secondSource = page.url();
+          await page.reload();
+          await page.getByRole("heading", { name: "剪辑片源预览", exact: true }).waitFor();
+          await page.locator(".comic-editor-source").getByText("W6 video fixture · 版本 2 · 已采用", { exact: true }).waitFor();
+          await page.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-editor-source video")?.videoWidth === 320);
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          if (process.env.COMIC_EDITOR_SOURCE_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_EDITOR_SOURCE_SCREENSHOT, fullPage: true });
+          await page.getByRole("button", { name: "历史成片", exact: true }).click();
+          await page.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 1" })
+            .filter({ hasText: "W6 ready" }).getByRole("button", { name: "选作剪辑片源", exact: true }).click();
+          await page.locator(".comic-editor-source").getByText("W6 video fixture · 版本 1", { exact: true }).waitFor();
+          assert.notEqual(page.url(), secondSource, "selection is the exact version");
+          await page.getByRole("button", { name: "选择其他片源", exact: true }).click();
+          await page.getByRole("heading", { name: "选择剪辑片源", exact: true }).waitFor();
           await page.goto(deepLink);
           await page.setViewportSize({ width: 1440, height: 900 });
           console.log("PASS W6 Web: adopted filter, reopen clip, video quote cancel, regeneration, playback, adoption and frame save");
+          console.log("PASS W7 Web: workspace and history selection, exact-version reload, and narrow editing preview");
+        }
+
+        const editLink = base + "/comic-drama/editor/projects/" + editFixture.projectId;
+        const saveEdit = async () => {
+          const [response] = await Promise.all([
+            page.waitForResponse((response: { url(): string; request(): { method(): string } }) =>
+              response.url().endsWith("/api/comic-drama/edits/" + editFixture.projectId) && response.request().method() === "PATCH"),
+            page.getByRole("button", { name: "保存工程", exact: true }).click(),
+          ]);
+          assert.equal(response.status(), 200, await response.text());
+          await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
+        };
+        await page.goto(editLink);
+        await page.getByRole("heading", { name: "W8 预告", exact: true }).waitFor();
+        await page.getByText("总时长 10.6 秒", { exact: true }).waitFor();
+        await page.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-timeline-player video")?.videoWidth === 320);
+        await page.getByRole("button", { name: "添加片源", exact: true }).click();
+        await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材 · 版本 1" })
+          .getByRole("button", { name: "选作剪辑片源", exact: true }).click();
+        await page.getByLabel("入点（秒）", { exact: true }).fill("0.4");
+        await page.getByLabel("出点（秒）", { exact: true }).fill("7.6");
+        await page.getByRole("button", { name: "应用裁切", exact: true }).click();
+        await page.getByText("总时长 17.8 秒", { exact: true }).waitFor();
+        await saveEdit();
+        await page.reload();
+        await page.getByText("总时长 17.8 秒", { exact: true }).waitFor();
+        assert.equal(await page.locator(".comic-video-track li").count(), 3);
+        await page.getByRole("button", { name: "下一片段", exact: true }).click();
+        await page.getByText("片段 2 / 3", { exact: true }).waitFor();
+        await page.waitForFunction(() => {
+          const player = document.querySelector<HTMLVideoElement>(".comic-timeline-player video");
+          return player?.videoWidth === 320 && Math.abs(player.currentTime - 0.4) < 0.05;
+        });
+        await page.locator(".comic-track-label").nth(2).click();
+        await page.getByRole("button", { name: "替换为采用版（版本 2）", exact: true }).click();
+        const replaceEdit = page.getByRole("dialog", { name: "替换为采用版（版本 2）", exact: true });
+        assert.equal(await replaceEdit.getByLabel("出点（秒）").inputValue(), "5");
+        await replaceEdit.getByRole("button", { name: "取消", exact: true }).click();
+        await page.locator(".comic-track-label").first().click();
+        const line = page.locator(".comic-dialogue-line").filter({ hasText: "第二句台词" });
+        await line.getByRole("button", { name: "合成此句", exact: true }).click();
+        await line.getByText("已复用缓存", { exact: true }).waitFor();
+        await line.getByRole("button", { name: "加入配音轨", exact: true }).click();
+        await saveEdit();
+        await page.reload();
+        await line.getByRole("button", { name: "移除配音", exact: true }).waitFor();
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+        if (process.env.COMIC_EDIT_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_EDIT_SCREENSHOT, fullPage: true });
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto(base + "/comic-drama/editor/" + editFixture.a1.takeId);
+        await page.getByRole("button", { name: "以此片源创建工程", exact: true }).click();
+        const newEdit = page.getByRole("dialog", { name: "新建剪辑工程", exact: true });
+        await newEdit.getByLabel("工程名称").fill("W8 界面工程");
+        await newEdit.getByRole("button", { name: "创建工程", exact: true }).click();
+        await page.getByRole("heading", { name: "W8 界面工程", exact: true }).waitFor();
+        await page.getByText("总时长 6 秒", { exact: true }).waitFor();
+        const editWindow = await context.newPage();
+        try {
+          await editWindow.goto(page.url());
+          await editWindow.getByLabel("工程名称").fill("W8 自动保存");
+          await editWindow.getByRole("heading", { name: "W8 自动保存", exact: true }).waitFor();
+          await page.getByLabel("工程名称").fill("W8 保留本地改动");
+          await page.getByRole("alert").filter({ hasText: "其他窗口已保存工程，本地修改仍在本页" }).waitFor();
+          assert.equal(await page.getByLabel("工程名称").inputValue(), "W8 保留本地改动");
+          page.once("dialog", (dialog: { accept(): Promise<void> }) => { void dialog.accept(); });
+          await page.getByRole("button", { name: "重新读取工程", exact: true }).click();
+          await page.getByRole("heading", { name: "W8 自动保存", exact: true }).waitFor();
+        } finally { await editWindow.close(); }
+        console.log("PASS W8 Web: exact source, trim, preview, cached speech, replacement confirmation, autosave, conflict and dark mobile");
+        await page.goto(deepLink);
+
+        let w9EditLink: string | undefined;
+        if (pauseRender) {
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await page.getByText("拆分镜差异样例", { exact: true }).click();
+          await page.getByRole("heading", { name: "将移除的分镜", exact: true }).waitFor();
+          await page.getByRole("button", { name: "追加预览", exact: true }).click();
+          await page.getByRole("heading", { name: "保留的分镜", exact: true }).waitFor();
+          assert.equal(await page.getByLabel("剧本正文").inputValue(), "雨夜的便利店仍在营业。");
+          await page.goto(base + "/comic-drama/editor/" + editFixture.a1.takeId);
+          await page.getByRole("button", { name: "以此片源创建工程", exact: true }).click();
+          const createFilm = page.getByRole("dialog", { name: "新建剪辑工程", exact: true });
+          await createFilm.getByLabel("工程名称").fill("W9 界面成片");
+          await createFilm.getByRole("button", { name: "创建工程", exact: true }).click();
+          await page.getByRole("heading", { name: "W9 界面成片", exact: true }).waitFor();
+          w9EditLink = page.url();
+          await page.getByRole("button", { name: "添加片源", exact: true }).click();
+          await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材 · 版本 1" })
+            .getByRole("button", { name: "选作剪辑片源", exact: true }).click();
+          await page.getByLabel("入点（秒）", { exact: true }).fill("0.4");
+          await page.getByLabel("出点（秒）", { exact: true }).fill("7.6");
+          await page.getByRole("button", { name: "应用裁切", exact: true }).click();
+          await page.getByLabel("入场转场", { exact: true }).selectOption("crossfade");
+          await page.getByRole("button", { name: "应用片段设置", exact: true }).click();
+          await page.getByText("总时长 12.7 秒", { exact: true }).waitFor();
+          const tracks = page.locator(".comic-multitrack");
+          assert.equal(await tracks.locator(".comic-track-row").count(), 5);
+          await tracks.getByRole("button", { name: "添加音乐", exact: true }).click();
+          await tracks.locator(".comic-track-picker li").filter({ hasText: "W9 配乐样例" }).getByRole("button", { name: "添加到轨道" }).click();
+          const trackInspector = tracks.locator(".comic-track-inspector");
+          await trackInspector.getByLabel("循环").check();
+          await trackInspector.getByLabel("时长（秒）", { exact: true }).fill("12.7");
+          await trackInspector.getByLabel("淡出（秒）", { exact: true }).fill("0.3");
+          await trackInspector.getByRole("button", { name: "应用轨道设置", exact: true }).click();
+          await tracks.getByRole("button", { name: "添加音效", exact: true }).click();
+          await tracks.locator(".comic-track-picker li").filter({ hasText: "W9 音效样例" }).getByRole("button", { name: "添加到轨道" }).click();
+          await trackInspector.getByLabel("时间锚点", { exact: true }).selectOption({ label: "片段 2" });
+          await trackInspector.getByLabel("偏移（秒）", { exact: true }).fill("0.25");
+          await trackInspector.getByRole("button", { name: "应用轨道设置", exact: true }).click();
+          await tracks.getByRole("slider", { name: "定位播放位置", exact: true }).press("Home");
+          await tracks.getByRole("textbox", { name: "字幕文字", exact: true }).fill("W9 字幕");
+          await tracks.getByRole("button", { name: "在播放头添加字幕", exact: true }).click();
+          await page.locator(".comic-preview-caption").getByText("W9 字幕", { exact: true }).waitFor();
+          await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
+          await page.reload();
+          await tracks.locator(".comic-track-lane[data-track=music] button").waitFor();
+          await tracks.locator(".comic-track-lane[data-track=sfx] button").waitFor();
+          await tracks.locator(".comic-track-lane[data-track=subtitles] button").waitFor();
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          if (process.env.COMIC_TRACKS_SCREENSHOT) await tracks.screenshot({ path: process.env.COMIC_TRACKS_SCREENSHOT });
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.getByRole("button", { name: "导出 MP4", exact: true }).click();
+          await page.getByText("导出完成", { exact: true }).waitFor({ timeout: 60_000 });
+          await page.getByRole("button", { name: "播放导出成片", exact: true }).click();
+          await page.waitForFunction(() => {
+            const player = document.querySelector<HTMLVideoElement>(".comic-render-panel video");
+            return player?.videoHeight === 1920 && Math.abs(player.duration - 12.7) < 0.04;
+          });
+          await page.evaluate(() => localStorage.setItem("lot:language", "en"));
+          await page.reload();
+          await page.getByRole("heading", { name: "Project timeline", exact: true }).waitFor();
+          await page.getByRole("button", { name: "Export MP4", exact: true }).waitFor();
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.goto(deepLink);
+          console.log("PASS W9 Web: example diff, five tracks, anchored audio, captions, 12.7s export, private playback, dark mobile and English");
+
+          await page.goto(w9EditLink!);
+          const exports = page.locator(".comic-export-history li");
+          const firstDownload = await Promise.all([
+            page.waitForEvent("download"), exports.first().getByRole("button", { name: "下载 MP4", exact: true }).click(),
+          ]).then(([download]) => download);
+          assert.match(firstDownload.suggestedFilename(), /^comic-[a-f0-9-]+\.mp4$/);
+          const originalName = firstDownload.suggestedFilename();
+          const originalBytes = await readFile(await firstDownload.path());
+          assert.equal(originalBytes.toString("ascii", 4, 8), "ftyp");
+          const unblock = pauseRender.pause();
+          try {
+            await page.getByRole("button", { name: "导出 MP4", exact: true }).click();
+            await exports.first().getByText("正在合成", { exact: true }).waitFor();
+            await page.locator(".comic-track-lane[data-track=subtitles] button").click();
+            const caption = page.locator(".comic-track-inspector");
+            await caption.getByLabel("字幕文字", { exact: true }).fill("W10 新版字幕");
+            await caption.getByRole("button", { name: "应用轨道设置", exact: true }).click();
+            await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
+            page.once("dialog", (dialog: { accept(): Promise<void> }) => { void dialog.accept(); });
+            await exports.first().getByRole("button", { name: "取消导出", exact: true }).click();
+            await exports.first().getByText("已取消", { exact: true }).waitFor();
+          } finally { unblock(); }
+          // Recovery stays on the cancelled row's saved revision.
+          const pendingBody = await exports.first().innerText();
+          const listing = await app.request(COMIC_DRAMA_API_ROOT + "/renders?editId=" + new URL(w9EditLink!).pathname.split("/").at(-1),
+            { headers: { Authorization: "Bearer fixture-one" } });
+          const recoveringId = (await listing.json() as { entries: { id: string }[] }).entries[0].id;
+          for (let i = 0; i < 100 && !await pauseRender.queue.canResumePersisted(recoveringId); i++) await new Promise(resolve => setTimeout(resolve, 25));
+          await exports.first().getByRole("button", { name: "用原修订恢复", exact: true }).click();
+          await exports.first().getByText("导出完成", { exact: true }).waitFor({ timeout: 75_000 });
+          assert.match(await exports.first().innerText(), new RegExp(pendingBody.match(/导出修订 \d+/)?.[0] ?? "missing revision"));
+          await page.getByRole("button", { name: "导出 MP4", exact: true }).click();
+          await exports.nth(2).waitFor();
+          await exports.first().getByText("导出完成", { exact: true }).waitFor({ timeout: 75_000 });
+          assert.equal(await exports.count(), 3);
+          const downloadCopy = await Promise.all([
+            page.waitForEvent("download"), exports.last().getByRole("button", { name: "下载 MP4", exact: true }).click(),
+          ]).then(([download]) => download);
+          assert.equal(downloadCopy.suggestedFilename(), originalName);
+          assert.deepEqual(await readFile(await downloadCopy.path()), originalBytes);
+          await page.getByRole("navigation", { name: "漫剧工厂" }).getByRole("button", { name: "导出历史", exact: true }).click();
+          await page.getByRole("heading", { name: "导出历史", exact: true }).waitFor();
+          await page.locator(".comic-export-history li").filter({ hasText: "W9 导出验收" }).first().waitFor();
+          await page.goto(deepLink);
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          const directorPanel = page.locator(".comic-director");
+          await directorPanel.getByLabel("剧本输入方式", { exact: true }).selectOption("file");
+          await directorPanel.getByLabel("上传剧本文件", { exact: true }).setInputFiles({
+            name: "fixture-script.txt", mimeType: "text/plain", buffer: Buffer.from("雨夜，便利店还开着。"),
+          });
+          await directorPanel.getByText("文件正文已载入", { exact: true }).waitFor();
+          await directorPanel.getByRole("button", { name: "生成剧本提案", exact: true }).click();
+          await directorPanel.getByRole("heading", { name: "建议剧本", exact: true }).waitFor();
+          await directorPanel.getByText("有多个同名或别名候选", { exact: true }).waitFor();
+          assert.equal(await page.getByLabel("剧本正文", { exact: true }).inputValue(), "雨夜的便利店仍在营业。");
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          if (process.env.COMIC_DIRECTOR_SCREENSHOT) await directorPanel.screenshot({ path: process.env.COMIC_DIRECTOR_SCREENSHOT });
+          await page.setViewportSize({ width: 1440, height: 900 });
+          page.once("dialog", (dialog: { accept(): Promise<void> }) => { void dialog.accept(); });
+          await directorPanel.getByRole("button", { name: "采用剧本", exact: true }).click();
+          await directorPanel.getByText("已采用剧本", { exact: true }).waitFor();
+          assert.equal(await page.getByLabel("剧本正文", { exact: true }).inputValue(), directorDraft);
+          await page.reload();
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await directorPanel.getByText("已采用剧本", { exact: true }).waitFor();
+          await page.evaluate(() => localStorage.setItem("lot:language", "en"));
+          await page.reload();
+          await page.getByRole("navigation", { name: "Production steps" }).getByRole("button", { name: /Script/ }).click();
+          await directorPanel.getByText("Script adopted", { exact: true }).waitFor();
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.goto(deepLink);
+          console.log("PASS W10 Web: revision downloads after edits, cancellation and recovery, global history, director import, ambiguity and persisted approval");
         }
 
         const desktopBinary = process.env.COMIC_DRAMA_ELECTRON_PATH;
@@ -447,10 +688,39 @@ try {
               }
               if (videoEpisode) {
                 await desktopPage.getByRole("button", { name: "历史成片", exact: true }).click();
-                const video = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 2 · 已采用" }).locator("video");
-                await video.evaluate((player: HTMLVideoElement) => { player.preload = "metadata"; player.load(); });
-                await desktopPage.waitForFunction(() => Array.from(document.querySelectorAll("video")).some(player => player.videoWidth === 320));
+                const card = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 2 · 已采用" });
+                await card.getByRole("button", { name: "选作剪辑片源", exact: true }).click();
+                await desktopPage.waitForURL(/\/editor\/[a-f0-9-]+$/);
+                await desktopPage.reload();
+                await desktopPage.getByRole("heading", { name: "剪辑片源预览", exact: true }).waitFor();
+                await desktopPage.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-editor-source video")?.videoWidth === 320)
+                  .catch(async (error: unknown) => {
+                    console.error("W7 desktop source preview did not load", { body: (await desktopPage.locator("body").innerText()).slice(-850) });
+                    throw error;
+                  });
                 console.log("PASS W6 Electron: history and signed video playback");
+                console.log("PASS W7 Electron: exact editing source deep link and video playback after reload");
+              }
+              await desktopPage.goto(new URL(new URL(editLink).pathname, desktopPage.url()).href);
+              await desktopPage.getByRole("heading", { name: "W8 预告", exact: true }).waitFor();
+              await desktopPage.getByText("总时长 17.8 秒", { exact: true }).waitFor();
+              await desktopPage.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-timeline-player video")?.videoWidth === 320);
+              console.log("PASS W8 Electron: persisted edit deep link, cross-episode timeline and signed video preview");
+              if (w9EditLink) {
+                await desktopPage.goto(new URL(new URL(w9EditLink).pathname, desktopPage.url()).href);
+                await desktopPage.getByRole("heading", { name: "工程时间线", exact: true }).waitFor();
+                assert.equal(await desktopPage.locator(".comic-track-row").count(), 5);
+                await desktopPage.locator(".comic-track-lane[data-track=music] button").waitFor();
+                await desktopPage.locator(".comic-preview-caption").getByText("W10 新版字幕", { exact: true }).waitFor();
+                await desktopPage.getByRole("button", { name: "导出 MP4", exact: true }).waitFor();
+                console.log("PASS W9 Electron: saved five-track timeline, caption overlay and export action");
+                await desktopPage.getByRole("navigation", { name: "漫剧工厂" }).getByRole("button", { name: "导出历史", exact: true }).click();
+                await desktopPage.getByRole("heading", { name: "导出历史", exact: true }).waitFor();
+                await desktopPage.locator(".comic-export-history li").first().getByRole("button", { name: "下载 MP4", exact: true }).waitFor();
+                await desktopPage.goto(new URL(new URL(deepLink).pathname, desktopPage.url()).href);
+                await desktopPage.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+                await desktopPage.locator(".comic-director").getByText("已采用剧本", { exact: true }).waitFor();
+                console.log("PASS W10 Electron: export history with download, saved director proposal and applied script");
               }
               await desktopPage.getByRole("button", { name: "素材库", exact: true }).click();
               await desktopPage.waitForFunction(() => Array.from(document.images).some(img => img.alt === "W3 夜景" && img.naturalWidth === 480));

@@ -25,7 +25,10 @@ import { initializePosterFonts } from "../generation/poster-render.js";
 import { DurableImageProvider, PgImageCallStore, imageCallFingerprint } from "../generation/image-receipts.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
-import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
+import { COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
+import { runComicRender } from "../comic-drama/render-worker.js";
+import { createComicDirectorExtension } from "../comic-drama/director-agent.js";
+import { PgComicDirector } from "../comic-drama/director-repository.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveImageReferenceUrl, resolveMaterialReference } from "../generation/private-materials.js";
 import { PgKlingVoiceStore } from "../generation/kling-voice-store.js";
@@ -306,6 +309,7 @@ async function main() {
     llm: (modelId, apiKey) => providerFactory.llm(modelId, apiKey),
   });
   registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
+  registerAgentExtension(createComicDirectorExtension(new PgComicDirector(db.pool), resolveOwnerLlm, process.env.COMIC_DRAMA_FACTORY === "1"));
   registerDigitalEmployeeWorkerJobs({
     queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
     checkQuota: (userId, estimatedCost) => meter.checkQuota(userId, estimatedCost),
@@ -345,6 +349,7 @@ async function main() {
     db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, uploads: uploadStorage, generation: (child, signal) => genDeps("video", child, signal),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
   const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(db.pool));
+  queue.process(COMIC_RENDER_TASK, (job, ctl) => runComicRender(db.pool, comicMedia, job, ctl.signal));
   queue.process(COMIC_IMAGE_TASK, (job, ctl) => runComicImageGeneration({
     pool: db.pool, media: comicMedia, receiptPath: resolve(ROOT, "data/image-receipts"),
     provider: async (owner, model) => {

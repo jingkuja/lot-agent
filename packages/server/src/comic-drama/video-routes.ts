@@ -27,6 +27,12 @@ export function createComicVideoRoutes({ repo, media, queue, library }: {
   });
   app.get("/series/:id/clips/:clipId/videos", async c =>
     c.json(await repo.clip(c.get("userId"), id(c.req.param("id")), id(c.req.param("clipId")))));
+  app.get("/video-takes/:id", async c => {
+    c.header("Cache-Control", "private, no-store");
+    const { taskId: _taskId, ...take } = await repo.take(c.get("userId"), id(c.req.param("id")));
+    if (take.state !== "ready" || !take.mediaId) libraryMissing();
+    return c.json(take);
+  });
   app.post("/series/:id/clips/:clipId/video/adopt", limit, async c => {
     const body = comicVideoAdoptSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);

@@ -21,7 +21,9 @@ function filters(form: FormData) {
   return params.toString();
 }
 
-export function ComicVideoHistory({ open }: { open: (seriesId: string, clipId: string) => void }) {
+export function ComicVideoHistory({ open, choose, picker = false }: {
+  open: (seriesId: string, clipId: string) => void; choose: (id: string) => void; picker?: boolean;
+}) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [cursors, setCursors] = useState<string[]>([]);
@@ -41,7 +43,7 @@ export function ComicVideoHistory({ open }: { open: (seriesId: string, clipId: s
   }, [cursor, query, refresh]);
 
   return <>
-    <header className="comic-heading"><h1>{t("历史成片")}</h1></header>
+    <header className="comic-heading"><h1>{t(picker ? "选择剪辑片源" : "历史成片")}</h1></header>
     <form className="comic-history-controls" onSubmit={event => {
       event.preventDefault();
       setCursors([]);
@@ -58,7 +60,7 @@ export function ComicVideoHistory({ open }: { open: (seriesId: string, clipId: s
     </form>
     {data === "error" ? <button type="button" onClick={reload}>{t("重新读取")}</button> : data ? <>
       <div className="comic-library-grid">{data.entries.map(take =>
-        <VideoTakeCard key={take.id} take={take} open={() => open(take.seriesId, take.targetId)} refresh={reload} />)}</div>
+        <VideoTakeCard key={take.id} take={take} open={() => open(take.seriesId, take.targetId)} choose={() => choose(take.id)} refresh={reload} />)}</div>
       {!data.entries.length && <p className="comic-empty">{t("暂无匹配的成片")}</p>}
       {(cursors.length > 0 || data.nextCursor) && <div className="comic-actions comic-library-pagination">
         <button type="button" disabled={!cursors.length} onClick={() => setCursors(values => values.slice(0, -1))}>{t("上一页")}</button>

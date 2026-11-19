@@ -15,9 +15,10 @@ type Props = {
   getSaved: () => Promise<ComicDramaDetail | null>;
   disabled: boolean;
   initialMode?: ComicGenerationMode;
+  choose: (id: string) => void;
 };
 
-export function ComicImageGeneration({ detail, selected, select, getSaved, disabled, initialMode = "keyframe" }: Props) {
+export function ComicImageGeneration({ detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe" }: Props) {
   const { t } = useI18n();
   const [checked, setChecked] = useState<string[]>([]);
   const [quoting, setQuoting] = useState(false);
@@ -88,7 +89,7 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
     <div className="comic-generation-results">
       {error && <p className="comic-error" role="alert">{t(error)}</p>}
       {clip && (isVideo ? <ClipVideoVersions key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
-        quoting={quoting} preview={() => void preview([clip.id])} /> :
+        choose={choose} quoting={quoting} preview={() => void preview([clip.id])} /> :
         <KeyframeHistory key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
           quoting={quoting} preview={() => void preview([clip.id])} />)}
       {batch && batch.takes.length > 1 && <BatchStatus key={batch.id} request={batch} label={label} select={select}

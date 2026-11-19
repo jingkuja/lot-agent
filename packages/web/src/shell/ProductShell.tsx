@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { COMIC_DRAMA_ROOT } from "@lot-agent/core/comic-drama";
+import { COMIC_DIRECTOR_AGENT_ID, COMIC_DRAMA_ROOT } from "@lot-agent/core/comic-drama";
 import { ComicDramaWorkspace } from "../modules/comic-drama/ComicDramaWorkspace.js";
 import { useI18n } from "../i18n/index.js";
 import type { User } from "../api/client.js";
@@ -17,8 +17,7 @@ interface ProductShellProps {
   onLogout: () => void;
 }
 
-/** The digital employee has its own entry, so the assistant's launcher leaves it out. */
-const HIDDEN_AGENT_IDS = [DIGITAL_EMPLOYEE_AGENT_ID];
+const HIDDEN_AGENT_IDS = [DIGITAL_EMPLOYEE_AGENT_ID, COMIC_DIRECTOR_AGENT_ID];
 
 function currentPath(): string {
   return window.location.pathname || "/assistant";

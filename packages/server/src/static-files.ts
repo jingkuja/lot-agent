@@ -121,6 +121,7 @@ export function parseRange(header: string | undefined, size: number): ByteRange 
 export function staticFileHandler(dir: string, options: {
   /** `true` serves the file as private and uncached; `"public"` serves it with the normal cache policy. */
   authorize?: (c: Context, filename: string) => Promise<boolean | "public">;
+  attachmentName?: (c: Context, filename: string) => string | undefined;
 } = {}) {
   return async (c: Context): Promise<Response> => {
     if (options.authorize) c.header("Cache-Control", "private, no-store");
@@ -152,11 +153,13 @@ export function staticFileHandler(dir: string, options: {
       "Accept-Ranges": "bytes",
       "Cache-Control": privateFile ? "private, no-store" : "private, max-age=3600",
     };
-    if (disposition === "attachment") {
+    const attachment = options.attachmentName?.(c, filename);
+    if (disposition === "attachment" || attachment) {
       // filename is already validated above (no `/`, no `..`); still quote
       // it defensively since it's user/vendor-controlled content.
-      const safeName = filename.replace(/"/g, "");
-      headers["Content-Disposition"] = `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+      const name = attachment ?? filename;
+      const safeName = attachment ? name.replace(/[^\x20-\x7e]|["\\]/g, "_") : filename.replace(/"/g, "");
+      headers["Content-Disposition"] = `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(name)}`;
     } else {
       headers["Content-Disposition"] = "inline";
     }

@@ -8,6 +8,11 @@ export function libraryMissing(): never { throw new ComicLibraryError("NOT_FOUND
 
 export async function libraryTransaction<T>(pool: Pool, operation: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  try { return await libraryTransactionOn(client, operation); }
+  finally { client.release(); }
+}
+
+export async function libraryTransactionOn<T>(client: PoolClient, operation: (client: PoolClient) => Promise<T>): Promise<T> {
   try {
     await client.query("BEGIN");
     const result = await operation(client);
@@ -16,7 +21,7 @@ export async function libraryTransaction<T>(pool: Pool, operation: (client: Pool
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
-  } finally { client.release(); }
+  }
 }
 
 export type ComicQuery = Pick<PoolClient, "query">;

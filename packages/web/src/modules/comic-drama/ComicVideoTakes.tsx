@@ -7,8 +7,8 @@ import { ComicTakeStatus, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { SaveComicFrame } from "./SaveComicFrame.js";
 
-export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, preview }: {
-  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
+export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, preview, choose }: {
+  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void; choose: (id: string) => void;
 }) {
   const { t } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.videos(seriesId, clip.id, signal), [seriesId, clip.id]);
@@ -22,6 +22,7 @@ export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, 
     {!history.current ? <p role="status">{t("加载中…")}</p> :
       !history.current.length ? <p className="comic-generation-note">{t("暂无视频版本")}</p> :
       <div className="comic-library-grid">{history.current.map(take => <VideoTakeCard key={take.id} take={take}
+        choose={() => choose(take.id)}
         adopt={disabled || take.adopted ? undefined : () => comicGenerationApi.adopt(seriesId, clip.id, take.id, clip.revision)}
         refresh={history.refresh} />)}</div>}
   </section>;
@@ -82,8 +83,8 @@ function VideoReceipt({ takeId, close }: { takeId: string; close: () => void }) 
   </dialog>;
 }
 
-export function VideoTakeCard({ take, adopt, refresh, open }: {
-  take: ComicVideoTake; adopt?: () => Promise<unknown>; refresh: () => void; open?: () => void;
+export function VideoTakeCard({ take, adopt, refresh, open, choose, selected = false }: {
+  take: ComicVideoTake; adopt?: () => Promise<unknown>; refresh: () => void; open?: () => void; choose?: () => void; selected?: boolean;
 }) {
   const { t, locale } = useI18n();
   const [links, setLinks] = useState<ComicMediaLinks | "error" | null>(null);
@@ -112,18 +113,18 @@ export function VideoTakeCard({ take, adopt, refresh, open }: {
   };
   return <article className="comic-library-card comic-video-card">
     {links === "error" ? <button type="button" onClick={() => { renewed.current = false; reload(value => value + 1); }}>{t("重新获取预览")}</button> :
-      links && <video ref={player} controls playsInline preload="none" aria-label={t("视频预览 · 版本 {0}", [take.version])}
+      links && <video ref={player} controls playsInline preload={selected ? "metadata" : "none"} aria-label={t("视频预览 · 版本 {0}", [take.version])}
         src={links.url} onError={() => {
           if (renewed.current) setLinks("error");
           else { renewed.current = true; reload(value => value + 1); }
         }} />}
-    <strong>{open ? take.seriesTitle + " · " : ""}{t("版本 {0}", [take.version])}{take.adopted && " · " + t("已采用")}</strong>
-    {open && take.scene && <small>{take.scene}</small>}
+    <strong>{open || selected ? take.seriesTitle + " · " : ""}{t("版本 {0}", [take.version])}{take.adopted && " · " + t("已采用")}</strong>
+    {(open || selected) && take.scene && <small>{take.scene}</small>}
     <small>{take.modelId} · {t("{0} 秒视频", [+(take.durationMs / 1000).toFixed(2)])}</small>
     <small>{new Date(take.completedAt ?? take.createdAt).toLocaleString(locale)}</small>
-    <ComicTakeStatus take={take} />
-    <VideoTakeActions take={take} refresh={refresh} />
-    {take.state === "ready" && <div className="comic-actions">
+    {!selected && <><ComicTakeStatus take={take} /><VideoTakeActions take={take} refresh={refresh} /></>}
+    {take.state === "ready" && !selected && <div className="comic-actions">
+      {choose && <button type="button" onClick={choose}>{t("选作剪辑片源")}</button>}
       {adopt && <button type="button" className="primary" onClick={() => void performAdopt()} disabled={saving}>{t("采用此版本")}</button>}
       {links && links !== "error" && <>
         <a href={links.url} download={`comic-v${take.version}.mp4`}>{t("下载视频")}</a>

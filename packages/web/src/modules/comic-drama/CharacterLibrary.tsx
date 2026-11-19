@@ -5,6 +5,7 @@ import type {
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
 import { comicGenerationApi } from "./generation-api.js";
+import { ComicCharacterVoice } from "./ComicCharacterVoice.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, RecoverComicImage, useGenerationHistory } from "./GenerationHistory.js";
 import { ChoiceSelect, comicListWords, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
@@ -101,7 +102,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   const { locale, t } = useI18n();
   const [kind, setKind] = useState<"slot" | "expression">("slot");
   const [outfitId, setOutfit] = useState("");
-  const [dialog, setDialog] = useState<"edit" | "outfit" | "upload" | "generate" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "outfit" | "upload" | "generate" | "voice" | null>(null);
   const [versionTarget, setVersionTarget] = useState<ComicCharacterUpload | null>(null);
   const [fee, setFee] = useState<{ quote: ComicGenerationQuote; label: string } | null>(null);
   const [error, setError] = useState("");
@@ -143,6 +144,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
     </div>
     {character.archived ? <span>{t("已归档")}</span> : <div className="comic-actions">
       <button onClick={() => setDialog("edit")}>{t("编辑角色")}</button>
+      <button onClick={() => setDialog("voice")}>{t("绑定角色音色")}</button>
       <button onClick={() => {
         if (window.confirm(t("归档此角色？"))) void comicLibraryApi.archiveCharacter(character.id).then(onArchive).catch(reason => setError(libraryError(reason)));
       }}>{t("归档")}</button>
@@ -193,6 +195,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
         <button onClick={() => showVersions(asset)}>{t("版本历史")}</button>
       </article>;
     })}</div>
+    {dialog === "voice" && <ComicCharacterVoice id={character.id} close={() => setDialog(null)} />}
     {dialog === "edit" && <CharacterForm character={character} close={() => setDialog(null)}
       save={async input => { await comicLibraryApi.editCharacter(character.id, input); await reload(); }} />}
     {dialog === "outfit" && <LibraryDialog title={t("新增套装")} submitLabel={t("保存")} close={() => setDialog(null)}

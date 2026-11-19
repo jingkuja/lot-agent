@@ -51,7 +51,8 @@ export function SeriesHistory({ busy, open, derive, change }: {
       {result.entries.map(entry => <article key={entry.id}>
         <button type="button" className="comic-history-title" onClick={() => open(entry.id)} disabled={busy}>
           <strong>{entry.title}</strong>
-          <small>{t("{0} 个分镜", [entry.clipCount])} · {new Date(entry.updatedAt).toLocaleDateString(locale)}</small>
+          <small>{t("{0} 个分镜", [entry.clipCount])} · {new Date(entry.updatedAt).toLocaleDateString(locale)}
+            {entry.hasRender && <> · {t("已导出")}</>}</small>
         </button>
         <div className="comic-actions">
           {!entry.archivedAt && <>

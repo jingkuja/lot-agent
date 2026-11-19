@@ -76,16 +76,17 @@ export class BullmqJobQueue implements JobQueue {
         async (bullJob, token) => {
           const { taskId } = bullJob.data as { taskId: string };
           const jobType = bullJob.name;
+          if (typeof taskId !== "string" || taskId !== bullJob.id) return;
+          const persisted = await this.db.getTask(taskId);
+          if (persisted?.type !== jobType || !["pending", "running"].includes(persisted.status)) return;
 
           if (name === DEFAULT_TASK_QUEUE && jobType === "marketing.video") {
             // No DB claim and no business handler here. Adding with the same
             // ID is idempotent and never retries an existing failed target.
-            const row = await this.db.getTask(taskId);
-            if (row?.type === jobType && ["pending", "running"].includes(row.status)) {
-              await publishPersistedJob(this.queues.get(MARKETING_VIDEO_QUEUE)!, taskId, jobType, { maxAttempts: 1 });
-            }
+            await publishPersistedJob(this.queues.get(MARKETING_VIDEO_QUEUE)!, taskId, jobType, { maxAttempts: 1 });
             return;
           }
+          if (taskQueueName(jobType) !== name) return;
 
           const jobHandler = this.handlers.get(jobType);
           if (!jobHandler) {
@@ -99,12 +100,10 @@ export class BullmqJobQueue implements JobQueue {
           // cancelled while queued) before we got here — never run the handler.
           let claimed: boolean;
           if (name === MARKETING_VIDEO_QUEUE) {
-            const owner = (await this.db.getTask(taskId))?.user_id;
-            if (!owner) return;
-            // Fair share: one user's batch must not hold every render slot.
-            const live = (await this.queues.get(name)!.getActive(0, 199)).flatMap(j => j.id && j.id !== taskId ? [j.id] : []);
-            const claim = await this.db.claimTaskWithinOwnerLimit(taskId, attempts, owner, live, this.marketingLimits.perUser);
-            if (claim === "busy") {
+            const live = () => queueDeadline(async () => (await this.queues.get(name)!.getActive(0, -1)).flatMap(job => job.id ? [job.id] : []));
+            const claim = await this.db.claimTaskWithinOwnerLimit(taskId, attempts, persisted.user_id, live, this.marketingLimits.perUser)
+              .catch(() => "unavailable" as const);
+            if (claim === "busy" || claim === "unavailable") {
               await bullJob.moveToDelayed(Date.now() + OWNER_BUSY_DELAY_MS + Math.floor(Math.random() * 5000), token);
               throw new DelayedError();
             }
@@ -281,9 +280,15 @@ export class BullmqJobQueue implements JobQueue {
 
   async cancel(id: string): Promise<boolean> {
     const changed = await this.db.cancelTask(id);
+    await this.stopCancelled(id);
+    return changed;
+  }
+
+  /** The caller has already made cancellation durable with its business record locked. */
+  async stopCancelled(id: string): Promise<void> {
     // Abort a handler running in this process.
     this.running.get(id)?.abort();
-    if (this.connection.status !== "ready") return changed;
+    if (this.connection.status !== "ready") return;
     // Remove a still-queued (waiting/delayed) job so it never starts. A job
     // already active is left to observe the aborted signal / DB status.
     for (const queue of this.queues.values()) {
@@ -301,7 +306,6 @@ export class BullmqJobQueue implements JobQueue {
         // best-effort — DB cancellation already recorded
       }
     }
-    return changed;
   }
 
   async updateProgress(id: string, progress: number, stage?: string): Promise<void> {

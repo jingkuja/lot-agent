@@ -9,7 +9,9 @@ import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { BullmqJobQueue } from "../src/jobs/bullmq-queue.js";
 import { createRedisConnection } from "../src/jobs/redis.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE } from "../src/jobs/task-queues.js";
+import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE } from "../src/jobs/task-queues.js";
+import { checkMixedMediaQueue } from "./fixtures/check-mixed-media-queue.js";
+import { checkComicWorkerRestart, startComicCrashWorker } from "./fixtures/check-comic-worker-restart.js";
 
 const pgRaw = process.env.MARKETING_QUEUE_CHECK_DATABASE_URL;
 const redisRaw = process.env.MARKETING_QUEUE_CHECK_REDIS_URL;
@@ -22,7 +24,9 @@ const db = new DB({ host: pgUrl.hostname, port: Number(pgUrl.port || 5432), user
 const publisherConnection = createRedisConnection(redisRaw);
 // A separate OS process proves that cancellation does not depend on the API's
 // in-memory AbortController. This child only runs the synthetic fixture type.
-if (process.argv.includes("--cancellation-worker")) {
+if (process.argv[2] === "--comic-crash-worker") {
+  startComicCrashWorker(db, publisherConnection, process.argv[3]);
+} else if (process.argv.includes("--cancellation-worker")) {
   const queue = new BullmqJobQueue(db, publisherConnection);
   queue.process("fixture.cross-process", async (job, ctl) => {
     process.send?.({ event: "started", id: job.id });
@@ -41,7 +45,7 @@ if (process.argv.includes("--cancellation-worker")) {
 let publisher: BullmqJobQueue | undefined, consumer: BullmqJobQueue | undefined;
 let child: ChildProcess | undefined;
 let legacyQueue: Queue | undefined, marketingQueue: Queue | undefined, legacyWorker: Worker | undefined;
-const releaseLegacy = deferred(), releaseMarketing = deferred();
+const releaseLegacy = deferred(), releaseMarketing = deferred(), releaseFair = deferred();
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(done => { resolve = done; });
@@ -193,15 +197,17 @@ try {
   // not failed) while another owner's render takes the free slot.
   const otherOwner = randomUUID();
   await db.pool.query("INSERT INTO users(id,name) VALUES($1,'other queue fixture')", [otherOwner]);
-  const releaseFair = deferred(), fairStarts: string[] = [];
+  const fairStarts: string[] = [];
   consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw), { concurrency: 2, perUser: 1, segments: 2 });
-  consumer.process<{ kind: string }, unknown>("marketing.video", async job => { fairStarts.push(job.id); await releaseFair.promise; return { fair: job.id }; });
-  const ownerRenders = [await publisher.enqueue("marketing.video", { kind: "fair" }, owner), await publisher.enqueue("marketing.video", { kind: "fair" }, owner)];
-  const otherRender = await publisher.enqueue("marketing.video", { kind: "fair" }, otherOwner);
+  for (const type of ["marketing.video", COMIC_VIDEO_TASK, COMIC_IMAGE_TASK]) {
+    consumer.process(type, async job => { fairStarts.push(job.id); await releaseFair.promise; return { fair: job.id }; });
+  }
+  const ownerRenders = await Promise.all(["marketing.video", COMIC_VIDEO_TASK].map(type => publisher!.enqueue(type, { kind: "fair" }, owner)));
+  const otherRender = await publisher.enqueue(COMIC_IMAGE_TASK, { kind: "fair" }, otherOwner);
   await until(async () => fairStarts.includes(otherRender) && fairStarts.length === 2, "another owner uses the free slot");
   const waiting = ownerRenders.find(id => !fairStarts.includes(id))!;
   assert.equal(fairStarts.filter(id => ownerRenders.includes(id)).length, 1, "one render per owner");
-  assert.equal(await (await marketingQueue.getJob(waiting))?.getState(), "delayed");
+  await until(async () => await (await marketingQueue!.getJob(waiting))?.getState() === "delayed", "same owner delayed across media types");
   assert.deepEqual([await db.getTaskStatus(waiting), (await db.getTask(waiting))?.stage], ["pending", "排队中：同账号已有视频在制作"]);
   releaseFair.resolve();
   await until(async () => await db.getTaskStatus(waiting) === "succeeded", "delayed render runs after the owner's slot frees", 30_000);
@@ -226,6 +232,11 @@ try {
     console.log("QUEUE_BASELINE", { count, concurrency: 2, simulatedWorkMs, p50Ms: percentile(.5), p95Ms: percentile(.95) });
     await consumer.close(); consumer = undefined;
   }
+  if (process.argv.includes("--mixed")) {
+    await checkMixedMediaQueue(publisher, pgUrl, redisRaw);
+    await checkComicWorkerRestart(db, redisRaw, publisher, root =>
+      fork(fileURLToPath(import.meta.url), ["--comic-crash-worker", root], { stdio: ["ignore", "inherit", "inherit", "ipc"] }));
+  }
   const events = new Set<string>();
   child = fork(fileURLToPath(import.meta.url), ["--cancellation-worker"], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
   child.on("message", message => events.add((message as { event: string }).event));
@@ -239,7 +250,7 @@ try {
   assert.equal(await db.getTaskStatus(crossId), "cancelled", "late result cannot undo cancellation");
   console.log("PASS: PG/Redis isolation, per-owner fair share across render slots, 0046 invariants, long pending diagnostics, delayed/missing delivery, terminal guard, automatic retry, same-ID resume and cross-process cancellation; no model calls");
 } finally {
-  releaseLegacy.resolve(); releaseMarketing.resolve();
+  releaseLegacy.resolve(); releaseMarketing.resolve(); releaseFair.resolve();
   await legacyWorker?.close();
   await consumer?.close();
   await legacyQueue?.close(); await marketingQueue?.close();
