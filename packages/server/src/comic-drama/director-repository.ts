@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
-  COMIC_DIRECTOR_AGENT_ID, comicDramaClipDraftSchema, type ComicDirectorBreakdown, type ComicDirectorDecision, type ComicDirectorInput,
+  COMIC_DIRECTOR_AGENT_ID, comicDramaClipDraftSchema, matchComicCharacters,
+  type ComicClipCasting, type ComicDirectorBreakdown, type ComicDirectorChatMessage, type ComicDirectorDecision, type ComicDirectorInput,
   type ComicDirectorModel, type ComicDirectorProposal, type ComicDirectorRole, type ComicDirectorRoleDecision,
-  type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicGenerationQuote,
+  type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicDirectorToolCallSummary, type ComicGenerationQuote,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { ComicDramaError, PgComicDramaRepository } from "./repository.js";
-import { editSeriesCast } from "./cast-store.js";
+import { editSeriesCast, readSeriesCast } from "./cast-store.js";
 
 const cd = "lot_comic_drama";
 const columns = `id,conversation_id AS "conversationId",base_revision AS "baseRevision",created_at AS "createdAt",input,original,proposal,
@@ -16,7 +17,6 @@ const columns = `id,conversation_id AS "conversationId",base_revision AS "baseRe
   coalesce((SELECT jsonb_object_agg(role_index,outcome) FROM ${cd}.cd_director_roles WHERE proposal_id=cd_director_proposals.id),'{}') AS "roleDecisions"`;
 type ProposalRow = Omit<ComicDirectorProposal, "createdAt"> & { createdAt: Date };
 const view = (row: ProposalRow): ComicDirectorProposal => ({ ...row, createdAt: row.createdAt.toISOString() });
-const normalize = (value: string) => value.normalize("NFKC").trim().toLowerCase();
 
 export class PgComicDirector {
   constructor(private readonly pool: Pool, private readonly episodes = new PgComicDramaRepository(pool)) {}
@@ -76,7 +76,74 @@ export class PgComicDirector {
     const { rows: quotes } = await this.pool.query<NonNullable<ComicDirectorState["quotes"]>[number]>(`SELECT q.quote,g.confirmed_at IS NOT NULL AS confirmed
       FROM ${cd}.cd_director_quotes q JOIN ${cd}.cd_generation_requests g ON g.id=q.confirmation_id AND g.owner_id=q.owner_id
       WHERE q.owner_id=$1 AND q.series_id=$2 AND q.conversation_id=$3 ORDER BY g.expires_at DESC,g.id DESC LIMIT 20`, [owner, series, conversationId]);
-    return { conversationId, proposals: rows.map(view), ...(quotes.length ? { quotes } : {}) };
+    const messages = conversationId ? await this.chatMessages(conversationId, 40) : [];
+    return {
+      conversationId,
+      proposals: rows.map(view),
+      ...(quotes.length ? { quotes } : {}),
+      ...(messages.length ? { messages } : {}),
+    };
+  }
+
+  async chatMessages(conversationId: string, limit = 24): Promise<ComicDirectorChatMessage[]> {
+    const { rows } = await this.pool.query<{
+      id: string; role: "user" | "assistant"; content: string; createdAt: Date; metadata: Record<string, unknown> | null;
+    }>(
+      `SELECT id, role, content, created_at AS "createdAt", metadata FROM (
+         SELECT id, role, content, created_at, metadata FROM messages
+         WHERE conversation_id=$1 AND role IN ('user','assistant') AND metadata->>'comicDirectorChat'='true'
+         ORDER BY created_at DESC, id DESC LIMIT $2
+       ) recent ORDER BY created_at ASC, id ASC`,
+      [conversationId, limit],
+    );
+    return rows.map(row => {
+      const toolCalls = Array.isArray(row.metadata?.toolCalls)
+        ? row.metadata.toolCalls as ComicDirectorToolCallSummary[]
+        : undefined;
+      return {
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        createdAt: row.createdAt.toISOString(),
+        ...(toolCalls?.length ? { toolCalls } : {}),
+      };
+    });
+  }
+
+  async ensureChatSession(owner: string, series: string): Promise<{ conversationId: string; revision: number; title: string }> {
+    return libraryTransaction(this.pool, async db => {
+      const episode = await this.episode(owner, series, db, true);
+      const conversationId = await this.ensureSession(db, owner, series, episode.title);
+      return { conversationId, revision: episode.revision, title: episode.title };
+    });
+  }
+
+  async recordChatTurn(
+    conversationId: string,
+    userText: string,
+    assistantText: string,
+    toolCalls: ComicDirectorToolCallSummary[],
+    model?: string,
+  ): Promise<ComicDirectorChatMessage> {
+    return libraryTransaction(this.pool, async db => {
+      await db.query(
+        "INSERT INTO messages(conversation_id,role,content,metadata) VALUES($1,'user',$2,$3)",
+        [conversationId, userText, { comicDirectorChat: true }],
+      );
+      const { rows: [saved] } = await db.query<{ id: string; createdAt: Date }>(
+        `INSERT INTO messages(conversation_id,role,content,model,metadata) VALUES($1,'assistant',$2,$3,$4)
+         RETURNING id, created_at AS "createdAt"`,
+        [conversationId, assistantText, model ?? null, { comicDirectorChat: true, ...(toolCalls.length ? { toolCalls } : {}) }],
+      );
+      await db.query("UPDATE conversations SET updated_at=now(),model=$2 WHERE id=$1", [conversationId, model ?? null]);
+      return {
+        id: saved.id,
+        role: "assistant",
+        content: assistantText,
+        createdAt: saved.createdAt.toISOString(),
+        ...(toolCalls.length ? { toolCalls } : {}),
+      };
+    });
   }
 
   private async get(db: ComicQuery, owner: string, series: string, id: string, lock = false) {
@@ -130,22 +197,56 @@ export class PgComicDirector {
         type Candidate = ComicDirectorRole["candidates"][number];
         const { rows } = await db.query<Required<Candidate> & { aliases: string[] }>(`SELECT id,name,aliases,left(appearance,80) AS appearance
           FROM ${cd}.cd_characters WHERE owner_id=$1 AND archived_at IS NULL ORDER BY name,id`, [owner]);
-        const byName = new Map<string, Map<string, Candidate>>();
-        for (const { id, name, aliases, appearance } of rows) for (const value of [name, ...aliases]) {
-          const key = normalize(value);
-          const matches = byName.get(key) ?? new Map();
-          if (matches.size < 24) matches.set(id, { id, name, appearance });
-          byName.set(key, matches);
-        }
-        const clips = "clips" in result ? result.clips.map(clip => comicDramaClipDraftSchema.parse({
-          schemaVersion: 1, scene: clip.scene, durationMs: clip.durationMs,
-          shots: clip.shots.map((description, i) => ({ id: randomUUID(), framingKey: "medium", movementKey: "fixed", description,
-            durationShare: Math.floor(100 / clip.shots.length) + (i < 100 % clip.shots.length ? 1 : 0) })),
-          lines: clip.lines.map(line => ({ id: randomUUID(), ...line, speed: 1, emotionKey: null })),
-        })) : undefined;
-        proposal = { script: "script" in result ? result.script : "", ...(clips ? { clips, previousScenes } : {}), roles: result.characters.map(role => ({
-          ...role, candidates: [...byName.get(normalize(role.name))?.values() ?? []],
-        })) };
+        const seriesCast = "clips" in result ? await readSeriesCast(db, series) : [];
+        const castCandidates = seriesCast.map(entry => ({
+          id: entry.snapshot.characterId,
+          name: entry.snapshot.name,
+          aliases: entry.snapshot.aliases,
+          snapshot: entry.snapshot,
+        }));
+        const clips = "clips" in result ? result.clips.map(clip => {
+          const matchedCast: ComicClipCasting = [];
+          const added = new Set<string>();
+          const addCastByQuery = (query: string) => {
+            const found = matchComicCharacters(query, castCandidates);
+            if (found.length !== 1) return;
+            const member = found[0]!;
+            if (added.has(member.id)) return;
+            added.add(member.id);
+            const slot = member.snapshot.assets.find(asset => asset.kind === "slot" && asset.key === "front")
+              ?? member.snapshot.assets.find(asset => asset.kind === "slot");
+            matchedCast.push({ characterId: member.id, slotKey: slot?.key ?? null, expressionKey: null });
+          };
+          for (const line of clip.lines) {
+            if (line.speaker) addCastByQuery(line.speaker);
+          }
+          const bodyText = [clip.scene, ...clip.shots].join(" ");
+          for (const member of castCandidates) {
+            if (added.has(member.id)) continue;
+            const names = [member.name, ...member.aliases].filter(name => name.trim().length >= 2);
+            if (names.some(name => bodyText.includes(name))) {
+              added.add(member.id);
+              const slot = member.snapshot.assets.find(asset => asset.kind === "slot" && asset.key === "front")
+                ?? member.snapshot.assets.find(asset => asset.kind === "slot");
+              matchedCast.push({ characterId: member.id, slotKey: slot?.key ?? null, expressionKey: null });
+            }
+          }
+          return comicDramaClipDraftSchema.parse({
+            schemaVersion: 1, scene: clip.scene, durationMs: clip.durationMs,
+            shots: clip.shots.map((description, i) => ({ id: randomUUID(), framingKey: "medium", movementKey: "fixed", description,
+              durationShare: Math.floor(100 / clip.shots.length) + (i < 100 % clip.shots.length ? 1 : 0) })),
+            lines: clip.lines.map(line => ({ id: randomUUID(), ...line, speed: 1, emotionKey: null })),
+            ...(matchedCast.length ? { cast: matchedCast } : {}),
+          });
+        }) : undefined;
+        proposal = {
+          script: "script" in result ? result.script : "",
+          ...(clips ? { clips, previousScenes } : {}),
+          roles: result.characters.map(role => ({
+            ...role,
+            candidates: matchComicCharacters(role.name, rows).slice(0, 24).map(({ id, name, appearance }) => ({ id, name, appearance })),
+          })),
+        };
         const content = clips ? clips.map(clip => clip.scene).join("\n") : proposal.script;
         await db.query("INSERT INTO messages(conversation_id,role,content,model,metadata) VALUES($1,'assistant',$2,$3,$4)",
           [row.conversationId, content, model ?? null, { comicDirectorProposalId: id, status: "ready", endsTurn: true }]);
@@ -191,10 +292,12 @@ export class PgComicDirector {
 
   role(owner: string, series: string, id: string, index: number, input: ComicDirectorRoleDecision) {
     return libraryTransaction(this.pool, async db => {
-      const episode = await this.episode(owner, series, db, true);
+      const sourceEpisode = await this.episode(owner, series, db, true);
       const row = await this.get(db, owner, series, id, true);
       const suggestion = row.proposal?.roles[index];
-      if (row.status !== "applied" || !suggestion || row.sequelId) throw new ComicLibraryError("DIRECTOR_PROPOSAL_UNAVAILABLE", 409);
+      if (row.status !== "applied" || !suggestion) throw new ComicLibraryError("DIRECTOR_PROPOSAL_UNAVAILABLE", 409);
+      const targetSeriesId = row.sequelId ?? series;
+      const targetEpisode = targetSeriesId === series ? sourceEpisode : await this.episode(owner, targetSeriesId, db, true);
       const previous = row.roleDecisions?.[index];
       if (previous) {
         if (previous.choice !== input.choice || (input.choice === "existing" && previous.characterId !== input.characterId)) {
@@ -202,8 +305,10 @@ export class PgComicDirector {
         }
         return previous;
       }
-      if (episode.revision !== input.expectedRevision) throw new ComicLibraryError("DIRECTOR_PROPOSAL_STALE", 409);
-      let characterId: string | null = null, revision = episode.revision;
+      if (targetEpisode.revision !== input.expectedRevision && sourceEpisode.revision !== input.expectedRevision) {
+        throw new ComicLibraryError("DIRECTOR_PROPOSAL_STALE", 409);
+      }
+      let characterId: string | null = null, revision = targetEpisode.revision;
       if (input.choice !== "skip") {
         let outfitId: string;
         if (input.choice === "existing") {
@@ -211,7 +316,7 @@ export class PgComicDirector {
           ({ characterId, outfitId } = input);
         } else {
           const { rows: [character] } = await db.query<{ id: string }>(`INSERT INTO ${cd}.cd_characters
-            (owner_id,name,aliases,tags,age,personality,appearance) VALUES($1,$2,'{}','{}','',$3,'') RETURNING id`,
+            (owner_id,name,aliases,tags,age,personality,appearance) VALUES($1,$2,'{}','{}','','',$3) RETURNING id`,
           [owner, suggestion.name, suggestion.description]);
           characterId = character.id;
           const { rows: [outfit] } = await db.query<{ id: string }>(`INSERT INTO ${cd}.cd_character_outfits(owner_id,character_id,name)
@@ -219,11 +324,11 @@ export class PgComicDirector {
           outfitId = outfit.id;
         }
         const { rowCount } = await db.query(`SELECT 1 FROM ${cd}.cd_series_cast WHERE series_id=$1 AND character_id=$2 AND outfit_id=$3`,
-          [series, characterId, outfitId]);
+          [targetSeriesId, characterId, outfitId]);
         if (!rowCount) {
-          await editSeriesCast(db, owner, series, { action: "add", characterId, outfitId });
+          await editSeriesCast(db, owner, targetSeriesId, { action: "add", characterId, outfitId });
           const { rows: [next] } = await db.query<{ revision: number }>(`UPDATE ${cd}.cd_series
-            SET revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING revision`, [series]);
+            SET revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING revision`, [targetSeriesId]);
           revision = next.revision;
         }
       }

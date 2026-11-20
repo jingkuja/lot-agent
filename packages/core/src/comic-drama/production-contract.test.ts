@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildComicGenerationInput, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicRenderIssue, comicSpeechReleaseSchema,
-  comicTimelineSchema, layoutComicTimeline, type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput,
-  type ComicSeriesCast,
+  buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG, comicDirectorChatInputSchema,
+  comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicRenderIssue, comicSpeechReleaseSchema,
+  comicTimelineSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline, matchComicCharacters,
+  type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
 
@@ -166,5 +167,52 @@ describe("comic timeline contract", () => {
     expect(comicSpeechReleaseSchema.safeParse({
       expectedRevision: 1, expectedClipRevision: 1, voice: { kind: "preset", preset: "alloy" }, acknowledgePossibleCharge: false,
     }).success).toBe(false);
+  });
+});
+
+describe("comic v1 quality checks, refs, presets and schemas", () => {
+  it("detects all 4 product-spec §4.2/§5.3 clip issues", () => {
+    const denseClip: ComicDramaClip = {
+      id: uuid(70), ordinal: 2, revision: 1,
+      draft: comicDramaClipDraftSchema.parse({
+        schemaVersion: 1, durationMs: 4000, scene: "便利店门口",
+        shots: [{ id: uuid(71), framingKey: "wide", movementKey: "fixed", description: "Rainy street.", durationShare: 100 }],
+        lines: [
+          {
+            id: uuid(72), speaker: "陌生人", emotionKey: null, speed: 1,
+            text: "这是一段非常长非常长非常长非常长非常长非常长非常长的台词，明显会超过四秒钟的成片时长限制。",
+          },
+        ],
+        cast: [{ characterId: snapshot.characterId, slotKey: "front", expressionKey: "smile" }],
+        sceneRef: { materialId: uuid(73), mediaId: uuid(74), name: "雨夜街道" },
+        propRefs: Array.from({ length: 5 }, (_, i) => ({ materialId: uuid(80 + i), mediaId: uuid(90 + i) })),
+        sfxRefs: [{ materialId: uuid(99), mediaId: uuid(98), name: "雨声" }],
+      }),
+    };
+    const klingSeries = { ...series, videoModel: "kling-video-v3-omni" };
+    const issues = checkComicSeriesIssues({ series: klingSeries, clips: [denseClip], cast }, { hasStyleRef: true });
+    expect(issues.map(issue => issue.code)).toEqual([
+      "SPEAKER_NOT_IN_CAST",
+      "REFERENCE_LIMIT_EXCEEDED",
+      "DIALOGUE_TOO_LONG",
+      "CAST_UPDATED_IN_LIBRARY",
+    ]);
+    expect(estimateComicDialogueMs(denseClip.draft.lines)).toBeGreaterThan(4000);
+    expect(checkComicClipIssues(series, clip, [{ ...cast[0], hasUpdates: false }])).toEqual([]);
+  });
+
+  it("supports loose alias matching, trilingual speech presets, audition and director chat schemas", () => {
+    const matched = matchComicCharacters("小 夏！", [
+      { id: uuid(1), name: "林夏", aliases: ["小夏", "Lin"] },
+      { id: uuid(2), name: "陈墨", aliases: ["阿墨"] },
+    ]);
+    expect(matched.map(item => item.id)).toEqual([uuid(1)]);
+    expect(COMIC_SPEECH_PRESET_CATALOG.every(item => item.labels.zh && item.labels.en && item.labels.id)).toBe(true);
+    expect(comicVoiceAuditionSchema.safeParse({
+      text: "雨停之前别走。", speed: 1.1, emotionKey: "gentle", voice: { kind: "preset", preset: "nova" },
+    }).success).toBe(true);
+    expect(comicDirectorChatInputSchema.safeParse({
+      message: "帮我检查全集有没有漏选角", expectedRevision: 3, language: "zh",
+    }).success).toBe(true);
   });
 });

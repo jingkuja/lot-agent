@@ -24,6 +24,7 @@ export function MaterialLibrary() {
   const [refresh, setRefresh] = useState(0);
   const [list, setList] = useState<Awaited<ReturnType<typeof comicLibraryApi.materials>> | "error" | null>(null);
   const [uploading, setUploading] = useState<"new" | ComicMaterial | null>(null);
+  const [editing, setEditing] = useState<ComicMaterial | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const choices = useComicChoices(kind);
@@ -58,18 +59,39 @@ export function MaterialLibrary() {
         <small>{[choices.find(entry => entry.key === material.categoryKey)?.labels[locale] ?? material.categoryKey,
           ...material.tags, t("版本 {0}", [material.version])].filter(Boolean).join(" · ")}</small>
         <div className="comic-actions">
-          <button onClick={() => setVersionId(material.id)}>{t("版本历史")}</button>
-          {!material.archived && <>
-            <button onClick={() => setUploading(material)}>{t("替换文件")}</button>
-            <button onClick={() => {
+          <button type="button" onClick={() => setVersionId(material.id)}>{t("版本历史")}</button>
+          {!material.archived ? <>
+            <button type="button" onClick={() => setEditing(material)}>{t("编辑")}</button>
+            <button type="button" onClick={() => setUploading(material)}>{t("替换文件")}</button>
+            <button type="button" onClick={() => {
               if (window.confirm(t("归档此素材？"))) void comicLibraryApi.archiveMaterial(material.id)
                 .then(reload).catch(reason => setError(libraryError(reason)));
             }}>{t("归档")}</button>
-          </>}
+          </> : (
+            <button type="button" onClick={() => void comicLibraryApi.unarchiveMaterial(material.id)
+              .then(reload).catch(reason => setError(libraryError(reason)))}>{t("取消归档")}</button>
+          )}
+          <button type="button" onClick={() => {
+            if (window.confirm(t("彻底删除此素材？已被剪辑或画风参考使用的素材无法删除。"))) void comicLibraryApi.deleteMaterial(material.id)
+              .then(reload).catch(reason => setError(libraryError(reason)));
+          }}>{t("删除")}</button>
         </div>
       </article>)}</div>
       <LibraryPagination page={page} more={list.more} change={setPage} />
     </> : <p role="status">{t("加载中…")}</p>}
+    {editing && <LibraryDialog title={t("编辑素材")} submitLabel={t("保存")} close={() => setEditing(null)} save={async form => {
+      await comicLibraryApi.editMaterial(editing.id, {
+        name: String(form.get("name") ?? "").trim(),
+        categoryKey: String(form.get("category") ?? "") || null,
+        tags: comicListWords(String(form.get("tags") ?? "")),
+      });
+      reload();
+    }}>
+      <label>{t("素材名称")}<input name="name" autoFocus required maxLength={120} defaultValue={editing.name} /></label>
+      <label>{t("分类")}<ChoiceSelect domain={editing.kind} name="category" aria-label={t("分类")} existing={editing.categoryKey}
+        defaultValue={editing.categoryKey ?? ""} empty={t("未分类")} /></label>
+      <label>{t("标签")}<input name="tags" maxLength={2400} defaultValue={editing.tags.join(", ")} placeholder={t("用逗号分隔")} /></label>
+    </LibraryDialog>}
     {uploading && <MaterialUpload initialKind={kind} material={uploading === "new" ? undefined : uploading}
       close={() => setUploading(null)} done={nextKind => {
         if (uploading === "new") { setKind(nextKind); setArchived(false); setQuery(""); setPage(1); }

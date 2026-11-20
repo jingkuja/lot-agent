@@ -12,9 +12,11 @@ const tables = "lot_comic_drama";
 const videoColumns = `${takeColumns},r.series_id AS "seriesId",s.title AS "seriesTitle",CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS ordinal,
   coalesce(c.draft->>'scene','') AS scene,coalesce(c.adopted_video_take_id=t.id,false) AS adopted,
   t.video_version AS version,t.input->>'modelId' AS "modelId",
-  coalesce(m.duration_ms,(t.input->>'durationMs')::int) AS "durationMs",t.completed_at AS "completedAt"`;
+  coalesce(m.duration_ms,(t.input->>'durationMs')::int) AS "durationMs",t.completed_at AS "completedAt",
+  coalesce(c.keyframe_media_id, kt.media_id) AS "posterMediaId"`;
 const joinVideos = `${joinTakes} JOIN ${tables}.cd_series s ON (s.owner_id,s.id)=(r.owner_id,r.series_id)
   LEFT JOIN ${tables}.cd_clips c ON c.id=t.target_id AND c.series_id=r.series_id
+  LEFT JOIN ${tables}.cd_takes kt ON kt.owner_id=t.owner_id AND kt.id=c.keyframe_take_id AND kt.status='ready'
   LEFT JOIN ${tables}.cd_media m ON (m.owner_id,m.id)=(t.owner_id,t.media_id)`;
 const receiptColumns = `coalesce(t.submit_state,'unsubmitted') AS state, t.vendor_id AS "vendorId",
   t.gateway_request_id AS "gatewayRequestId",t.gateway_http_status AS "httpStatus"`;
@@ -27,13 +29,18 @@ export class PgComicVideo {
   async frames(owner: string, seriesId: string, ids: string[]) {
     type Row = { clipId: string; adopted: string | null; frame: ComicFrozenGenerationInput["firstFrame"] };
     const { rows } = await this.pool.query<Row>(`SELECT c.id AS "clipId",c.adopted_video_take_id AS adopted,
-      CASE WHEN m.id IS NOT NULL THEN jsonb_build_object('takeId',t.id,'mediaId',m.id,'width',m.width,'height',m.height,
-      'mime',m.mime,'sizeBytes',m.size_bytes,'version',(SELECT count(*)::int FROM ${tables}.cd_takes prior
-        WHERE prior.owner_id=t.owner_id AND prior.target_key=t.target_key AND (prior.created_at,prior.id)<=(t.created_at,t.id))) END AS frame
+      CASE
+        WHEN m.id IS NOT NULL THEN jsonb_build_object('takeId',t.id,'mediaId',m.id,'width',m.width,'height',m.height,
+          'mime',m.mime,'sizeBytes',m.size_bytes,'version',(SELECT count(*)::int FROM ${tables}.cd_takes prior
+            WHERE prior.owner_id=t.owner_id AND prior.target_key=t.target_key AND (prior.created_at,prior.id)<=(t.created_at,t.id)))
+        WHEN mm.id IS NOT NULL THEN jsonb_build_object('takeId',NULL,'mediaId',mm.id,'width',mm.width,'height',mm.height,
+          'mime',mm.mime,'sizeBytes',mm.size_bytes,'version',1)
+      END AS frame
       FROM ${tables}.cd_clips c JOIN ${tables}.cd_series s ON s.id=c.series_id
       LEFT JOIN ${tables}.cd_takes t ON t.id=c.keyframe_take_id AND t.owner_id=s.owner_id AND t.video_version IS NULL
         AND t.status='ready' AND (t.input->>'clipRevision')::int=c.revision
       LEFT JOIN ${tables}.cd_media m ON (m.owner_id,m.id)=(t.owner_id,t.media_id)
+      LEFT JOIN ${tables}.cd_media mm ON (mm.owner_id,mm.id)=(s.owner_id,c.keyframe_media_id)
       WHERE s.owner_id=$1 AND s.id=$2 AND c.id=ANY($3::uuid[])`, [owner, seriesId, ids]);
     return new Map(rows.map(row => [row.clipId, row]));
   }
@@ -65,22 +72,29 @@ export class PgComicVideo {
   }
 
   async history(owner: string, filter: {
-    seriesId?: string; seriesQuery?: string; adopted?: "true" | "false"; after?: string; before?: string; cursor?: string;
+    seriesId?: string; seriesQuery?: string; adopted?: "true" | "false"; characterId?: string; after?: string; before?: string; cursor?: string;
   }): Promise<ComicVideoHistory> {
     const [stamp, id, extra] = filter.cursor?.split(",") ?? [];
     if (filter.cursor && (extra !== undefined || !stamp || !Number.isFinite(Date.parse(stamp)) || !comicDramaIdSchema.safeParse(id).success)) {
       throw new ComicLibraryError("INVALID_CURSOR", 400);
     }
     if (filter.after && filter.before && Date.parse(filter.after) > Date.parse(filter.before)) throw new ComicLibraryError("INVALID_INPUT", 400);
+    const pageLimit = 30;
     const { rows } = await this.pool.query<ComicVideoTake & { stamp: string }>(`SELECT ${videoColumns},t.completed_at::text AS stamp ${joinVideos}
       WHERE t.owner_id=$1 AND t.status='ready' AND t.video_version IS NOT NULL AND ($2::uuid IS NULL OR r.series_id=$2)
       AND ($3::boolean IS NULL OR coalesce(c.adopted_video_take_id=t.id,false)=$3)
       AND ($4::timestamptz IS NULL OR t.completed_at>=$4) AND ($5::timestamptz IS NULL OR t.completed_at<$5)
       AND ($8='' OR strpos(lower(s.title),lower($8))>0)
-      AND ($6::timestamptz IS NULL OR (t.completed_at,t.id)<($6,$7::uuid)) ORDER BY t.completed_at DESC,t.id DESC LIMIT 25`,
-    [owner, filter.seriesId ?? null, filter.adopted ?? null, filter.after ?? null, filter.before ?? null, stamp ?? null, id ?? null, filter.seriesQuery ?? ""]);
-    const last = rows[23];
-    return { entries: rows.slice(0, 24).map(({ stamp: _stamp, ...row }) => row), nextCursor: rows.length > 24 ? `${last.stamp},${last.id}` : null };
+      AND ($9::text IS NULL OR coalesce(c.draft->'cast','[]'::jsonb) @> jsonb_build_array(jsonb_build_object('characterId',$9::text))
+        OR coalesce(t.input->'references','[]'::jsonb) @> jsonb_build_array(jsonb_build_object('characterId',$9::text)))
+      AND ($6::timestamptz IS NULL OR (t.completed_at,t.id)<($6,$7::uuid)) ORDER BY t.completed_at DESC,t.id DESC LIMIT $10`,
+    [owner, filter.seriesId ?? null, filter.adopted ?? null, filter.after ?? null, filter.before ?? null,
+      stamp ?? null, id ?? null, filter.seriesQuery ?? "", filter.characterId ?? null, pageLimit + 1]);
+    const last = rows[pageLimit - 1];
+    return {
+      entries: rows.slice(0, pageLimit).map(({ stamp: _stamp, ...row }) => row),
+      nextCursor: rows.length > pageLimit && last ? `${last.stamp},${last.id}` : null,
+    };
   }
 
   async adopt(owner: string, seriesId: string, clipId: string, takeId: string, revision: number) {

@@ -44,7 +44,7 @@ const reference = image.extend({
 export const comicFrozenGenerationSchema = z.object({
   schemaVersion: z.literal(1), promptVersion: z.literal(1), seriesId: id, seriesRevision: revision, clipId: id, clipRevision: revision,
   mode, modelId: z.string().min(1), aspectRatio: z.enum(["9:16", "16:9", "1:1"]), durationMs: z.number().int().min(1).max(60_000),
-  styleKey: z.string().min(1), firstFrame: image.extend({ takeId: id }).nullable(), references: z.array(reference), prompt: z.string().min(1),
+  styleKey: z.string().min(1), firstFrame: image.extend({ takeId: id.nullable() }).nullable(), references: z.array(reference), prompt: z.string().min(1),
 }).strict().refine(item => !!item.firstFrame === (item.mode === "from_keyframe"));
 
 export type ComicGenerationImage = z.infer<typeof image>;
@@ -59,6 +59,21 @@ export const comicImageTakeInput = z.union([
 ]);
 export type ComicImageTakeInput = z.infer<typeof comicImageTakeInput>;
 export const comicKeyframeReviewSchema = z.object({ keyframeTakeId: id, expectedClipRevision: revision }).strict();
+export const comicKeyframeSelectSchema = z.object({ mediaId: id, expectedClipRevision: revision }).strict();
+const styleKeySchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
+export const comicCharacterGenerateSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("slot"), key: styleKeySchema, outfitId: id,
+    styleKey: styleKeySchema.optional(),
+    referenceMediaIds: z.array(id).max(4).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("expression"), key: styleKeySchema,
+    styleKey: styleKeySchema.optional(),
+    referenceMediaIds: z.array(id).max(4).optional(),
+  }).strict(),
+]);
+export type ComicCharacterGenerateRequest = z.infer<typeof comicCharacterGenerateSchema>;
 export const comicVideoTakeInput = comicFrozenGenerationSchema.refine(input => input.mode !== "keyframe");
 export const comicTakeInput = z.union([comicImageTakeInput, comicVideoTakeInput]);
 export type ComicTakeInput = z.infer<typeof comicTakeInput>;
@@ -74,6 +89,7 @@ export const comicFrameSaveSchema = z.object({
 export type ComicFrameSaveRequest = z.infer<typeof comicFrameSaveSchema>;
 export const comicVideoSearchSchema = z.object({
   seriesId: id.optional(), seriesQuery: z.string().trim().max(120).optional(), adopted: z.enum(["true", "false"]).optional(),
+  characterId: id.optional(),
   after: z.string().datetime().optional(), before: z.string().datetime().optional(),
   cursor: z.string().max(100).optional(),
 }).strict();
@@ -99,10 +115,11 @@ export type ComicGenerationRequest = {
 export type ComicImageTakeState = ComicTakeState;
 export type ComicImageTake = ComicTake;
 export type ComicImageRequest = ComicGenerationRequest;
-export type ComicKeyframeHistory = { approvedTakeId: string | null; takes: ComicImageTake[] };
+export type ComicKeyframeHistory = { approvedTakeId: string | null; approvedMediaId?: string | null; takes: ComicImageTake[] };
 export type ComicVideoTake = ComicTake & {
   seriesId: string; seriesTitle: string; scene: string; ordinal: number | null; adopted: boolean;
   version: number; modelId: string; durationMs: number; completedAt: string | null;
+  posterMediaId?: string | null;
 };
 export type ComicVideoHistory = { entries: ComicVideoTake[]; nextCursor: string | null };
 export type ComicVideoReceipt = {

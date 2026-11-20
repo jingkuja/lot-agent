@@ -1,16 +1,18 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  COMIC_SCRIPT_DOCX, COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, comicDirectorApplySchema, comicDirectorInputSchema, comicDirectorRoleDecisionSchema,
-  comicDramaIdSchema,
+  checkComicSeriesIssues, COMIC_SCRIPT_DOCX, COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, comicDirectorApplySchema,
+  comicDirectorChatInputSchema, comicDirectorInputSchema, comicDirectorRoleDecisionSchema, comicDramaIdSchema,
 } from "@lot-agent/core/comic-drama";
 import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
-import type { ComicDirector } from "./director-agent.js";
+import type { ComicDirector, ComicDirectorToolsDeps } from "./director-agent.js";
 import type { PgComicDirector } from "./director-repository.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
 import { ComicDramaError } from "./repository.js";
 
-export function createComicDirectorRoutes(repo: PgComicDirector, director: ComicDirector, parser: string) {
+export function createComicDirectorRoutes(
+  repo: PgComicDirector, director: ComicDirector, parser: string, toolsDeps?: ComicDirectorToolsDeps,
+) {
   const app = new Hono<{ Variables: { userId: string } }>();
   app.onError((error, c) => {
     if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
@@ -29,6 +31,18 @@ export function createComicDirectorRoutes(repo: PgComicDirector, director: Comic
   app.get("/series/:id/director", async c => {
     c.header("Cache-Control", "private, no-store");
     return c.json(await repo.list(c.get("userId"), id(c.req.param("id"))));
+  });
+  app.get("/series/:id/director/check", async c => {
+    if (!toolsDeps) return c.json({ issues: [] });
+    const owner = c.get("userId"), sid = id(c.req.param("id"));
+    const detail = await toolsDeps.episodes.get(owner, sid);
+    const hasStyleRef = toolsDeps.settings ? !!(await toolsDeps.settings.getStylePreset(owner, detail.series.styleKey).catch(() => null)) : false;
+    return c.json({ issues: checkComicSeriesIssues(detail, { hasStyleRef }) });
+  });
+  app.post("/series/:id/director/chat", limit, async c => {
+    const fields = comicDirectorChatInputSchema.safeParse(await c.req.json().catch(() => null));
+    if (!fields.success) throw new ComicLibraryError("INVALID_INPUT", 400);
+    return c.json(await director.chat(c.get("userId"), id(c.req.param("id")), fields.data, c.req.raw.signal));
   });
   app.post("/series/:id/director/import", fileLimit, async c => {
     const episode = await repo.episode(c.get("userId"), id(c.req.param("id")));

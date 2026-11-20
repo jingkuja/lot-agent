@@ -433,19 +433,19 @@ try {
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
           if (process.env.COMIC_VIDEO_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_VIDEO_SCREENSHOT, fullPage: true });
           await newest.getByRole("button", { name: "选作剪辑片源", exact: true }).click();
-          await page.waitForURL(/\/editor\/[a-f0-9-]+$/);
+          await page.waitForURL(/\/editor\/sources\/[a-f0-9-]+$/);
           const secondSource = page.url();
           await page.reload();
           await page.getByRole("heading", { name: "剪辑片源预览", exact: true }).waitFor();
-          await page.locator(".comic-editor-source").getByText("W6 video fixture · 版本 2 · 已采用", { exact: true }).waitFor();
+          await page.locator(".comic-editor-source").getByText(/W6 video fixture.*版本 2 · 已采用/).waitFor();
           await page.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-editor-source video")?.videoWidth === 320);
           await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
           if (process.env.COMIC_EDITOR_SOURCE_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_EDITOR_SOURCE_SCREENSHOT, fullPage: true });
           await page.getByRole("button", { name: "历史成片", exact: true }).click();
-          await page.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 1" })
+          await page.locator(".comic-video-card").filter({ hasText: "W6 video fixture" }).filter({ hasText: "版本 1" })
             .filter({ hasText: "W6 ready" }).getByRole("button", { name: "选作剪辑片源", exact: true }).click();
-          await page.locator(".comic-editor-source").getByText("W6 video fixture · 版本 1", { exact: true }).waitFor();
+          await page.locator(".comic-editor-source").getByText(/W6 video fixture.*版本 1/).waitFor();
           assert.notEqual(page.url(), secondSource, "selection is the exact version");
           await page.getByRole("button", { name: "选择其他片源", exact: true }).click();
           await page.getByRole("heading", { name: "选择剪辑片源", exact: true }).waitFor();
@@ -455,7 +455,7 @@ try {
           console.log("PASS W7 Web: workspace and history selection, exact-version reload, and narrow editing preview");
         }
 
-        const editLink = base + "/comic-drama/editor/projects/" + editFixture.projectId;
+        const editLink = base + "/comic-drama/editor/" + editFixture.projectId;
         const saveEdit = async () => {
           const [response] = await Promise.all([
             page.waitForResponse((response: { url(): string; request(): { method(): string } }) =>
@@ -470,7 +470,7 @@ try {
         await page.getByText("总时长 10.6 秒", { exact: true }).waitFor();
         await page.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-timeline-player video")?.videoWidth === 320);
         await page.getByRole("button", { name: "添加片源", exact: true }).click();
-        await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材 · 版本 1" })
+        await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材" }).filter({ hasText: "版本 1" })
           .getByRole("button", { name: "选作剪辑片源", exact: true }).click();
         await page.getByLabel("入点（秒）", { exact: true }).fill("0.4");
         await page.getByLabel("出点（秒）", { exact: true }).fill("7.6");
@@ -504,7 +504,7 @@ try {
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         if (process.env.COMIC_EDIT_SCREENSHOT) await page.screenshot({ path: process.env.COMIC_EDIT_SCREENSHOT, fullPage: true });
         await page.setViewportSize({ width: 1440, height: 900 });
-        await page.goto(base + "/comic-drama/editor/" + editFixture.a1.takeId);
+        await page.goto(base + "/comic-drama/editor/sources/" + editFixture.a1.takeId);
         await page.getByRole("button", { name: "以此片源创建工程", exact: true }).click();
         const newEdit = page.getByRole("dialog", { name: "新建剪辑工程", exact: true });
         await newEdit.getByLabel("工程名称").fill("W8 界面工程");
@@ -531,7 +531,7 @@ try {
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
           assert.equal(await page.getByText("拆分镜差异样例").count(), 0);
           assert.equal(await page.getByLabel("剧本正文").inputValue(), "雨夜的便利店仍在营业。");
-          await page.goto(base + "/comic-drama/editor/" + editFixture.a1.takeId);
+          await page.goto(base + "/comic-drama/editor/sources/" + editFixture.a1.takeId);
           await page.getByRole("button", { name: "以此片源创建工程", exact: true }).click();
           const createFilm = page.getByRole("dialog", { name: "新建剪辑工程", exact: true });
           await createFilm.getByLabel("工程名称").fill("W9 界面成片");
@@ -539,7 +539,7 @@ try {
           await page.getByRole("heading", { name: "W9 界面成片", exact: true }).waitFor();
           w9EditLink = page.url();
           await page.getByRole("button", { name: "添加片源", exact: true }).click();
-          await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材 · 版本 1" })
+          await page.locator(".comic-video-card").filter({ hasText: "W8 跨集素材" }).filter({ hasText: "版本 1" })
             .getByRole("button", { name: "选作剪辑片源", exact: true }).click();
           await page.getByLabel("入点（秒）", { exact: true }).fill("0.4");
           await page.getByLabel("出点（秒）", { exact: true }).fill("7.6");
@@ -726,9 +726,9 @@ try {
               }
               if (videoEpisode) {
                 await desktopPage.getByRole("button", { name: "历史成片", exact: true }).click();
-                const card = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 2 · 已采用" });
+                const card = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture" }).filter({ hasText: "版本 2 · 已采用" });
                 await card.getByRole("button", { name: "选作剪辑片源", exact: true }).click();
-                await desktopPage.waitForURL(/\/editor\/[a-f0-9-]+$/);
+                await desktopPage.waitForURL(/\/editor\/sources\/[a-f0-9-]+$/);
                 await desktopPage.reload();
                 await desktopPage.getByRole("heading", { name: "剪辑片源预览", exact: true }).waitFor();
                 await desktopPage.waitForFunction(() => document.querySelector<HTMLVideoElement>(".comic-editor-source video")?.videoWidth === 320)

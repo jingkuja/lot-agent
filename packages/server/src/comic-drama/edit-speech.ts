@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResult } from "@lot-agent/core";
 import {
-  comicDramaClipDraftSchema, comicSpeechPresets, comicVoiceBindSchema,
-  type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicVoiceBind, type ComicVoiceSettings,
+  COMIC_SPEECH_PRESET_CATALOG, comicDramaClipDraftSchema, comicSpeechPresets, comicVoiceBindSchema, estimateComicDialogueMs, matchComicCharacters,
+  type ComicAutoDialogueResult, type ComicEditAutoDialogue, type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake,
+  type ComicTimeline, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { readComicDictionary } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
@@ -46,8 +47,13 @@ export class ComicEditSpeech {
   async settings(owner: string, id: string): Promise<ComicVoiceSettings> {
     if (!(await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2`, [owner, id])).rowCount) libraryMissing();
     const [current, clones] = await Promise.all([this.binding(owner, id), this.deps.clones?.list(owner) ?? []]);
-    return { binding: current?.binding ?? { kind: "none" }, presets: this.deps.presetModel ? comicSpeechPresets : [],
-      clonesEnabled: !!this.deps.clones, clones };
+    return {
+      binding: current?.binding ?? { kind: "none" },
+      presets: this.deps.presetModel ? comicSpeechPresets : [],
+      presetCatalog: this.deps.presetModel ? COMIC_SPEECH_PRESET_CATALOG : [],
+      clonesEnabled: !!this.deps.clones,
+      clones,
+    };
   }
 
   async bind(owner: string, id: string, binding: ComicVoiceBind) {
@@ -73,7 +79,8 @@ export class ComicEditSpeech {
 
   private async linesForClip(owner: string, clipId: string | null): Promise<ComicSpeechLines> {
     const presets = this.deps.presetModel ? comicSpeechPresets : [];
-    if (!clipId) return { clipRevision: null, lines: [], characters: [], presets };
+    const presetCatalog = this.deps.presetModel ? COMIC_SPEECH_PRESET_CATALOG : [];
+    if (!clipId) return { clipRevision: null, lines: [], characters: [], presets, presetCatalog };
     const { rows: [source] } = await this.pool.query<{ revision: number; draft: unknown; characters: ComicSpeechLines["characters"] }>(
       `SELECT c.revision,c.draft,coalesce((SELECT jsonb_agg(jsonb_build_object('id',x.character_id,'name',x.snapshot->>'name',
         'aliases',x.snapshot->'aliases') ORDER BY x.snapshot->>'name',x.character_id)
@@ -82,7 +89,7 @@ export class ComicEditSpeech {
           AND (($3::boolean AND v.binding->>'kind'='preset') OR ($4::boolean AND v.binding->>'kind'='clone'))),'[]'::jsonb) AS characters
       FROM ${cd}.cd_clips c JOIN ${cd}.cd_series s ON s.id=c.series_id WHERE c.id=$1 AND s.owner_id=$2 AND s.deleted_at IS NULL`,
       [clipId, owner, !!this.deps.presetModel, !!this.deps.clones]);
-    return { clipRevision: source?.revision ?? null, presets, characters: source?.characters ?? [],
+    return { clipRevision: source?.revision ?? null, presets, presetCatalog, characters: source?.characters ?? [],
       lines: source ? comicDramaClipDraftSchema.parse(source.draft).lines.filter(line => line.text) : [] };
   }
 
@@ -143,9 +150,15 @@ export class ComicEditSpeech {
     if (!result.rowCount) throw new ComicLibraryError("EDIT_SPEECH_NOT_RELEASABLE", 409);
   }
 
-  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
-    const { line, voice, clone, input, fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields);
-    assertComicDramaCompliance([{ field: "dialogue", text: line.text }]);
+  private async synthesizeCached(
+    owner: string,
+    fingerprint: string,
+    voice: CloneVoice,
+    clone: boolean,
+    input: { text: string; instructions?: string; speed: number },
+    signal: AbortSignal,
+    accepting?: () => void,
+  ): Promise<ComicSpeechTake> {
     const existing = await this.cached(owner, fingerprint);
     if (existing) return existing;
     accepting?.();
@@ -185,6 +198,106 @@ export class ComicEditSpeech {
       [owner, fingerprint, rejected ? "failed" : "unknown", safeTrace(error instanceof ProviderError ? error.gatewayRequestId : trace)]);
       throw rejected ? new ComicLibraryError("EDIT_SPEECH_UNAVAILABLE", 503) : new ComicLibraryError("EDIT_SPEECH_UNKNOWN", 409);
     }
+  }
+
+  async audition(owner: string, fields: ComicVoiceAudition, signal: AbortSignal, accepting?: () => void): Promise<ComicSpeechTake> {
+    assertComicDramaCompliance([{ field: "audition", text: fields.text }]);
+    let resolved: { voice: CloneVoice; version: string | null; clone: boolean };
+    if (fields.voice.kind === "clone") {
+      const cloneVoice = await this.ready(owner, fields.voice.itemId);
+      resolved = { voice: cloneVoice, version: null, clone: true };
+    } else if (fields.voice.kind === "character") {
+      const exists = await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2`, [owner, fields.voice.characterId]);
+      if (!exists.rowCount) libraryMissing();
+      resolved = await this.resolve(owner, { kind: "character", characterId: fields.voice.characterId });
+    } else {
+      resolved = await this.resolve(owner, { kind: "preset", preset: fields.voice.preset });
+    }
+    const emotions = fields.emotionKey ? await readComicDictionary(this.pool, owner, "emotion") : [];
+    const instructions = emotions.find(entry => entry.key === fields.emotionKey)?.labels.en;
+    const input = { text: fields.text, instructions, speed: fields.speed };
+    const fingerprint = digest(["audition", 1, fields.voice, resolved.version, resolved.voice, input, "wav"]);
+    return this.synthesizeCached(owner, fingerprint, resolved.voice, resolved.clone, input, signal, accepting);
+  }
+
+  async autoDialogue(
+    owner: string, editId: string, fields: ComicEditAutoDialogue, signal: AbortSignal, accepting?: () => void,
+  ): Promise<ComicAutoDialogueResult> {
+    const edit = await this.edits.get(owner, editId);
+    if (edit.revision !== fields.expectedRevision) throw new ComicEditConflict(edit.revision);
+    const emotions = await readComicDictionary(this.pool, owner, "emotion");
+    const nextVoice: ComicTimeline["voice"] = [...edit.timeline.voice];
+    const nextSubtitles: ComicTimeline["subtitles"] = [...edit.timeline.subtitles];
+    let voicedCount = 0;
+    let subtitledCount = 0;
+    let skippedLines = 0;
+
+    for (const item of edit.timeline.video) {
+      signal.throwIfAborted();
+      const source = edit.sources.find(entry => entry.takeId === item.takeId);
+      const clipLines = await this.linesForClip(owner, source?.clipId ?? null);
+      if (!clipLines.lines.length) continue;
+      const clipDuration = item.outMs - item.inMs;
+      let cursorMs = Math.max(0, ...nextVoice
+        .filter(entry => entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id)
+        .map(entry => entry.anchor.offsetMs + entry.durationMs));
+      for (const line of clipLines.lines) {
+        const existingVoice = nextVoice.find(entry => entry.lineId === line.id && entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
+        const existingSub = nextSubtitles.find(entry => entry.lineId === line.id && entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
+        const startOffset = existingVoice?.anchor.offsetMs ?? cursorMs;
+        const remaining = clipDuration - startOffset;
+        if (remaining <= 0) { skippedLines += 1; continue; }
+        let lineDurationMs = existingVoice?.durationMs ?? Math.min(remaining, Math.max(800, estimateComicDialogueMs([line])));
+        if (fields.includeVoice && !existingVoice) {
+          const matched = line.speaker ? matchComicCharacters(line.speaker, clipLines.characters) : [];
+          const scope: ComicSpeechRequest["voice"] | null = matched.length === 1
+            ? { kind: "character", characterId: matched[0].id }
+            : fields.fallbackPreset && clipLines.presets.includes(fields.fallbackPreset)
+              ? { kind: "preset", preset: fields.fallbackPreset }
+              : clipLines.presets[0] ? { kind: "preset", preset: clipLines.presets[0] as typeof comicSpeechPresets[number] } : null;
+          if (scope) {
+            assertComicDramaCompliance([{ field: "dialogue", text: line.text }]);
+            const { voice, version, clone } = await this.resolve(owner, scope);
+            const instructions = line.emotionKey ? emotions.find(entry => entry.key === line.emotionKey)?.labels.en : undefined;
+            const synthInput = { text: line.text, instructions, speed: line.speed };
+            const fingerprint = digest([1, scope, version, voice, synthInput, "wav"]);
+            const take = await this.synthesizeCached(owner, fingerprint, voice, clone, synthInput, signal, accepting);
+            lineDurationMs = Math.min(remaining, take.durationMs);
+            nextVoice.push({
+              id: randomUUID(), mediaId: take.mediaId, lineId: line.id,
+              anchor: { kind: "clip", videoItemId: item.id, offsetMs: startOffset },
+              durationMs: lineDurationMs, sourceInMs: 0, volume: 1, fadeInMs: 0, fadeOutMs: 0, loop: false,
+            });
+            voicedCount += 1;
+          } else {
+            skippedLines += 1;
+          }
+        }
+        if (fields.includeSubtitles && !existingSub) {
+          nextSubtitles.push({
+            id: randomUUID(), lineId: line.id, text: line.text,
+            anchor: { kind: "clip", videoItemId: item.id, offsetMs: startOffset },
+            durationMs: Math.max(1, Math.min(remaining, lineDurationMs)),
+          });
+          subtitledCount += 1;
+        }
+        if (!existingVoice) cursorMs = Math.max(cursorMs, startOffset + lineDurationMs);
+      }
+    }
+    const updated = voicedCount > 0 || subtitledCount > 0
+      ? await this.edits.update(owner, editId, {
+        expectedRevision: fields.expectedRevision,
+        title: edit.title,
+        timeline: { ...edit.timeline, voice: nextVoice, subtitles: nextSubtitles },
+      })
+      : edit;
+    return { edit: updated, voicedCount, subtitledCount, skippedLines };
+  }
+
+  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
+    const { line, voice, clone, input, fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields);
+    assertComicDramaCompliance([{ field: "dialogue", text: line.text }]);
+    return this.synthesizeCached(owner, fingerprint, voice, clone, input, signal, accepting);
   }
 }
 

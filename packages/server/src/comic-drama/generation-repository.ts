@@ -13,7 +13,7 @@ import { comicQuoteCurrency } from "./pricing.js";
 
 export type ComicGenerationScope = { kind: "series" | "character"; id: string };
 export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second"; currency?: "CNY" | "USD" };
-export type FrozenVisualReference = { materialId: string; mediaId: string; version: number };
+export type FrozenVisualReference = { materialId: string | null; mediaId: string; version: number; styleKey?: string };
 type FrozenQuote = {
   stamp: string; price: ComicPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[];
   visualReferences?: FrozenVisualReference[];
@@ -133,10 +133,14 @@ export class PgComicGeneration {
       for (const input of inputs) {
         if ("target" in input) await requireComicChoice(db, owner, input.target.kind, input.target.key);
         else if (type === COMIC_VIDEO_TASK) {
-          const { rows: [clip] } = await db.query<{ frame: string | null; adopted: string | null }>(`SELECT keyframe_take_id AS frame,
-            adopted_video_take_id AS adopted FROM ${namespace}.cd_clips WHERE id=$1 AND series_id=$2 AND revision=$3`,
+          const { rows: [clip] } = await db.query<{ frame: string | null; frameMedia: string | null; adopted: string | null }>(`SELECT
+            keyframe_take_id AS frame, keyframe_media_id AS "frameMedia", adopted_video_take_id AS adopted
+            FROM ${namespace}.cd_clips WHERE id=$1 AND series_id=$2 AND revision=$3`,
           [input.clipId, scope.id, input.clipRevision]);
-          if (!clip || (input.firstFrame && input.firstFrame.takeId !== clip.frame) || (clip.adopted && !row.frozen.replaceAdopted?.includes(input.clipId))) {
+          const frameMatches = !input.firstFrame || (input.firstFrame.takeId
+            ? input.firstFrame.takeId === clip?.frame
+            : !clip?.frame && input.firstFrame.mediaId === clip?.frameMedia);
+          if (!clip || !frameMatches || (clip.adopted && !row.frozen.replaceAdopted?.includes(input.clipId))) {
             throw new ComicLibraryError("QUOTE_STALE", 409);
           }
         }
@@ -168,16 +172,19 @@ export class PgComicGeneration {
   }
 
   async history(owner: string, seriesId: string, clipId: string): Promise<ComicKeyframeHistory> {
-    const { rows } = await this.pool.query<{ approved: string | null }>(`SELECT CASE WHEN (t.input->>'clipRevision')::int=c.revision
-      THEN c.keyframe_take_id ELSE NULL END AS approved FROM ${namespace}.cd_series s JOIN ${namespace}.cd_clips c ON c.series_id=s.id
+    const { rows } = await this.pool.query<{ approved: string | null; approvedMedia: string | null }>(`SELECT
+      CASE WHEN (t.input->>'clipRevision')::int=c.revision THEN c.keyframe_take_id ELSE NULL END AS approved,
+      CASE WHEN (t.input->>'clipRevision')::int=c.revision THEN t.media_id ELSE c.keyframe_media_id END AS "approvedMedia"
+      FROM ${namespace}.cd_series s JOIN ${namespace}.cd_clips c ON c.series_id=s.id
       LEFT JOIN ${namespace}.cd_takes t ON t.id=c.keyframe_take_id AND t.owner_id=s.owner_id
       WHERE s.owner_id=$1 AND s.id=$2 AND c.id=$3 AND s.deleted_at IS NULL`, [owner, seriesId, clipId]);
     if (!rows[0]) libraryMissing();
     const approvedTakeId = rows[0].approved;
+    const approvedMediaId = rows[0].approvedMedia;
     const takes = await this.pool.query<ComicImageTake>(`SELECT ${takeColumns} ${joinTakes}
       WHERE t.owner_id=$1 AND r.series_id=$2 AND t.target_id=$3 AND t.video_version IS NULL
       ORDER BY (t.id IS NOT DISTINCT FROM $4::uuid) DESC,t.created_at DESC,t.id DESC LIMIT 30`, [owner, seriesId, clipId, approvedTakeId]);
-    return { approvedTakeId, takes: takes.rows };
+    return { approvedTakeId, approvedMediaId, takes: takes.rows };
   }
 
   async characterHistory(owner: string, id: string) {
@@ -192,12 +199,41 @@ export class PgComicGeneration {
   async approve(owner: string, seriesId: string, clipId: string, takeId: string, revision: number) {
     await libraryTransaction(this.pool, async db => {
       await this.lockSeries(db, owner, seriesId);
-      const { rowCount } = await db.query(`UPDATE ${namespace}.cd_clips c SET keyframe_take_id=t.id
+      const { rowCount } = await db.query(`UPDATE ${namespace}.cd_clips c SET keyframe_take_id=t.id, keyframe_media_id=NULL
         FROM ${namespace}.cd_takes t JOIN ${namespace}.cd_generation_requests r ON (r.owner_id,r.id)=(t.owner_id,t.request_id)
         WHERE r.owner_id=$1 AND r.series_id=$2 AND c.series_id=$2 AND c.id=$3 AND t.target_id=c.id
           AND t.id=$4 AND t.status='ready' AND t.video_version IS NULL AND c.revision=$5 AND (t.input->>'clipRevision')::int=$5`,
       [owner, seriesId, clipId, takeId, revision]);
       if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+    });
+  }
+
+  async selectKeyframeMedia(owner: string, seriesId: string, clipId: string, mediaId: string, revision: number) {
+    await libraryTransaction(this.pool, async db => {
+      await this.lockSeries(db, owner, seriesId);
+      const { rows: [media] } = await db.query<{ mime: string }>(
+        `SELECT mime FROM ${namespace}.cd_media WHERE owner_id=$1 AND id=$2`, [owner, mediaId],
+      );
+      if (!media) libraryMissing();
+      if (!media.mime.startsWith("image/")) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+      const { rowCount } = await db.query(
+        `UPDATE ${namespace}.cd_clips SET keyframe_media_id=$4, keyframe_take_id=NULL WHERE series_id=$1 AND id=$2 AND revision=$3`,
+        [seriesId, clipId, revision, mediaId],
+      );
+      if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+    });
+  }
+
+  async uploadKeyframeMedia(owner: string, seriesId: string, clipId: string, revision: number, media: StoredComicMedia) {
+    return libraryTransaction(this.pool, async db => {
+      await this.lockSeries(db, owner, seriesId);
+      await insertComicMedia(db, media);
+      const { rowCount } = await db.query(
+        `UPDATE ${namespace}.cd_clips SET keyframe_media_id=$4, keyframe_take_id=NULL WHERE series_id=$1 AND id=$2 AND revision=$3`,
+        [seriesId, clipId, revision, media.id],
+      );
+      if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+      return { mediaId: media.id };
     });
   }
 
@@ -219,11 +255,25 @@ export class PgComicGeneration {
   private async verifyVisualReferences(
     db: ComicQuery, owner: string, frozen: FrozenVisualReference[] | undefined, inputs: ComicTakeInput[],
   ) {
-    const refs = frozen?.length ? frozen : inputs.flatMap(input =>
+    const refs: FrozenVisualReference[] = frozen?.length ? frozen : inputs.flatMap(input =>
       "clipId" in input ? input.references.filter(ref => ref.kind === "style" || ref.kind === "scene" || ref.kind === "prop")
         .map(ref => ({ materialId: null as string | null, mediaId: ref.mediaId, version: ref.version })) : []);
     if (!refs.length) return;
-    const unique = new Map(refs.map(ref => [`${ref.materialId ?? ""}:${ref.mediaId}`, ref]));
+    const styleRefs = refs.filter(ref => ref.styleKey);
+    const materialRefs = refs.filter(ref => !ref.styleKey);
+    if (styleRefs.length) {
+      const { rows } = await db.query<{ styleKey: string; mediaId: string }>(
+        `SELECT style_key AS "styleKey", media_id AS "mediaId" FROM ${namespace}.cd_style_presets WHERE owner_id=$1 AND style_key=ANY($2::text[])`,
+        [owner, [...new Set(styleRefs.map(ref => ref.styleKey!))]],
+      );
+      for (const ref of styleRefs) {
+        if (!rows.some(row => row.styleKey === ref.styleKey && row.mediaId === ref.mediaId)) {
+          throw new ComicLibraryError("QUOTE_STALE", 409);
+        }
+      }
+    }
+    if (!materialRefs.length) return;
+    const unique = new Map(materialRefs.map(ref => [`${ref.materialId ?? ""}:${ref.mediaId}`, ref]));
     const { rows } = await db.query<{ materialId: string; mediaId: string; version: number; latestVersion: number; archived: boolean }>(
       `SELECT m.id AS "materialId", v.media_id AS "mediaId", v.version, (m.archived_at IS NOT NULL) AS archived,
         (SELECT max(all_v.version) FROM ${namespace}.cd_material_versions all_v

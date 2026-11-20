@@ -81,13 +81,14 @@ import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
 import { PgComicRenders } from "./comic-drama/render-repository.js";
 import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
 import { ComicDirector, createComicDirectorExtension } from "./comic-drama/director-agent.js";
+import { createComicDirectorLlmResolver } from "./comic-drama/director-model.js";
 import { PgComicDirector } from "./comic-drama/director-repository.js";
 import { createComicDirectorRoutes } from "./comic-drama/director-routes.js";
+import { PgComicSettings } from "./comic-drama/settings-repository.js";
 import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
-import { createOwnerLlmResolver } from "./digital-employee/runtime.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
-import { quoteComicCatalogPrice } from "./comic-drama/pricing.js";
+import { comicQuoteCurrency, quoteComicCatalogPrice } from "./comic-drama/pricing.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -276,11 +277,14 @@ async function main() {
   app.route("/api/auth", createAuthRoutes(service));
   const rollout = comicRollout();
   const comicDramaEnabled = rollout.enabled;
+  const comicSettings = new PgComicSettings(service.db.pool);
   const directorRepo = new PgComicDirector(service.db.pool);
-  const directorExtension = createComicDirectorExtension(directorRepo, createOwnerLlmResolver({
-    db: service.db, managedKeysEnabled: service.managedKeysEnabled,
+  const directorExtension = createComicDirectorExtension(directorRepo, createComicDirectorLlmResolver({
+    getUserApiKey: (owner, managed) => service.db.getUserApiKey(owner, managed),
+    managedKeysEnabled: service.managedKeysEnabled,
     listLlmModels: async (owner, key) => (await service.getUserModelCatalog(owner, key))?.llm.map(model => model.id) ?? [],
     llm: (model, key) => service.providerFactory.llm(model, key),
+    settings: comicSettings,
   }), comicDramaEnabled);
   registerAgentExtension(directorExtension);
   service.agentRegistry.register(comicDirectorDefinition);
@@ -445,9 +449,26 @@ async function main() {
     });
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/characters/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/:id/files`, `${COMIC_DRAMA_API_ROOT}/materials/upload`,
+      `${COMIC_DRAMA_API_ROOT}/series/:id/clips/:clipId/keyframe/upload`,
+      `${COMIC_DRAMA_API_ROOT}/settings/styles/:styleKey/reference/upload`,
     ], uploadRateLimit);
     const library = new PgComicLibrary(service.db.pool);
-    const series = new PgComicDramaRepository(service.db.pool);
+    const resolveImageModel = async (owner: string, requested?: string) => {
+      if (requested) return requested;
+      const pref = (await comicSettings.getPreferences(owner).catch(() => null))?.defaultImageModel;
+      return pref || process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2";
+    };
+    const series = new PgComicDramaRepository(service.db.pool, async (owner, videoModel) => {
+      const currency = comicQuoteCurrency();
+      const imageModel = await resolveImageModel(owner);
+      const imageQuote = quoteComicCatalogPrice(service.modelCatalog, "image", imageModel);
+      const videoQuote = videoModel ? quoteComicCatalogPrice(service.modelCatalog, "video", videoModel) : null;
+      return {
+        imageMicros: imageQuote?.amountMicros ?? null,
+        videoPerSecMicros: videoQuote?.amountMicros ?? null,
+        currency: videoQuote?.currency ?? imageQuote?.currency ?? currency,
+      };
+    });
     const edits = new PgComicEdits(service.db.pool);
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
       presetModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || undefined,
@@ -470,23 +491,40 @@ async function main() {
         },
       } : undefined,
     });
-    app.on("POST", `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`, generationRateLimit);
+    app.on("POST", [
+      `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`,
+      `${COMIC_DRAMA_API_ROOT}/edits/:id/auto-dialogue`,
+      `${COMIC_DRAMA_API_ROOT}/voices/audition`,
+      `${COMIC_DRAMA_API_ROOT}/characters/:id/voice/audition`,
+    ], generationRateLimit);
     app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech, rollout.accepting));
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/edits/:id/render`, `${COMIC_DRAMA_API_ROOT}/renders/:id/recover`,
     ], generationRateLimit);
     app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(new PgComicRenders(service.db.pool, edits), comicMedia,
       service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined, rollout.accepting));
-    app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`, generationRateLimit);
+    app.on("POST", [
+      `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`,
+      `${COMIC_DRAMA_API_ROOT}/series/:id/director/chat`,
+    ], generationRateLimit);
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`, uploadRateLimit);
     const parser = fileURLToPath(new URL(`./workers/knowledge-parser.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
-    app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(directorRepo, new ComicDirector(directorRepo, directorExtension, rollout.accepting), parser));
-    app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
+    const directorToolsDeps = { episodes: series, library, settings: comicSettings };
+    app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(
+      directorRepo,
+      new ComicDirector(directorRepo, directorExtension, rollout.accepting, directorToolsDeps),
+      parser,
+      directorToolsDeps,
+    ));
+    app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia, comicSettings));
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
       if (!comicVideoProfile(model)) return false;
       const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
       const catalog = await service.getUserModelCatalog(owner, key);
       return catalog?.video.some(item => item.id === model) === true;
+    }, async owner => {
+      const pref = (await comicSettings.getPreferences(owner).catch(() => null))?.defaultVideoModel;
+      return pref || process.env.MARKETING_VIDEO_MODEL?.trim() || null;
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
@@ -500,13 +538,14 @@ async function main() {
       app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
         pool: service.db.pool, library, series, media: comicMedia, queue: service.jobQueue,
         accepting: rollout.accepting,
-        quotePrice: async (owner, modelId = process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2") => {
-          const price = quoteComicCatalogPrice(service.modelCatalog, "image", modelId);
+        quotePrice: async (owner, modelId) => {
+          const chosen = await resolveImageModel(owner, modelId);
+          const price = quoteComicCatalogPrice(service.modelCatalog, "image", chosen);
           if (!price) return null;
           const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
           if (!key) return null;
           const catalog = await service.getUserModelCatalog(owner, key);
-          return catalog?.image.some(item => item.id === modelId) ? price : null;
+          return catalog?.image.some(item => item.id === chosen) ? price : null;
         },
         quoteVideoPrice: async (owner, modelId) => {
           const price = quoteComicCatalogPrice(service.modelCatalog, "video", modelId);

@@ -1,6 +1,6 @@
 import type {
-  ComicCastChange, ComicSeriesCast, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaDetail, ComicDramaListing,
-  ComicDramaSeries, ComicDramaSeriesInput,
+  ComicCastChange, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaDetail, ComicDramaEpisodeSummary, ComicDramaListing,
+  ComicDramaScriptVersion, ComicDramaSeries, ComicDramaSeriesInput, ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -13,6 +13,8 @@ export const comicDramaApi = {
   list: (params: URLSearchParams, signal?: AbortSignal) => read<ComicDramaListing>(`${root}?${params}`, signal),
   get: (id: string, signal?: AbortSignal) => read<ComicDramaDetail>(path(id), signal),
   current: (signal?: AbortSignal) => read<{ seriesId: string | null }>(`${root}/current`, signal),
+  currentSummary: (signal?: AbortSignal) =>
+    read<{ seriesId: string | null; summary: ComicDramaEpisodeSummary | null }>(`${root}/current?summary=1`, signal),
   open: (id: string) => write<ComicDramaDetail>(`${root}/current`, "PUT", { seriesId: id }),
   create: (fields: ComicDramaSeriesInput) => write<ComicDramaDetail>(root, "POST", fields),
   derive: (id: string, action: "copy" | "sequel", inheritCastAndStyle = true) =>
@@ -32,9 +34,11 @@ export const comicDramaApi = {
     write<ComicDramaSeries>(path(id), "PATCH", { ...fields, expectedRevision }),
   archive: (id: string, expectedRevision: number) => write<{ ok: true }>(`${path(id)}/archive`, "POST", { expectedRevision }),
   remove: (id: string, expectedRevision: number) => write<{ ok: true }>(path(id), "DELETE", { expectedRevision }),
+  scriptHistory: (id: string, signal?: AbortSignal) => read<{ versions: ComicDramaScriptVersion[] }>(`${path(id)}/script`, signal),
   saveScript: (id: string, content: string, expectedRevision: number) =>
     write<ComicDramaContent>(`${path(id)}/script`, "PUT", { content, expectedRevision }),
-  addClip: (id: string, expectedRevision: number) => write<ComicDramaContent>(`${path(id)}/clips`, "POST", { expectedRevision }),
+  addClip: (id: string, expectedRevision: number, opts?: { afterClipId?: string; insertIndex?: number }) =>
+    write<ComicDramaContent>(`${path(id)}/clips`, "POST", { expectedRevision, ...opts }),
   saveClip: (id: string, clipId: string, draft: ComicDramaClipDraft, expectedRevision: number) =>
     write<{ clip: ComicDramaClip; seriesRevision: number }>(`${path(id)}/clips/${clipId}`, "PATCH", { draft, expectedRevision }),
   copyClip: (id: string, clipId: string, expectedRevision: number) =>

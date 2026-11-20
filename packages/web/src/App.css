@@ -5761,7 +5761,8 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
   line-height: 1.2; text-align: center; cursor: pointer;
   transition: color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
 }
-.brand-module-tab:lang(en) { font-size: 10px; line-height: 1.15; }
+.brand-module-tab:lang(en),
+.brand-module-tab:lang(id) { font-size: 10px; line-height: 1.15; }
 .brand-module-tab svg { flex-shrink: 0; }
 .brand-module-tab:hover { color: var(--text); background: color-mix(in srgb, var(--bg-card) 55%, transparent); }
 .brand-module-tab:active { background: var(--bg-active); }
@@ -6229,7 +6230,8 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
   font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.25;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.sidebar-current-agent-copy > strong:lang(en) {
+.sidebar-current-agent-copy > strong:lang(en),
+.sidebar-current-agent-copy > strong:lang(id) {
   font-size: 12.5px; white-space: normal; overflow-wrap: anywhere;
 }
 .agent-feishu-toggle {
@@ -6261,7 +6263,8 @@ html:not([lang="zh-CN"]) .agent-tab-strip .agent-tab {
   text-align: left; overflow-wrap: anywhere; cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.agent-launcher-item:lang(en) { font-size: 10.5px; line-height: 1.2; }
+.agent-launcher-item:lang(en),
+.agent-launcher-item:lang(id) { font-size: 10.5px; line-height: 1.2; }
 .agent-launcher-item:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .agent-launcher-item.active {
   border-color: var(--accent); background: var(--bg-active);

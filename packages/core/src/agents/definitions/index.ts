@@ -6,3 +6,4 @@ export { contractDefinition } from "./contract.js";
 export { digitalEmployeeDefinition } from "./digital-employee.js";
 export { marketingVideoDefinition } from "./marketing-video.js";
 export { digitalPresenterDefinition } from "./digital-presenter.js";
+export { COMIC_DIRECTOR_AGENT_ID, COMIC_DIRECTOR_TOOL_NAMES, comicDirectorDefinition } from "./comic-drama.js";

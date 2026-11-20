@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
-  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload, ComicGenerationQuote,
+  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterGenerateRequest, ComicCharacterInput, ComicCharacterUpload,
+  ComicGenerationQuote,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -9,6 +10,7 @@ import { ComicCharacterVoice } from "./ComicCharacterVoice.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { ChoiceSelect, comicListWords, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
+import { SaveMediaAsMaterialDialog } from "./SaveMediaAsMaterialDialog.js";
 
 const images = "image/jpeg,image/png,image/webp";
 
@@ -102,16 +104,43 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   const { locale, t } = useI18n();
   const [kind, setKind] = useState<"slot" | "expression">("slot");
   const [outfitId, setOutfit] = useState("");
-  const [dialog, setDialog] = useState<"edit" | "outfit" | "upload" | "generate" | "voice" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "outfit" | "renameOutfit" | "upload" | "generate" | "voice" | null>(null);
   const [versionTarget, setVersionTarget] = useState<ComicCharacterUpload | null>(null);
+  const [saveMaterial, setSaveMaterial] = useState<{ mediaId: string; name: string } | null>(null);
   const [fee, setFee] = useState<{ quote: ComicGenerationQuote; label: string } | null>(null);
   const [error, setError] = useState("");
   const slots = useComicChoices("slot");
   const expressions = useComicChoices("expression");
   const choices = kind === "slot" ? slots : expressions;
-  const outfit = character.outfits.find(entry => entry.id === outfitId) ?? character.outfits[0];
+  const outfitIndex = character.outfits.findIndex(entry => entry.id === outfitId);
+  const outfit = character.outfits[outfitIndex >= 0 ? outfitIndex : 0];
+  const activeOutfitIndex = outfit ? character.outfits.findIndex(entry => entry.id === outfit.id) : -1;
   const rows = character.assets.filter(asset => asset.kind === kind && (kind === "expression" || asset.outfitId === outfit?.id));
   const reload = async () => changed(await comicLibraryApi.character(character.id));
+  const moveOutfit = async (delta: number) => {
+    if (activeOutfitIndex < 0) return;
+    const to = activeOutfitIndex + delta;
+    if (to < 0 || to >= character.outfits.length) return;
+    const ids = character.outfits.map(item => item.id);
+    [ids[activeOutfitIndex], ids[to]] = [ids[to], ids[activeOutfitIndex]];
+    setError("");
+    try { await comicLibraryApi.reorderOutfits(character.id, ids); await reload(); }
+    catch (reason) { setError(libraryError(reason)); }
+  };
+  const removeOutfit = async () => {
+    if (!outfit || !window.confirm(t("删除套装「{0}」及其图片？", [outfit.name]))) return;
+    setError("");
+    try { await comicLibraryApi.deleteOutfit(character.id, outfit.id); setOutfit(""); await reload(); }
+    catch (reason) { setError(libraryError(reason)); }
+  };
+  const removeAsset = async (asset: ComicCharacterAsset) => {
+    if (!window.confirm(t("删除该角色图片？"))) return;
+    const target: ComicCharacterUpload = asset.kind === "slot" && asset.outfitId
+      ? { kind: "slot", key: asset.key, outfitId: asset.outfitId } : { kind: "expression", key: asset.key };
+    setError("");
+    try { await comicLibraryApi.deleteCharacterAsset(character.id, target); await reload(); }
+    catch (reason) { setError(libraryError(reason)); }
+  };
   const generationScope = { resource: "characters", id: character.id } as const;
   const loadTakes = useCallback((signal: AbortSignal) => comicGenerationApi.characterTakes(character.id, signal), [character.id]);
   const generation = useGenerationHistory(loadTakes);
@@ -168,7 +197,14 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
             {character.outfits.map(entry => <option value={entry.id} key={entry.id}>{entry.name}</option>)}
           </select>
         </label>}
-        {!character.archived && <button onClick={() => setDialog("outfit")}>＋ {t("新增套装")}</button>}
+        {!character.archived && <button type="button" onClick={() => setDialog("outfit")}>＋ {t("新增套装")}</button>}
+        {!character.archived && outfit && <>
+          <button type="button" onClick={() => setDialog("renameOutfit")}>{t("重命名套装")}</button>
+          <button type="button" disabled={activeOutfitIndex <= 0} onClick={() => void moveOutfit(-1)}>{t("上移")}</button>
+          <button type="button" disabled={activeOutfitIndex < 0 || activeOutfitIndex >= character.outfits.length - 1}
+            onClick={() => void moveOutfit(1)}>{t("下移")}</button>
+          <button type="button" onClick={() => void removeOutfit()}>{t("删除套装")}</button>
+        </>}
       </>}
       {!character.archived && <button className="primary" disabled={kind === "slot" && !outfit}
         onClick={() => setDialog("upload")}>＋ {t("上传角色图片")}</button>}
@@ -189,10 +225,16 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
     <div className="comic-library-grid">{rows.map(asset => {
       const label = choices.find(entry => entry.key === asset.key)?.labels[locale] ?? asset.key;
       return <article className="comic-library-card" key={asset.media.id}>
-        <MediaPreview media={asset.media} title={label} />
+        <MediaPreview media={asset.media} title={label} openOriginal />
         <strong>{label}</strong>
         <small>{t("版本 {0}", [asset.version])}</small>
-        <button onClick={() => showVersions(asset)}>{t("版本历史")}</button>
+        <div className="comic-actions">
+          <button type="button" onClick={() => showVersions(asset)}>{t("版本历史")}</button>
+          <button type="button" onClick={() => setSaveMaterial({ mediaId: asset.media.id, name: `${character.name} · ${label}` })}>
+            {t("另存为素材")}
+          </button>
+          {!character.archived && <button type="button" onClick={() => void removeAsset(asset)}>{t("删除")}</button>}
+        </div>
       </article>;
     })}</div>
     {dialog === "voice" && <ComicCharacterVoice id={character.id} close={() => setDialog(null)} />}
@@ -205,6 +247,13 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
         await reload();
       }}>
       <label>{t("套装名称")}<input name="name" autoFocus required maxLength={120} /></label>
+    </LibraryDialog>}
+    {dialog === "renameOutfit" && outfit && <LibraryDialog title={t("重命名套装")} submitLabel={t("保存")} close={() => setDialog(null)}
+      save={async form => {
+        await comicLibraryApi.renameOutfit(character.id, outfit.id, String(form.get("name") ?? "").trim());
+        await reload();
+      }}>
+      <label>{t("套装名称")}<input name="name" autoFocus required maxLength={120} defaultValue={outfit.name} /></label>
     </LibraryDialog>}
     {dialog === "upload" && <LibraryDialog title={t("上传角色图片")} submitLabel={t("上传")} close={() => setDialog(null)}
       save={async (form, signal) => {
@@ -222,16 +271,40 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
     {dialog === "generate" && <LibraryDialog title={t(kind === "slot" ? "生成造型" : "生成表情")} submitLabel={t("预览费用")}
       close={() => setDialog(null)} save={async (form, signal) => {
         const key = String(form.get("key") ?? "");
+        const styleKey = String(form.get("styleKey") ?? "") || undefined;
+        const referenceMediaIds = form.getAll("refMedia").map(String).filter(Boolean).slice(0, 4);
         const target: ComicCharacterUpload = kind === "slot" && outfit ? { kind, key, outfitId: outfit.id } : { kind: "expression", key };
-        const quote = await comicGenerationApi.preview(generationScope, target, signal);
+        const req: ComicCharacterGenerateRequest = {
+          ...target,
+          ...(styleKey ? { styleKey } : {}),
+          ...(referenceMediaIds.length ? { referenceMediaIds } : {}),
+        };
+        const quote = await comicGenerationApi.preview(generationScope, req, signal);
         if (!signal.aborted) setFee({ quote, label: takeLabel(target) });
       }}>
       <label>{t(kind === "slot" ? "造型槽位" : "表情")}
         <ChoiceSelect name="key" domain={kind} aria-label={t(kind === "slot" ? "造型槽位" : "表情")} required empty={t("请选择")} autoFocus />
       </label>
+      <label>{t("画风")}
+        <ChoiceSelect name="styleKey" domain="style" empty={t("不指定画风")} />
+      </label>
+      {character.assets.length > 0 && <fieldset>
+        <legend className="comic-legend">{t("参考图（最多选 4 张）")}</legend>
+        <div className="comic-ref-checklist">
+          {character.assets.map(asset => {
+            const name = (asset.kind === "slot" ? slots : expressions).find(item => item.key === asset.key)?.labels[locale] ?? asset.key;
+            return <label key={asset.media.id} className="comic-video-replace">
+              <input type="checkbox" name="refMedia" value={asset.media.id} />
+              <span>{name} · {t("版本 {0}", [asset.version])}</span>
+            </label>;
+          })}
+        </div>
+      </fieldset>}
     </LibraryDialog>}
     {fee && <GenerationQuoteDialog quote={fee.quote} label={() => fee.label} close={() => setFee(null)}
       confirm={id => comicGenerationApi.confirm(generationScope, id)} submitted={generation.refresh} />}
+    {saveMaterial && <SaveMediaAsMaterialDialog mediaId={saveMaterial.mediaId} defaultName={saveMaterial.name}
+      close={() => setSaveMaterial(null)} />}
     {versionTarget && <MediaVersions list={versions} close={() => setVersionTarget(null)} />}
   </>;
 }

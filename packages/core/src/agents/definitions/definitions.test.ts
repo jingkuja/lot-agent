@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition, marketingVideoDefinition } from "./index.js";
+import {
+  pptDefinition, contractDefinition, imageDefinition, digitalEmployeeDefinition, marketingVideoDefinition, comicDirectorDefinition,
+} from "./index.js";
 
 describe("agent definitions", () => {
   it("ppt is a real office agent with ask_user + generate_ppt", () => {
@@ -52,4 +54,18 @@ describe("agent definitions", () => {
 it("marketing video is a visible studio agent with no model-driven write tools", () => {
   expect(marketingVideoDefinition).toMatchObject({ id: "marketing_video", type: "marketing_video", name: "营销影像", category: "创作", toolNames: [] });
   expect(marketingVideoDefinition.hidden).not.toBe(true);
+});
+
+it("comic director is a hidden workspace agent exposing all 11 spec tools", () => {
+  expect(comicDirectorDefinition).toMatchObject({
+    id: "comic_drama",
+    type: "comic_drama",
+    hidden: true,
+    defaultModelId: "tokenhub-user-selected",
+  });
+  expect(comicDirectorDefinition.toolNames).toEqual([
+    "read_series", "write_script", "breakdown_script", "continue_series",
+    "update_clip", "reorder_clips", "search_characters", "propose_character",
+    "search_materials", "check_series", "request_generation",
+  ]);
 });

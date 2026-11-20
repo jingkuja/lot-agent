@@ -62,21 +62,39 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
   changed: () => void; openClip: (id: string) => void;
 }) {
   const { t } = useI18n();
-  const [selected, setSelected] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mode, setMode] = useState<ComicGenerationMode>("keyframe");
   const [quote, setQuote] = useState<ComicGenerationQuote>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const labels = (id: string) => detail.clips.find(clip => clip.id === id)?.draft.scene || t("分镜");
+  const labels = (id: string) => {
+    const target = detail.clips.find(clip => clip.id === id);
+    return target ? `${t("分镜 {0}", [target.ordinal])}${target.draft.scene ? " · " + target.draft.scene : ""}` : t("分镜");
+  };
+  const validSelected = detail.clips.filter(clip => selectedIds.includes(clip.id)).map(clip => clip.id);
   const series = detail.series.id;
+  const toggle = (id: string) => {
+    setSelectedIds(cur => cur.includes(id) ? cur.filter(item => item !== id) : cur.length < 10 ? [...cur, id] : cur);
+  };
+  const selectPending = () => {
+    const ids = detail.clips
+      .filter(clip => mode === "keyframe" ? !clip.progress?.keyframeApproved : !clip.progress?.adoptedVideoTakeId)
+      .slice(0, 10).map(clip => clip.id);
+    setSelectedIds(ids.length ? ids : detail.clips.slice(0, 10).map(clip => clip.id));
+  };
   const preview = async () => {
+    if (!validSelected.length) return;
     setBusy(true); setError("");
     try {
       const current = await getSaved();
-      const clip = current?.clips.find(row => row.id === selected);
-      if (!current || !clip) return;
-      setQuote(await comicDirectorApi.quote(series, { expectedSeriesRevision: current.series.revision, mode,
-        targets: [{ clipId: clip.id, expectedRevision: clip.revision }] }, AbortSignal.timeout(20_000)));
+      if (!current) return;
+      const targets = current.clips.filter(row => validSelected.includes(row.id)).map(clip => ({
+        clipId: clip.id, expectedRevision: clip.revision,
+      }));
+      if (!targets.length) return;
+      setQuote(await comicDirectorApi.quote(series, {
+        expectedSeriesRevision: current.series.revision, mode, targets,
+      }, AbortSignal.timeout(20_000)));
       changed();
     } catch (error) { setError(comicDirectorError(error)); }
     finally { setBusy(false); }
@@ -84,21 +102,33 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
   return <details className="comic-director-proposal">
     <summary>{t("导演生成确认")}</summary>
     <fieldset disabled={disabled || busy}>
-      <select value={selected} aria-label={t("选择生成分镜")} onChange={event => setSelected(event.target.value)}>
-        <option value="">{t("选择生成分镜")}</option>
-        {detail.clips.map(clip => <option key={clip.id} value={clip.id}>{labels(clip.id)}</option>)}
-      </select>
-      <select value={mode} aria-label={t("生成模式")} onChange={event => setMode(event.target.value as ComicGenerationMode)}>
-        <option value="keyframe">{t("生成首帧")}</option><option value="from_keyframe">{t("用已确认首帧")}</option>
-        <option value="references">{t("直接生成视频")}</option>
-      </select>
-      <button type="button" disabled={!selected} onClick={() => void preview()}>{t("预览生成费用")}</button>
+      <div className="comic-actions">
+        <select value={mode} aria-label={t("生成模式")} onChange={event => setMode(event.target.value as ComicGenerationMode)}>
+          <option value="keyframe">{t("生成首帧")}</option><option value="from_keyframe">{t("用已确认首帧")}</option>
+          <option value="references">{t("直接生成视频")}</option>
+        </select>
+        <button type="button" onClick={selectPending} disabled={!detail.clips.length}>{t("全选未完成")}</button>
+      </div>
+      <div className="comic-ref-checklist" role="group" aria-label={t("选择生成分镜")}>
+        {detail.clips.map(clip => (
+          <label key={clip.id} className="comic-video-replace">
+            <input type="checkbox" checked={validSelected.includes(clip.id)}
+              disabled={!validSelected.includes(clip.id) && validSelected.length >= 10}
+              onChange={() => toggle(clip.id)} />
+            <span>{labels(clip.id)}</span>
+          </label>
+        ))}
+      </div>
+      <button type="button" className="primary" disabled={!validSelected.length} onClick={() => void preview()}>
+        {t("预览生成费用（{0}）", [validSelected.length])}
+      </button>
     </fieldset>
     {error && <p role="alert">{t(error)}</p>}
     {quotes.map(({ quote, confirmed }) => {
       const target = quote.items[0]?.clipId;
+      const summaryLabel = quote.items.length > 1 ? t("{0} 个分镜", [quote.items.length]) : (target ? labels(target) : t("分镜"));
       return <div className="comic-actions" key={quote.confirmationId}>
-        {target && <span>{labels(target)} · {t(confirmed ? "已确认生成" : "待确认费用")}</span>}
+        {target && <span>{summaryLabel} · {t(confirmed ? "已确认生成" : "待确认费用")}</span>}
         <button type="button" disabled={disabled && !confirmed} onClick={() => {
           if (confirmed && target) openClip(target); else setQuote(quote);
         }}>{t(confirmed ? "查看分镜生成" : "查看费用确认")}</button>
@@ -106,6 +136,6 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
     })}
     {quote && <GenerationQuoteDialog quote={quote} label={labels} close={() => setQuote(undefined)}
       confirm={id => comicGenerationApi.confirm({ resource: "series", id: series }, id)}
-      submitted={() => { changed(); if (quote.items[0]) openClip(quote.items[0].clipId); }} />}
+      submitted={() => { changed(); setSelectedIds([]); if (quote.items[0]) openClip(quote.items[0].clipId); }} />}
   </details>;
 }

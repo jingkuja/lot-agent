@@ -1,6 +1,7 @@
 import {
-  COMIC_SCRIPT_DOCX, type ComicDirectorDecision, type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleDecision,
-  type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicScriptImport,
+  COMIC_SCRIPT_DOCX, type ComicClipCheckIssue, type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorDecision,
+  type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleDecision, type ComicDirectorRoleOutcome, type ComicDirectorState,
+  type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicScriptImport,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
 import { editError } from "./edit-api.js";
@@ -10,6 +11,9 @@ const action = (series: string, id: string, choice: "apply" | "dismiss", body: u
   root(series) + "/proposals/" + encodeURIComponent(id) + "/" + choice, { method: "POST", body: JSON.stringify(body) });
 export const comicDirectorApi = {
   state: (series: string, signal?: AbortSignal) => request<ComicDirectorState>(root(series), { signal }),
+  check: (series: string, signal?: AbortSignal) => request<{ issues: ComicClipCheckIssue[] }>(root(series) + "/check", { signal }),
+  chat: (series: string, input: ComicDirectorChatInput, signal?: AbortSignal) => request<ComicDirectorChatResponse>(root(series) + "/chat",
+    { method: "POST", body: JSON.stringify(input), signal }),
   import: (series: string, file: File, signal?: AbortSignal) => request<ComicScriptImport>(root(series) + "/import", {
     method: "POST", body: file, signal,
     headers: { "Content-Type": file.name.toLowerCase().endsWith(".docx") ? COMIC_SCRIPT_DOCX : "text/plain" },

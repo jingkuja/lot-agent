@@ -83,17 +83,20 @@ function VideoReceipt({ takeId, close }: { takeId: string; close: () => void }) 
   </dialog>;
 }
 
-export function VideoTakeCard({ take, adopt, refresh, open, choose, selected = false }: {
-  take: ComicVideoTake; adopt?: () => Promise<unknown>; refresh: () => void; open?: () => void; choose?: () => void; selected?: boolean;
+export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, selected = false }: {
+  take: ComicVideoTake; adopt?: () => Promise<unknown>; refresh: () => void; open?: () => void;
+  choose?: () => void; addToEdit?: () => void; selected?: boolean;
 }) {
   const { t, locale } = useI18n();
   const [links, setLinks] = useState<ComicMediaLinks | "error" | null>(null);
+  const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
   const [attempt, reload] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [frame, setFrame] = useState<number | null>(null);
   const [savedFrame, setSavedFrame] = useState(false);
   const renewed = useRef(false);
+  const hoverPlaying = useRef(false);
   const player = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -103,6 +106,14 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, selected = f
     }).catch(() => { if (!controller.signal.aborted) setLinks("error"); });
     return () => controller.abort();
   }, [attempt, take.mediaId]);
+  useEffect(() => {
+    if (!take.posterMediaId) { setPosterUrl(undefined); return; }
+    const controller = new AbortController();
+    void comicLibraryApi.links(take.posterMediaId, controller.signal).then(result => {
+      if (!controller.signal.aborted) setPosterUrl(result.thumbnailUrl ?? result.url);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [take.posterMediaId]);
   const performAdopt = async () => {
     if (!adopt || saving) return;
     setSaving(true);
@@ -113,17 +124,40 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, selected = f
   };
   return <article className="comic-library-card comic-video-card">
     {links === "error" ? <button type="button" onClick={() => { renewed.current = false; reload(value => value + 1); }}>{t("重新获取预览")}</button> :
-      links && <video ref={player} controls playsInline preload={selected ? "metadata" : "none"} aria-label={t("视频预览 · 版本 {0}", [take.version])}
-        src={links.url} onError={() => {
+      links && <video ref={player} controls playsInline poster={posterUrl} preload={selected ? "metadata" : "none"}
+        aria-label={t("视频预览 · 版本 {0}", [take.version])} src={links.url}
+        onMouseEnter={() => {
+          const video = player.current;
+          if (!selected && video && video.paused) {
+            video.muted = true;
+            hoverPlaying.current = true;
+            void video.play().catch(() => { hoverPlaying.current = false; });
+          }
+        }}
+        onMouseLeave={() => {
+          const video = player.current;
+          if (hoverPlaying.current && video) {
+            hoverPlaying.current = false;
+            video.pause();
+            video.currentTime = 0;
+          }
+        }}
+        onPlay={() => { if (!player.current?.muted) hoverPlaying.current = false; }}
+        onError={() => {
           if (renewed.current) setLinks("error");
           else { renewed.current = true; reload(value => value + 1); }
         }} />}
-    <strong>{open || selected ? take.seriesTitle + " · " : ""}{t("版本 {0}", [take.version])}{take.adopted && " · " + t("已采用")}</strong>
+    <strong>
+      {open || selected ? take.seriesTitle + " · " : ""}
+      {take.ordinal !== null ? t("分镜 {0}", [take.ordinal]) + " · " : ""}
+      {t("版本 {0}", [take.version])}{take.adopted && " · " + t("已采用")}
+    </strong>
     {(open || selected) && take.scene && <small>{take.scene}</small>}
     <small>{take.modelId} · {t("{0} 秒视频", [+(take.durationMs / 1000).toFixed(2)])}</small>
     <small>{new Date(take.completedAt ?? take.createdAt).toLocaleString(locale)}</small>
     {!selected && <><ComicTakeStatus take={take} /><VideoTakeActions take={take} refresh={refresh} /></>}
     {take.state === "ready" && !selected && <div className="comic-actions">
+      {addToEdit && <button type="button" onClick={addToEdit}>{t("加入剪辑台")}</button>}
       {choose && <button type="button" onClick={choose}>{t("选作剪辑片源")}</button>}
       {adopt && <button type="button" className="primary" onClick={() => void performAdopt()} disabled={saving}>{t("采用此版本")}</button>}
       {links && links !== "error" && <>

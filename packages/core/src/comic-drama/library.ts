@@ -68,6 +68,9 @@ export const comicCharacterInput = z.object({
   age: z.string().trim().max(120), personality: z.string().trim().max(2000), appearance: z.string().trim().max(2000),
 }).strict();
 export const comicOutfitInput = z.object({ name: label }).strict();
+export const comicOutfitOrder = z.object({
+  outfitIds: z.array(id).max(100).refine(values => new Set(values).size === values.length),
+}).strict();
 export const comicCharacterUpload = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("slot"), key, outfitId: id }).strict(),
   z.object({ kind: z.literal("expression"), key }).strict(),
@@ -75,6 +78,19 @@ export const comicCharacterUpload = z.discriminatedUnion("kind", [
 export const comicMaterialInput = z.object({
   kind: comicMaterialKind, name: label, categoryKey: key.nullable(), tags: words,
 }).strict();
+export const comicMaterialUpdate = z.object({
+  name: label, categoryKey: key.nullable(), tags: words,
+}).strict();
+export const comicSaveMediaAsMaterial = z.object({
+  mediaId: id,
+  material: comicMaterialInput,
+}).strict();
+export const comicUserPreferencesSchema = z.object({
+  defaultVideoModel: z.string().trim().min(1).max(128).nullable().optional(),
+  defaultImageModel: z.string().trim().min(1).max(128).nullable().optional(),
+  defaultTextModel: z.string().trim().min(1).max(128).nullable().optional(),
+}).strict();
+export const comicStyleReferenceBindSchema = z.object({ mediaId: id }).strict();
 export const comicLibrarySearch = z.object({
   query: z.string().trim().max(120).optional(), archived: z.enum(["true", "false"]).default("false"),
   page: z.coerce.number().int().min(1).max(10000).default(1),
@@ -84,6 +100,9 @@ export const comicMaterialSearch = comicLibrarySearch.extend({ kind: comicMateri
 export type ComicCharacterInput = z.infer<typeof comicCharacterInput>;
 export type ComicCharacterUpload = z.infer<typeof comicCharacterUpload>;
 export type ComicMaterialInput = z.infer<typeof comicMaterialInput>;
+export type ComicMaterialUpdate = z.infer<typeof comicMaterialUpdate>;
+export type ComicSaveMediaAsMaterial = z.infer<typeof comicSaveMediaAsMaterial>;
+export type ComicUserPreferences = z.infer<typeof comicUserPreferencesSchema>;
 export type ComicLibrarySearch = z.infer<typeof comicLibrarySearch>;
 export type ComicMaterialSearch = z.infer<typeof comicMaterialSearch>;
 export type ComicDictionaryUpdate = z.infer<typeof comicDictionaryUpdate>;
@@ -94,10 +113,12 @@ export type ComicMedia = {
 export type ComicMediaLinks = { url: string; thumbnailUrl: string | null };
 export type ComicMediaVersion = { version: number; media: ComicMedia };
 export type ComicCharacterAsset = { kind: "slot" | "expression"; key: string; outfitId: string | null } & ComicMediaVersion;
-export type ComicOutfit = { id: string; name: string };
+export type ComicOutfit = { id: string; name: string; sort?: number };
 export type ComicCharacter = ComicCharacterInput & { id: string; archived: boolean; cover: ComicMedia | null };
 export type ComicCharacterDetail = ComicCharacter & { outfits: ComicOutfit[]; assets: ComicCharacterAsset[] };
 export type ComicMaterial = ComicMaterialInput & { id: string; archived: boolean } & ComicMediaVersion;
+export type ComicStylePreset = { styleKey: string; mediaId: string; media: ComicMedia; updatedAt: string };
+export type ComicUserSettings = { preferences: ComicUserPreferences; stylePresets: ComicStylePreset[] };
 
 export interface ComicDictionaryRepository {
   dictionary(owner: string, domain: ComicDictionaryDomain): Promise<ComicDictionaryEntry[]>;
@@ -117,13 +138,21 @@ export interface ComicLibraryRepository {
   editCharacter(owner: string, id: string, input: ComicCharacterInput): Promise<void>;
   archiveCharacter(owner: string, id: string): Promise<void>;
   addOutfit(owner: string, id: string, name: string): Promise<ComicOutfit>;
+  renameOutfit?(owner: string, characterId: string, outfitId: string, name: string): Promise<ComicOutfit>;
+  reorderOutfits?(owner: string, characterId: string, outfitIds: string[]): Promise<ComicOutfit[]>;
+  deleteOutfit?(owner: string, characterId: string, outfitId: string): Promise<void>;
   validateCharacterAsset(owner: string, id: string, input: ComicCharacterUpload): Promise<void>;
   addCharacterAsset(owner: string, id: string, input: ComicCharacterUpload, media: StoredComicMedia): Promise<number>;
+  deleteCharacterAsset?(owner: string, id: string, input: ComicCharacterUpload): Promise<void>;
   characterVersions(owner: string, id: string, input: ComicCharacterUpload): Promise<ComicMediaVersion[]>;
   listMaterials(owner: string, input: ComicMaterialSearch): Promise<ComicLibraryPage<ComicMaterial>>;
   materialInput(owner: string, id: string): Promise<ComicMaterialInput>;
   addMaterial(owner: string, input: ComicMaterialInput, media: StoredComicMedia): Promise<string>;
+  addMaterialFromMedia?(owner: string, input: ComicMaterialInput, mediaId: string): Promise<string>;
+  editMaterial?(owner: string, id: string, input: ComicMaterialUpdate): Promise<void>;
   replaceMaterial(owner: string, id: string, media: StoredComicMedia): Promise<number>;
   materialVersions(owner: string, id: string): Promise<ComicMediaVersion[]>;
   archiveMaterial(owner: string, id: string): Promise<void>;
+  unarchiveMaterial?(owner: string, id: string): Promise<void>;
+  deleteMaterial?(owner: string, id: string): Promise<void>;
 }

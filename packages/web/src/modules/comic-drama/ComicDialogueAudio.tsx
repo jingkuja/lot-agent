@@ -5,6 +5,7 @@ import {
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicEditApi, editError } from "./edit-api.js";
+import { presetVoiceLabel } from "./ComicCharacterVoice.js";
 import { MediaPreview } from "./LibraryParts.js";
 
 type Video = ComicTimeline["video"][number];
@@ -65,7 +66,7 @@ function DialogueLine({ line, data, remaining, attached, disabled, generate, rel
   attach: (take: ComicSpeechTake, durationMs: number) => void; remove: () => void;
   addCaption?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [selection, setSelection] = useState("");
   const [take, setTake] = useState<ComicSpeechTake | null>(null);
   const [error, setError] = useState("");
@@ -117,7 +118,7 @@ function DialogueLine({ line, data, remaining, attached, disabled, generate, rel
         setSelection(event.target.value); setTake(null); setError(""); setUnknown(false);
       }}>
         {!choice && <option value="">{t("暂无可用音色")}</option>}
-        {data.presets.map(key => <option key={key} value={key}>{key}</option>)}
+        {data.presets.map(key => <option key={key} value={key}>{presetVoiceLabel(key, locale)}</option>)}
         {data.characters.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
       </select>
       <button type="button" disabled={!choice || disabled || busy} onClick={() => void synthesize()}>{t(busy ? "正在合成…" : "合成此句")}</button>

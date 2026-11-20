@@ -15,7 +15,7 @@ const currentSnapshot = `jsonb_build_object(
           'durationMs',m.duration_ms,'hasThumbnail',m.thumbnail_key IS NOT NULL
         )) AS asset
       FROM lot_comic_drama.cd_character_assets a JOIN lot_comic_drama.cd_media m ON m.owner_id=a.owner_id AND m.id=a.media_id
-      WHERE a.owner_id=c.owner_id AND a.character_id=c.id AND (a.outfit_id=o.id OR a.kind='expression')
+      WHERE a.owner_id=c.owner_id AND a.character_id=c.id AND a.deleted_at IS NULL AND (a.outfit_id=o.id OR a.kind='expression')
       ORDER BY a.kind,a.key,a.version DESC
     ) latest
   ), '[]'::jsonb)

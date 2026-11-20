@@ -19,12 +19,14 @@ export function createComicVideoRoutes({ repo, media, queue, library }: {
     const parsed = comicDramaIdSchema.safeParse(value);
     return parsed.success ? parsed.data : libraryMissing();
   };
-  app.get("/videos", async c => {
-    c.header("Cache-Control", "private, no-store");
-    const filter = comicVideoSearchSchema.safeParse(c.req.query());
-    if (!filter.success) return c.json({ code: "INVALID_INPUT" }, 400);
-    return c.json(await repo.history(c.get("userId"), filter.data));
-  });
+  for (const path of ["/videos", "/clips"]) {
+    app.get(path, async c => {
+      c.header("Cache-Control", "private, no-store");
+      const filter = comicVideoSearchSchema.safeParse(c.req.query());
+      if (!filter.success) return c.json({ code: "INVALID_INPUT" }, 400);
+      return c.json(await repo.history(c.get("userId"), filter.data));
+    });
+  }
   app.get("/series/:id/clips/:clipId/videos", async c =>
     c.json(await repo.clip(c.get("userId"), id(c.req.param("id")), id(c.req.param("clipId")))));
   app.get("/video-takes/:id", async c => {

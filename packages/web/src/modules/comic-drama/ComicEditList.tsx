@@ -6,14 +6,25 @@ import { LibraryDialog } from "./LibraryParts.js";
 
 export function NewComicEdit({ seed, open, close }: { seed?: Pick<ComicEditCreate, "seriesId" | "takeId">; open: (id: string) => void; close: () => void }) {
   const { t } = useI18n();
-  return <LibraryDialog title={t("新建剪辑工程")} submitLabel={t("创建工程")} close={close} save={async (form, signal) => {
+  return <LibraryDialog title={t("新建剪辑工程")} submitLabel={t("创建工程")} close={close} describeError={editError} save={async (form, signal) => {
     const title = String(form.get("title") ?? "").trim();
     const project = await comicEditApi.create({ title, ...seed }, signal);
+    if (!signal.aborted && seed?.seriesId && form.get("autoDialogue") === "on") {
+      await comicEditApi.autoDialogue(project.id, {
+        expectedRevision: project.revision, includeVoice: true, includeSubtitles: true,
+      }, signal).catch(() => {});
+    }
     if (!signal.aborted) open(project.id);
   }}>
     <label>{t("工程名称")}<input name="title" required autoFocus maxLength={120} /></label>
     {seed?.takeId && <p>{t("工程将锁定当前预览的片源版本。")}</p>}
-    {seed?.seriesId && <p>{t("工程将按分镜顺序加入本集当前采用的版本。")}</p>}
+    {seed?.seriesId && <>
+      <p>{t("工程将按分镜顺序加入本集当前采用的版本。")}</p>
+      <label className="comic-sequel-option">
+        <input type="checkbox" name="autoDialogue" />
+        {t("同时按分镜台词批量合成配音并铺字幕轨")}
+      </label>
+    </>}
   </LibraryDialog>;
 }
 
@@ -39,8 +50,10 @@ export function ComicEditsIndex({ open, browse, currentSeries }: { open: (id: st
     try { await comicEditApi.remove(entry.id, entry.revision); refresh(); }
     catch (error) { setError(editError(error)); }
   };
+  const lastEntry = page && page !== "error" && page.lastEditId ? page.entries.find(e => e.id === page.lastEditId) : undefined;
   return <>
     <header className="comic-heading"><h1>{t("剪辑工作台")}</h1><div className="comic-actions">
+      {lastEntry && <button type="button" onClick={() => open(lastEntry.id)}>{t("继续上次剪辑")} · {lastEntry.title}</button>}
       <button onClick={browse}>{t("选择剪辑片源")}</button>
       {currentSeries && <button onClick={() => setCreate("series")}>{t("用本集采用版建工程")}</button>}
       <button className="primary" onClick={() => setCreate("empty")}>{t("新建剪辑工程")}</button>

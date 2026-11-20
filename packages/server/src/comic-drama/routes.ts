@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema, comicDramaRevisionSchema,
+  comicAddClipSchema, comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema, comicDramaRevisionSchema,
   comicDramaScriptWriteSchema, comicDramaSeriesListSchema, comicDramaSetCurrentSchema, comicVideoProfile,
   createComicDramaSeriesSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema,
   updateComicDramaSeriesSchema, type ComicDramaRepository,
@@ -11,7 +11,11 @@ import { ComicDramaError } from "./repository.js";
 
 type Variables = { userId: string };
 
-export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectModel: (owner: string, model: string) => Promise<boolean>) {
+export function createComicDramaRoutes(
+  repo: ComicDramaRepository,
+  canSelectModel: (owner: string, model: string) => Promise<boolean>,
+  resolveDefaultVideoModel?: (owner: string) => Promise<string | null>,
+) {
   const app = new Hono<{ Variables: Variables }>();
   app.use("/series/*", bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) }));
   app.onError((error, c) => {
@@ -38,12 +42,25 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     const input = createComicDramaSeriesSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     const owner = c.get("userId");
-    if (input.data.videoModel && (!comicVideoProfile(input.data.videoModel) || !await canSelectModel(owner, input.data.videoModel))) {
-      return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    let videoModel = input.data.videoModel;
+    if (videoModel) {
+      if (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel)) {
+        return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+      }
+    } else if (resolveDefaultVideoModel) {
+      const candidate = await resolveDefaultVideoModel(owner).catch(() => null);
+      if (candidate && comicVideoProfile(candidate) && await canSelectModel(owner, candidate)) {
+        videoModel = candidate;
+      }
     }
-    return c.json(await repo.create(owner, input.data), 201);
+    return c.json(await repo.create(owner, { ...input.data, videoModel }), 201);
   });
-  app.get("/series/current", async c => c.json({ seriesId: await repo.current(c.get("userId")) }));
+  app.get("/series/current", async c => {
+    if (c.req.query("summary") === "1" && repo.currentSummary) {
+      return c.json(await repo.currentSummary(c.get("userId")));
+    }
+    return c.json({ seriesId: await repo.current(c.get("userId")) });
+  });
   app.put("/series/current", async c => {
     const input = comicDramaSetCurrentSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
@@ -107,15 +124,20 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     await repo.remove(c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision);
     return c.json({ ok: true });
   });
+  app.get("/series/:id/script", async c => {
+    if (!repo.scriptHistory) return c.json({ versions: [] });
+    return c.json({ versions: await repo.scriptHistory(c.get("userId"), seriesId(c.req.param("id"))) });
+  });
   app.put("/series/:id/script", async c => {
     const input = comicDramaScriptWriteSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     return c.json(await repo.saveScript(c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision, input.data.content));
   });
   app.post("/series/:id/clips", async c => {
-    const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+    const input = comicAddClipSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
-    return c.json(await repo.addClip(c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision), 201);
+    const { expectedRevision, afterClipId, insertIndex } = input.data;
+    return c.json(await repo.addClip(c.get("userId"), seriesId(c.req.param("id")), expectedRevision, { afterClipId, insertIndex }), 201);
   });
   app.put("/series/:id/clips/order", async c => {
     const input = reorderComicDramaClipsSchema.safeParse(await c.req.json().catch(() => null));

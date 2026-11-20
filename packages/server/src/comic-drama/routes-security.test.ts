@@ -122,4 +122,57 @@ describe("comic-drama route security checks", () => {
     expect(blockedPreview.status).toBe(400);
     expect(await blockedPreview.json()).toEqual({ code: "CONTENT_COMPLIANCE_REJECTED" });
   });
+
+  it("falls back to default video model on POST /series and supports summary, script history, clip insertion, and audition routes", async () => {
+    const detail = makeSeries("grok-imagine-video-1.5");
+    const addClip = vi.fn(async () => ({ seriesRevision: 2, clips: [], script: null, cast: [] }));
+    const repo = {
+      create: vi.fn(async (_owner, fields) => makeSeries(fields.videoModel)),
+      current: vi.fn(async () => seriesId),
+      currentSummary: vi.fn(async () => ({
+        seriesId,
+        summary: {
+          seriesId, title: "Test", archived: false, clipCount: 2, completedCount: 1, generatingCount: 1,
+          totalDurationMs: 10_000, estimatedMicros: 50_000, estimatedUnverifiedCount: 0, spentMicros: 20_000, spentUnverifiedCount: 0, currency: "CNY" as const,
+        },
+      })),
+      scriptHistory: vi.fn(async () => [{ version: 1, content: "第一版剧本", source: "user" as const, createdAt: new Date().toISOString() }]),
+      addClip,
+    } as unknown as ComicDramaRepository;
+    const audition = vi.fn(async () => ({ mediaId: takeId, durationMs: 1800, cached: false }));
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicDramaRoutes(repo, async (_u, m) => m === "grok-imagine-video-1.5", async () => "grok-imagine-video-1.5"));
+    app.route("/", createComicEditRoutes({} as PgComicEdits, { audition } as unknown as ComicEditSpeech));
+
+    const created = await app.request("/series", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Fallback", styleKey: "webtoon", aspectRatio: "9:16", videoModel: null }),
+    });
+    expect(created.status).toBe(201);
+    expect((await created.json() as ComicDramaDetail).series.videoModel).toBe("grok-imagine-video-1.5");
+
+    const plainCurrent = await app.request("/series/current");
+    expect(await plainCurrent.json()).toEqual({ seriesId });
+    const summaryCurrent = await app.request("/series/current?summary=1");
+    expect((await summaryCurrent.json() as { summary: { completedCount: number } }).summary.completedCount).toBe(1);
+
+    const scriptRes = await app.request(`/series/${seriesId}/script`);
+    expect((await scriptRes.json() as { versions: Array<{ version: number }> }).versions[0]?.version).toBe(1);
+
+    const insertRes = await app.request(`/series/${seriesId}/clips`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, afterClipId: clipId }),
+    });
+    expect(insertRes.status).toBe(201);
+    expect(addClip).toHaveBeenCalledWith(ownerId, seriesId, 1, { afterClipId: clipId, insertIndex: undefined });
+
+    const auditionRes = await app.request("/voices/audition", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "测试试听台词", speed: 1.2, emotionKey: "gentle", voice: { kind: "preset", preset: "nova" } }),
+    });
+    expect(auditionRes.status).toBe(200);
+    expect(audition).toHaveBeenCalledTimes(1);
+    expect(detail.series.id).toBe(seriesId);
+  });
 });

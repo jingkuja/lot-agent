@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
   comicDramaIdSchema, comicEditUpdateSchema, comicTimelineSchema, comicVideoItem, emptyComicTimeline,
-  type ComicEdit, type ComicEditAudioSource, type ComicEditCreate, type ComicEditList, type ComicEditListEntry, type ComicEditReplace, type ComicEditSource,
-  type ComicEditUpdate, type ComicTimeline,
+  type ComicEdit, type ComicEditAppendSource, type ComicEditAudioSource, type ComicEditCreate, type ComicEditList, type ComicEditListEntry,
+  type ComicEditReplace, type ComicEditSource, type ComicEditUpdate, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
@@ -45,8 +45,15 @@ export class PgComicEdits {
   }
 
   private detail(row: EditRow, refs: { sources: SourceRow[]; audioSources: ComicEditAudioSource[] }): ComicEdit {
-    return { ...row, updatedAt: row.updatedAt.toISOString(), audioSources: refs.audioSources,
-      sources: refs.sources.map(({ seriesId: _series, ...source }) => source) };
+    return { ...row, updatedAt: row.updatedAt.toISOString(), audioSources: refs.audioSources, sources: refs.sources };
+  }
+
+  private async rememberLastEdit(db: ComicQuery, owner: string, editId: string) {
+    await db.query(
+      `INSERT INTO ${cd}.cd_user_state(owner_id, editor_last_id) VALUES ($1, $2)
+       ON CONFLICT (owner_id) DO UPDATE SET editor_last_id = excluded.editor_last_id`,
+      [owner, editId],
+    );
   }
 
   private async validateReferences(db: ComicQuery, owner: string, timeline: ComicTimeline) {
@@ -95,18 +102,30 @@ export class PgComicEdits {
     if (cursor && (extra !== undefined || !stamp || !Number.isFinite(Date.parse(stamp)) || !comicDramaIdSchema.safeParse(id).success)) {
       throw new ComicLibraryError("INVALID_CURSOR", 400);
     }
-    const { rows } = await this.pool.query<Omit<ComicEditListEntry, "updatedAt"> & { updatedAt: Date; stamp: string }>(
-      `SELECT ${columns},updated_at::text AS stamp FROM ${cd}.cd_edits WHERE owner_id=$1
-      AND ($2::timestamptz IS NULL OR (updated_at,id)<($2,$3::uuid)) ORDER BY updated_at DESC,id DESC LIMIT 25`, [owner, stamp ?? null, id ?? null]);
+    const [{ rows }, { rows: [stateRow] }] = await Promise.all([
+      this.pool.query<Omit<ComicEditListEntry, "updatedAt"> & { updatedAt: Date; stamp: string }>(
+        `SELECT ${columns},updated_at::text AS stamp FROM ${cd}.cd_edits WHERE owner_id=$1
+        AND ($2::timestamptz IS NULL OR (updated_at,id)<($2,$3::uuid)) ORDER BY updated_at DESC,id DESC LIMIT 25`,
+        [owner, stamp ?? null, id ?? null],
+      ),
+      this.pool.query<{ editorLastId: string | null }>(
+        `SELECT editor_last_id AS "editorLastId" FROM ${cd}.cd_user_state WHERE owner_id=$1`, [owner],
+      ),
+    ]);
     const last = rows[23];
-    return { entries: rows.slice(0, 24).map(({ stamp: _stamp, updatedAt, ...row }) => ({ ...row, updatedAt: updatedAt.toISOString() })),
-      nextCursor: rows.length > 24 ? `${last.stamp},${last.id}` : null };
+    return {
+      entries: rows.slice(0, 24).map(({ stamp: _stamp, updatedAt, ...row }) => ({ ...row, updatedAt: updatedAt.toISOString() })),
+      nextCursor: rows.length > 24 ? `${last.stamp},${last.id}` : null,
+      lastEditId: stateRow?.editorLastId ?? null,
+    };
   }
 
   get(owner: string, id: string): Promise<ComicEdit> {
     return libraryTransaction(this.pool, async db => {
       const row = await this.read(db, owner, id);
-      return this.detail(row, await this.validateReferences(db, owner, row.timeline));
+      const refs = await this.validateReferences(db, owner, row.timeline);
+      await this.rememberLastEdit(db, owner, id);
+      return this.detail(row, refs);
     });
   }
 
@@ -139,7 +158,9 @@ export class PgComicEdits {
       timeline.video = initial.map(source => comicVideoItem(randomUUID(), source));
       const { rows: [row] } = await db.query<EditRow>(`INSERT INTO ${cd}.cd_edits(owner_id,series_id,title,timeline)
         VALUES($1,$2,$3,$4) RETURNING ${columns},timeline`, [owner, seriesId, fields.title, timeline]);
-      return this.detail(row, await this.refs(db, owner, row.id, timeline));
+      const refs = await this.refs(db, owner, row.id, timeline);
+      await this.rememberLastEdit(db, owner, row.id);
+      return this.detail(row, refs);
     });
   }
 
@@ -147,6 +168,7 @@ export class PgComicEdits {
     const sources = await this.refs(db, owner, row.id, timeline);
     const { rows: [next] } = await db.query<EditRow>(`UPDATE ${cd}.cd_edits SET title=$3,timeline=$4,revision=revision+1,updated_at=clock_timestamp()
       WHERE owner_id=$1 AND id=$2 RETURNING ${columns},timeline`, [owner, row.id, title, timeline]);
+    await this.rememberLastEdit(db, owner, row.id);
     return this.detail(next, sources);
   }
 
@@ -155,6 +177,21 @@ export class PgComicEdits {
       const row = await this.read(db, owner, id, true);
       if (row.revision !== fields.expectedRevision) throw new ComicEditConflict(row.revision);
       return this.save(db, owner, row, fields.title, fields.timeline);
+    });
+  }
+
+  appendSource(owner: string, id: string, fields: ComicEditAppendSource) {
+    return libraryTransaction(this.pool, async db => {
+      const row = await this.read(db, owner, id, true);
+      if (row.revision !== fields.expectedRevision) throw new ComicEditConflict(row.revision);
+      if (row.timeline.video.length >= 200) throw new ComicLibraryError("EDIT_SOURCE_LIMIT", 400);
+      const [exact] = await this.sources(db, owner, [fields.takeId]);
+      if (!exact) throw new ComicLibraryError("EDIT_SOURCE_UNAVAILABLE", 404);
+      const timeline: ComicTimeline = {
+        ...row.timeline,
+        video: [...row.timeline.video, comicVideoItem(randomUUID(), exact)],
+      };
+      return this.save(db, owner, row, row.title, timeline);
     });
   }
 

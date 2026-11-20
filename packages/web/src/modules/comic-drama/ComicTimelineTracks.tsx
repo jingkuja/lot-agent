@@ -108,7 +108,7 @@ export function ComicTimelineTracks({ timeline, videoSources, audioSources, sele
     <div className="comic-track-ruler">
       <label>{t("定位播放位置")}<input type="range" min={0} max={total} step={1} value={playhead} disabled={!layout.durationMs}
         onChange={event => seek(Number(event.target.value))} /></label>
-      <div aria-hidden="true">{Array.from({ length: 5 }, (_, index) => <span key={index}>{Math.round(total * index / 40) / 100} s</span>)}</div>
+      <div aria-hidden="true">{Array.from({ length: 5 }, (_, index) => <span key={index}>{t("{0} 秒", [Math.round(total * index / 40) / 100])}</span>)}</div>
     </div>
     {tracks.map(track => {
       const { lanes, rows } = stack(layout[track]);
@@ -214,7 +214,7 @@ function AudioPicker({ track, choose, close }: { track: "music" | "sfx"; choose:
     </div>
     {state === null ? <p role="status">{t("加载中…")}</p> : state === "error" ? <p role="alert">{t("操作失败，请重试")}</p> : <>
       {state.entries.length ? <ul>{state.entries.map(material => <li key={material.id}>
-        <span>{material.name} · {seconds(material.media.durationMs ?? 0)} s</span>
+        <span>{material.name} · {t("{0} 秒", [seconds(material.media.durationMs ?? 0)])}</span>
         <button type="button" disabled={!material.media.durationMs} onClick={() => choose(material)}>{t("添加到轨道")}</button>
       </li>)}</ul> : <p>{t("素材库暂无此类音频")}</p>}
       <div className="comic-actions">

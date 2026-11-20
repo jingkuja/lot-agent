@@ -1,12 +1,16 @@
-import { useCallback, useRef, useState } from "react";
-import type { ComicDramaClip, ComicDramaDetail, ComicGenerationMode, ComicGenerationQuote, ComicImageRequest } from "@lot-agent/core/comic-drama";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  ComicDramaClip, ComicDramaDetail, ComicGenerationMode, ComicGenerationQuote, ComicImageRequest, ComicLibraryPage, ComicMaterial,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError, GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
+import { comicLibraryApi } from "./library-api.js";
 import { MediaPreview } from "./LibraryParts.js";
 import { ClipVideoVersions, VideoTakeActions } from "./ComicVideoTakes.js";
 import { ComicVideoReferences, type ChosenVideoReference } from "./ComicVideoReferences.js";
+import { SaveMediaAsMaterialDialog } from "./SaveMediaAsMaterialDialog.js";
 
 type Props = {
   detail: ComicDramaDetail;
@@ -15,10 +19,11 @@ type Props = {
   getSaved: () => Promise<ComicDramaDetail | null>;
   disabled: boolean;
   initialMode?: ComicGenerationMode;
+  quickAction?: { mode: ComicGenerationMode; token: number } | null;
   choose: (id: string) => void;
 };
 
-export function ComicImageGeneration({ detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe" }: Props) {
+export function ComicImageGeneration({ detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe", quickAction }: Props) {
   const { t } = useI18n();
   const [checked, setChecked] = useState<string[]>([]);
   const [quoting, setQuoting] = useState(false);
@@ -29,6 +34,7 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
   const [mode, setMode] = useState(initialMode);
   const [replaceAdopted, setReplaceAdopted] = useState(false);
   const [visual, setVisual] = useState<ChosenVideoReference[]>([]);
+  const lastQuickToken = useRef(0);
   const isVideo = mode !== "keyframe";
   const pending = useRef(false);
   const clip = detail.clips.find(item => item.id === selected) ?? detail.clips[0];
@@ -38,8 +44,10 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
     const target = detail.clips.find(item => item.id === id);
     return target ? `${t("分镜 {0}", [target.ordinal])}${target.draft.scene ? " · " + target.draft.scene : ""}` : t("分镜已被删除");
   };
-  const preview = async (ids: string[]) => {
-    if (pending.current) return;
+  const preview = useCallback(async (ids: string[], overrideMode?: ComicGenerationMode) => {
+    const targetMode = overrideMode ?? mode;
+    const targetIsVideo = targetMode !== "keyframe";
+    if (pending.current || !ids.length) return;
     pending.current = true;
     setQuoting(true);
     setError("");
@@ -47,15 +55,29 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
       const saved = await getSaved();
       if (!saved || saved.series.id !== scope.id) return;
       const targets = saved.clips.filter(item => ids.includes(item.id)).map(item => ({
-        clipId: item.id, expectedRevision: item.revision, ...(isVideo && replaceAdopted ? { replaceAdopted: true } : {}),
+        clipId: item.id, expectedRevision: item.revision, ...(targetIsVideo && replaceAdopted ? { replaceAdopted: true } : {}),
       }));
       if (targets.length !== ids.length) { setError("素材或分镜已更新，请重新询价"); return; }
-      setQuote(await comicGenerationApi.preview(scope, { mode, expectedSeriesRevision: saved.series.revision, targets,
-        ...(isVideo && visual.length ? { visualReferences: visual.map(({ kind, materialId, mediaId }) => ({ kind, materialId, mediaId })) } : {}),
+      setQuote(await comicGenerationApi.preview(scope, { mode: targetMode, expectedSeriesRevision: saved.series.revision, targets,
+        ...(targetIsVideo && visual.length ? { visualReferences: visual.map(({ kind, materialId, mediaId }) => ({ kind, materialId, mediaId })) } : {}),
       }));
     } catch (reason) { setError(comicGenerationError(reason)); }
     finally { setQuoting(false); pending.current = false; }
-  };
+  }, [getSaved, mode, replaceAdopted, scope, visual]);
+
+  useEffect(() => {
+    if (!quickAction || quickAction.token === lastQuickToken.current || disabled) return;
+    lastQuickToken.current = quickAction.token;
+    setMode(quickAction.mode);
+    const eligible = detail.clips.filter(item =>
+      quickAction.mode === "keyframe" ? !item.progress?.keyframeApproved : !item.progress?.adoptedVideoTakeId,
+    ).slice(0, 10).map(item => item.id);
+    const targets = eligible.length ? eligible : detail.clips.slice(0, 10).map(item => item.id);
+    if (targets.length) {
+      setChecked(targets);
+      void preview(targets, quickAction.mode);
+    }
+  }, [detail.clips, disabled, preview, quickAction]);
   return <div className="comic-board">
     <section className="comic-edit-card comic-generation-picker">
       <header><h2>{t(isVideo ? "生成视频" : "生成首帧")}</h2></header>
@@ -111,9 +133,12 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.keyframes(seriesId, clip.id, signal), [seriesId, clip.id]);
   const history = useGenerationHistory(load, 5_000, refresh);
   const [busyTake, setBusyTake] = useState<string | null>(null);
+  const [pickingMaterial, setPickingMaterial] = useState(false);
+  const [saveMediaId, setSaveMediaId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const reviewing = useRef(false);
   const approved = history.current?.approvedTakeId;
+  const approvedMediaId = history.current?.approvedMediaId;
   const review = async (id: string) => {
     if (reviewing.current) return;
     reviewing.current = true;
@@ -123,18 +148,59 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
     catch (reason) { setError(comicGenerationError(reason)); }
     finally { reviewing.current = false; setBusyTake(null); }
   };
+  const uploadManual = async (file: File) => {
+    if (reviewing.current) return;
+    reviewing.current = true;
+    setBusyTake("upload");
+    setError("");
+    try {
+      await comicGenerationApi.uploadKeyframe(seriesId, clip.id, clip.revision, file, AbortSignal.timeout(30_000));
+      history.refresh();
+    } catch (reason) { setError(comicGenerationError(reason)); }
+    finally { reviewing.current = false; setBusyTake(null); }
+  };
+  const selectManual = async (mediaId: string) => {
+    if (reviewing.current) return;
+    reviewing.current = true;
+    setBusyTake("select");
+    setError("");
+    try {
+      await comicGenerationApi.selectKeyframe(seriesId, clip.id, mediaId, clip.revision);
+      setPickingMaterial(false);
+      history.refresh();
+    } catch (reason) { setError(comicGenerationError(reason)); }
+    finally { reviewing.current = false; setBusyTake(null); }
+  };
   return <section className="comic-edit-card">
     <header>
       <h2>{t("首帧审核 · 分镜 {0}", [clip.ordinal])}</h2>
-      {!disabled && <button type="button" onClick={preview} disabled={quoting || history.current?.takes.some(take =>
-        ["pending", "running", "recoverable", "unknown"].includes(take.state))}>
-        {t("预览首帧费用")}
-      </button>}
+      {!disabled && <div className="comic-actions">
+        <label className="comic-file-button">
+          {t("上传首帧")}
+          <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={busyTake !== null} onChange={event => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void uploadManual(file);
+          }} />
+        </label>
+        <button type="button" disabled={busyTake !== null} onClick={() => setPickingMaterial(v => !v)}>{t("从素材库选择")}</button>
+        <button type="button" className="primary" onClick={preview} disabled={quoting || history.current?.takes.some(take =>
+          ["pending", "running", "recoverable", "unknown"].includes(take.state))}>
+          {t("预览首帧费用")}
+        </button>
+      </div>}
     </header>
     {error && <p className="comic-error" role="alert">{t(error)}</p>}
+    {pickingMaterial && <KeyframeMaterialPicker choose={id => void selectManual(id)} close={() => setPickingMaterial(false)} />}
     {history.failed && <button onClick={history.refresh}>{t("重新读取")}</button>}
+    {!approved && approvedMediaId && (
+      <article className="comic-library-card comic-manual-keyframe">
+        <MediaPreview openOriginal media={{ id: approvedMediaId, hasThumbnail: true, durationMs: null }} title={t("已确认首帧")} />
+        <strong>{t("已确认首帧")} · {t("上传或素材库")}</strong>
+      </article>
+    )}
     {!history.current ? <p role="status">{t("加载中…")}</p> :
-      !history.current.takes.length ? <p className="comic-generation-note">{t("暂无生成的首帧")}</p> :
+      !history.current.takes.length && !approvedMediaId ? <p className="comic-generation-note">{t("暂无生成的首帧")}</p> :
       <div className="comic-library-grid">
         {history.current.takes.map(take => {
           const stale = take.clipRevision !== clip.revision;
@@ -143,13 +209,57 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
             <strong>{take.id === approved && !stale ? t("已确认首帧") : <ComicTakeStatus take={take} />}</strong>
             <small>{new Date(take.createdAt).toLocaleString(locale)}</small>
             {take.state === "ready" && stale && <small>{t("生成后分镜已修改")}</small>}
-            {!disabled && take.state === "ready" && take.id !== approved && !stale &&
-              <button type="button" disabled={busyTake !== null} onClick={() => void review(take.id)}>{t("确认此首帧")}</button>}
+            <div className="comic-actions">
+              {!disabled && take.state === "ready" && take.id !== approved && !stale &&
+                <button type="button" disabled={busyTake !== null} onClick={() => void review(take.id)}>{t("确认此首帧")}</button>}
+              {take.state === "ready" && take.mediaId && (
+                <button type="button" onClick={() => setSaveMediaId(take.mediaId!)}>{t("另存为素材")}</button>
+              )}
+            </div>
             <ImageTakeActions take={take} refreshed={history.refresh} />
           </article>;
         })}
       </div>}
+    {saveMediaId && <SaveMediaAsMaterialDialog mediaId={saveMediaId}
+      defaultName={clip.draft.scene || t("分镜 {0}", [clip.ordinal])} close={() => setSaveMediaId(null)} />}
   </section>;
+}
+
+function KeyframeMaterialPicker({ choose, close }: { choose: (mediaId: string) => void; close: () => void }) {
+  const { t } = useI18n();
+  const [kind, setKind] = useState<"scene" | "prop" | "other">("scene");
+  const [query, setQuery] = useState("");
+  const [data, setData] = useState<ComicLibraryPage<ComicMaterial> | "error" | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setData(null);
+    void comicLibraryApi.materials({ kind, query, page: "1" }, controller.signal).then(res => {
+      if (!controller.signal.aborted) setData({ ...res, entries: res.entries.filter(item => item.media.mime.startsWith("image/")) });
+    }).catch(() => { if (!controller.signal.aborted) setData("error"); });
+    return () => controller.abort();
+  }, [kind, query]);
+  return <div className="comic-track-picker">
+    <div className="comic-actions">
+      <select value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
+        <option value="scene">{t("场景")}</option><option value="prop">{t("道具")}</option><option value="other">{t("其他")}</option>
+      </select>
+      <input value={query} placeholder={t("搜索素材")} maxLength={120} onChange={e => setQuery(e.target.value)} />
+      <button type="button" onClick={close}>{t("取消")}</button>
+    </div>
+    {data === null ? <p role="status">{t("加载中…")}</p> : data === "error" ? <p role="alert">{t("操作失败，请重试")}</p> : (
+      data.entries.length === 0 ? <p>{t("暂无匹配的素材")}</p> : (
+        <div className="comic-library-grid">
+          {data.entries.map(item => (
+            <article key={item.id} className="comic-library-card">
+              <MediaPreview media={item.media} title={item.name} thumbOnly />
+              <strong>{item.name}</strong>
+              <button type="button" onClick={() => choose(item.media.id)}>{t("选作首帧")}</button>
+            </article>
+          ))}
+        </div>
+      )
+    )}
+  </div>;
 }
 
 function BatchStatus({ request, label, select, refreshed }: {

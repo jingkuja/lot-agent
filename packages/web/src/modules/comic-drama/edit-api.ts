@@ -1,7 +1,7 @@
 import type {
-  ComicEdit, ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate,
+  ComicAutoDialogueResult, ComicEdit, ComicEditAppendSource, ComicEditAutoDialogue, ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate,
   ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest, ComicSpeechLines, ComicSpeechRelease,
-  ComicSpeechRequest, ComicSpeechTake, ComicVoiceBind, ComicVoiceSettings,
+  ComicSpeechRequest, ComicSpeechTake, ComicVoiceAudition, ComicVoiceBind, ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
 import { libraryError } from "./LibraryParts.js";
@@ -20,6 +20,10 @@ export const comicEditApi = {
   remove: (id: string, expectedRevision: number) => send<{ ok: true }>(edit(id), "DELETE", { expectedRevision }),
   replace: (id: string, itemId: string, fields: ComicEditReplace, signal?: AbortSignal) =>
     send<ComicEdit>(item(id, itemId) + "/replace", "POST", fields, signal),
+  appendSource: (id: string, fields: ComicEditAppendSource, signal?: AbortSignal) =>
+    send<ComicEdit>(edit(id) + "/append-source", "POST", fields, signal),
+  autoDialogue: (id: string, fields: ComicEditAutoDialogue, signal?: AbortSignal) =>
+    send<ComicAutoDialogueResult>(edit(id) + "/auto-dialogue", "POST", fields, signal),
   lines: (id: string, itemId: string, signal?: AbortSignal) => request<ComicSpeechLines>(item(id, itemId) + "/lines", { signal }),
   speak: (id: string, itemId: string, line: string, fields: ComicSpeechRequest, signal?: AbortSignal) =>
     send<ComicSpeechTake>(item(id, itemId) + "/lines/" + encodeURIComponent(line) + "/speech", "POST", fields, signal),
@@ -27,6 +31,7 @@ export const comicEditApi = {
     send<{ ok: true }>(item(id, itemId) + "/lines/" + encodeURIComponent(line) + "/speech/release", "POST", fields, signal),
   voice: (id: string, signal?: AbortSignal) => request<ComicVoiceSettings>(voice(id), { signal }),
   bindVoice: (id: string, fields: ComicVoiceBind, signal?: AbortSignal) => send<{ ok: true }>(voice(id), "PUT", fields, signal),
+  auditionVoice: (fields: ComicVoiceAudition, signal?: AbortSignal) => send<ComicSpeechTake>(root + "/voices/audition", "POST", fields, signal),
   startRender: (id: string, fields: ComicRenderRequest) => send<ComicRender>(edit(id) + "/render", "POST", fields),
   render: (id: string, signal?: AbortSignal) => request<ComicRender>(root + "/renders/" + encodeURIComponent(id), { signal }),
   renders: (editId?: string, cursor?: string, signal?: AbortSignal) => {

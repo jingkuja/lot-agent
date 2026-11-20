@@ -1,6 +1,7 @@
 import type {
   ComicCharacter, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload, ComicDictionaryDomain, ComicDictionaryEntry,
-  ComicDictionaryUpdate, ComicLabels, ComicLibraryPage, ComicMaterial, ComicMaterialInput, ComicMediaLinks, ComicMediaVersion, ComicOutfit,
+  ComicDictionaryUpdate, ComicLabels, ComicLibraryPage, ComicMaterial, ComicMaterialInput, ComicMaterialUpdate, ComicMediaLinks,
+  ComicMediaVersion, ComicOutfit, ComicStylePreset, ComicUserPreferences, ComicUserSettings,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -22,6 +23,10 @@ export const comicLibraryApi = {
   editCharacter: (id: string, data: ComicCharacterInput) => write<{ ok: true }>(`/characters/${id}`, "PATCH", data),
   archiveCharacter: (id: string) => write<{ ok: true }>(`/characters/${id}/archive`, "POST"),
   outfit: (id: string, name: string) => write<ComicOutfit>(`/characters/${id}/outfits`, "POST", { name }),
+  renameOutfit: (id: string, outfitId: string, name: string) => write<ComicOutfit>(`/characters/${id}/outfits/${outfitId}`, "PATCH", { name }),
+  reorderOutfits: (id: string, outfitIds: string[]) => write<ComicOutfit[]>(`/characters/${id}/outfits/order`, "PUT", { outfitIds }),
+  deleteOutfit: (id: string, outfitId: string) => write<{ ok: true }>(`/characters/${id}/outfits/${outfitId}`, "DELETE"),
+  deleteCharacterAsset: (id: string, target: ComicCharacterUpload) => write<{ ok: true }>(`/characters/${id}/assets`, "DELETE", target),
   characterVersions: (id: string, target: ComicCharacterUpload, signal?: AbortSignal) =>
     get<ComicMediaVersion[]>(`/characters/${id}/versions` + query(target), signal),
   characterUpload: (id: string, target: ComicCharacterUpload, file: File, signal: AbortSignal) =>
@@ -30,9 +35,14 @@ export const comicLibraryApi = {
   materialUpload: (data: ComicMaterialInput, file: File, signal: AbortSignal) => upload<{ id: string; mediaId: string }>(
     "/materials/upload" + query({ ...data, categoryKey: data.categoryKey ?? "", tags: data.tags.join(",") }), file, signal,
   ),
+  saveMediaAsMaterial: (mediaId: string, material: ComicMaterialInput) =>
+    write<{ id: string }>("/materials/from-media", "POST", { mediaId, material }),
+  editMaterial: (id: string, data: ComicMaterialUpdate) => write<{ ok: true }>(`/materials/${id}`, "PATCH", data),
   replaceMaterial: (id: string, file: File, signal: AbortSignal) => upload<{ mediaId: string; version: number }>(`/materials/${id}/files`, file, signal),
   materialVersions: (id: string, signal?: AbortSignal) => get<ComicMediaVersion[]>(`/materials/${id}/versions`, signal),
   archiveMaterial: (id: string) => write<{ ok: true }>(`/materials/${id}/archive`, "POST"),
+  unarchiveMaterial: (id: string) => write<{ ok: true }>(`/materials/${id}/unarchive`, "POST"),
+  deleteMaterial: (id: string) => write<{ ok: true }>(`/materials/${id}`, "DELETE"),
   links: (id: string, signal?: AbortSignal) => get<ComicMediaLinks>(`/media/${id}/links`, signal),
   dictionary: (domain: ComicDictionaryDomain, signal?: AbortSignal) => get<ComicDictionaryEntry[]>(`/dictionary/${domain}`, signal),
   addEntry: (domain: ComicDictionaryDomain, key: string, labels: ComicLabels) =>
@@ -40,4 +50,12 @@ export const comicLibraryApi = {
   editEntry: (domain: ComicDictionaryDomain, key: string, data: ComicDictionaryUpdate) =>
     write<ComicDictionaryEntry[]>(`/dictionary/${domain}/${key}`, "PATCH", data),
   sort: (domain: ComicDictionaryDomain, keys: string[]) => write<ComicDictionaryEntry[]>(`/dictionary/${domain}/order`, "PUT", { keys }),
+  settings: (signal?: AbortSignal) => get<ComicUserSettings>("/settings", signal),
+  updateSettings: (preferences: ComicUserPreferences) => write<ComicUserPreferences>("/settings", "PUT", preferences),
+  bindStyleReference: (styleKey: string, mediaId: string) =>
+    write<ComicStylePreset>(`/settings/styles/${encodeURIComponent(styleKey)}/reference`, "PUT", { mediaId }),
+  uploadStyleReference: (styleKey: string, file: File, signal: AbortSignal) =>
+    upload<ComicStylePreset>(`/settings/styles/${encodeURIComponent(styleKey)}/reference/upload`, file, signal),
+  removeStyleReference: (styleKey: string) =>
+    write<{ ok: true }>(`/settings/styles/${encodeURIComponent(styleKey)}/reference`, "DELETE"),
 };

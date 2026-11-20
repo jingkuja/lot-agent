@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicDramaIdSchema, comicEditCreateSchema, comicEditDeleteSchema, comicEditListSchema, comicEditReplaceSchema, comicEditUpdateSchema,
-  comicSpeechReleaseSchema, comicSpeechRequestSchema, comicVoiceBindSchema,
+  comicDramaIdSchema, comicEditAppendSourceSchema, comicEditAutoDialogueSchema, comicEditCreateSchema, comicEditDeleteSchema, comicEditListSchema,
+  comicEditReplaceSchema, comicEditUpdateSchema, comicSpeechReleaseSchema, comicSpeechRequestSchema, comicVoiceAuditionSchema, comicVoiceBindSchema,
 } from "@lot-agent/core/comic-drama";
 import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
@@ -52,6 +52,16 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     return c.json(await repo.replace(c.get("userId"), id(c.req.param("id")), id(c.req.param("itemId")), input.data));
   });
+  app.post("/edits/:id/append-source", limit, async c => {
+    const input = comicEditAppendSourceSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.appendSource(c.get("userId"), id(c.req.param("id")), input.data));
+  });
+  app.post("/edits/:id/auto-dialogue", limit, async c => {
+    const input = comicEditAutoDialogueSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await speech.autoDialogue(c.get("userId"), id(c.req.param("id")), input.data, c.req.raw.signal, accepting));
+  });
   app.get("/characters/:id/voice", async c => {
     c.header("Cache-Control", "private, no-store");
     return c.json(await speech.settings(c.get("userId"), id(c.req.param("id"))));
@@ -61,6 +71,20 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     await speech.bind(c.get("userId"), id(c.req.param("id")), input.data);
     return c.json({ ok: true });
+  });
+  app.post("/characters/:id/voice/audition", limit, async c => {
+    const raw = await c.req.json().catch(() => null);
+    const body = raw && typeof raw === "object" && !("voice" in raw)
+      ? { ...(raw as Record<string, unknown>), voice: { kind: "character", characterId: id(c.req.param("id")) } }
+      : raw;
+    const input = comicVoiceAuditionSchema.safeParse(body);
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await speech.audition(c.get("userId"), input.data, c.req.raw.signal, accepting));
+  });
+  app.post("/voices/audition", limit, async c => {
+    const input = comicVoiceAuditionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await speech.audition(c.get("userId"), input.data, c.req.raw.signal, accepting));
   });
   app.get("/edits/:id/items/:itemId/lines", async c => {
     c.header("Cache-Control", "private, no-store");
