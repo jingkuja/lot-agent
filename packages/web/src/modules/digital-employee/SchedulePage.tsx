@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { request } from "../../api/client.js";
+import { FeishuSettings } from "../../components/FeishuSettings.js";
 import { useI18n } from "../../i18n/index.js";
 import { employeeApi } from "./api.js";
 import { ScheduledWorkSection } from "./schedule/ScheduledWorkSection.js";
 import type { DigitalEmployeeOverview, EmployeeSettings, OpportunitySettings, WorkChannel, WorkTone } from "./types.js";
 import { useEmployeeLabels } from "./employee-labels.js";
+
+interface FeishuSummary {
+  configured?: boolean;
+  connected?: boolean;
+  account?: { name: string } | null;
+}
 
 const MAX_NAME = 20;
 const TONES: Array<{ value: WorkTone | ""; label: string }> = [
@@ -185,6 +194,7 @@ export function SchedulePage({ employeeName, dailyScan, schedules, onNameChange 
         </div>}
       </section>
       {schedules && <ScheduledWorkSection />}
+      <FeishuConnectionSection />
       {dailyScan && <section className="de-schedule-section">
         <h2>{t("提醒")}</h2>
         <p>{t("简报准备好时告诉你。站内一直有提醒。")}</p>
@@ -215,4 +225,59 @@ export function SchedulePage({ employeeName, dailyScan, schedules, onNameChange 
       </section>}
     </>}
   </div>;
+}
+
+function FeishuConnectionSection() {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<FeishuSummary | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const loadStatus = useCallback((signal?: AbortSignal) => {
+    void request<FeishuSummary>("/feishu/status", { signal })
+      .then((next) => { if (!signal?.aborted) setStatus(next); })
+      .catch(() => { if (!signal?.aborted) setStatus(null); });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadStatus(controller.signal);
+    const onConnected = () => loadStatus();
+    window.addEventListener("lot:feishu-connected", onConnected);
+    return () => {
+      controller.abort();
+      window.removeEventListener("lot:feishu-connected", onConnected);
+    };
+  }, [loadStatus]);
+
+  const summary = !status
+    ? t("尚未绑定飞书账号")
+    : status.configured === false
+      ? t("服务端尚未配置飞书接入")
+      : status.connected
+        ? `${t("已绑定飞书账号")}：${status.account?.name ?? ""}`
+        : t("尚未绑定飞书账号");
+
+  return (
+    <>
+      <section className="de-schedule-section">
+        <h2>{t("飞书接入")}</h2>
+        <p>{t("连接后可在飞书私聊机器人下发任务、接收简报提醒和回复确认。")}</p>
+        <div className="de-schedule-row">
+          <small>{summary}</small>
+          <button type="button" className="de-secondary-button" onClick={() => setOpen(true)}>
+            {t(status?.connected ? "管理飞书连接" : "连接飞书")}
+          </button>
+        </div>
+      </section>
+      {open && createPortal(
+        <FeishuSettings
+          onClose={() => {
+            setOpen(false);
+            loadStatus();
+          }}
+        />,
+        document.body,
+      )}
+    </>
+  );
 }

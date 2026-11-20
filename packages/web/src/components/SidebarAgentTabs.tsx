@@ -1,4 +1,3 @@
-import { FeishuSettings } from "./FeishuSettings.js";
 import { useI18n } from "../i18n/index.js";
 import { useEffect, useId, useRef, useState } from "react";
 import type { Agent } from "../api/client.js";
@@ -17,7 +16,6 @@ const DEFAULT_VISIBLE_AGENTS = 6;
 /** Show two rows of three quick choices; expand to browse additional Agents. */
 export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: SidebarAgentTabsProps) {
   const { t } = useI18n();
-  const [feishuOpen, setFeishuOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -58,21 +56,6 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
           <div className="sidebar-current-agent-copy">
             <strong>{current ? t(current.name) : t("加载中…")}</strong>
           </div>
-          <button
-            type="button"
-            className="agent-feishu-toggle"
-            aria-label={t("飞书接入")}
-            title={t("飞书接入")}
-            onClick={() => setFeishuOpen(true)}
-          >
-            <span className="agent-feishu-icon" aria-hidden>
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="m21 3-7 18-4-7-7-4 18-7Z" strokeLinejoin="round" />
-                <path d="m10 14 6-6" />
-              </svg>
-            </span>
-            <span>{t("飞书")}</span>
-          </button>
         </div>
         <div className="agent-launcher" id={gridId}>
           <div className={`agent-launcher-grid${expanded ? " is-expanded" : ""}`} role="group" aria-label={t("选择 Agent")}>
@@ -125,7 +108,6 @@ export function SidebarAgentTabs({ agents, activeId, onSwitch, disabled }: Sideb
           )}
         </div>
       </div>
-      {feishuOpen && <FeishuSettings onClose={() => setFeishuOpen(false)} />}
     </>
   );
 }

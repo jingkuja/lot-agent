@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Conversation } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { employeeApi } from "./api.js";
 import {
@@ -12,10 +11,9 @@ import { runSummary } from "./schedule/ScheduledRunPage.js";
 import { statusLabel, statusTone } from "./assignments/copy.js";
 import type { Assignment, OpportunityItem, OpportunityListResponse, OpportunityView, ScheduleRun } from "./types.js";
 
-type WorkTab = "conversations" | "tasks" | "scheduled" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
+type WorkTab = "tasks" | "scheduled" | Extract<OpportunityView, "in_progress" | "completed" | "snoozed">;
 
 const TABS: Array<{ id: WorkTab; label: string }> = [
-  { id: "conversations", label: "对话" },
   { id: "tasks", label: "任务" },
   { id: "in_progress", label: "跟进中" },
   { id: "completed", label: "已完成" },
@@ -31,14 +29,6 @@ interface WorkLogPageProps {
   assignments: boolean;
   onOpenAssignment: (id: string) => void;
   onOpenScheduledRun: (id: string) => void;
-  conversations: Conversation[];
-  activeConversationId: string | null;
-  hasMore: boolean;
-  loadingMore: boolean;
-  onLoadMore: () => void;
-  /** Rows open the record of the work; the record leads back to the conversation. */
-  onOpenWork: (id: string) => void;
-  onDeleteConversation: (id: string) => void;
   onOpenProfile: (id: string) => void;
   onDraftOutreach: (item: OpportunityItem) => void;
 }
@@ -47,16 +37,15 @@ interface WorkLogPageProps {
 export function WorkLogPage(props: WorkLogPageProps) {
   const { t } = useI18n();
   const tabs = TABS.filter((item) => (item.id !== "scheduled" || props.schedules) && (item.id !== "tasks" || props.assignments));
-  const [tab, setTab] = useState<WorkTab>(tabs.find((item) => item.id === props.initialTab)?.id ?? "conversations");
+  const [tab, setTab] = useState<WorkTab>(tabs.find((item) => item.id === props.initialTab)?.id ?? tabs[0]?.id ?? "in_progress");
   return <div className="de-page de-work-log">
     <header className="de-employee-page-head"><h1>{t("工作记录")}</h1></header>
     <nav className="de-employee-tabs" aria-label={t("工作记录")}>
       {tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{t(item.label)}</button>)}
     </nav>
-    {tab === "conversations" && <ConversationList {...props} />}
     {tab === "tasks" && <TaskRecords onOpen={props.onOpenAssignment} />}
     {tab === "scheduled" && <ScheduledRuns onOpen={props.onOpenScheduledRun} />}
-    {tab !== "conversations" && tab !== "tasks" && tab !== "scheduled" && <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
+    {tab !== "tasks" && tab !== "scheduled" && <FollowUpList view={tab} onOpenProfile={props.onOpenProfile} onDraftOutreach={props.onDraftOutreach} />}
   </div>;
 }
 
@@ -121,23 +110,6 @@ function ScheduledRuns({ onOpen }: { onOpen: (id: string) => void }) {
         <small>{formatTime(run.scheduledFor, locale)}</small>
       </button>
     </article>)}
-  </section>;
-}
-
-function ConversationList({
-  conversations, activeConversationId, hasMore, loadingMore, onLoadMore, onOpenWork, onDeleteConversation,
-}: WorkLogPageProps) {
-  const { t, locale } = useI18n();
-  if (conversations.length === 0) return <div className="de-state de-empty-state"><strong>{t("还没有工作记录")}</strong></div>;
-  return <section className="de-work-log-list">
-    {conversations.map((conversation) => <article key={conversation.id} className={conversation.id === activeConversationId ? "active" : ""}>
-      <button type="button" onClick={() => onOpenWork(conversation.id)}>
-        <strong>{conversation.title || t("新对话")}</strong>
-        <small>{conversation.updated_at ? formatTime(conversation.updated_at, locale) : ""}</small>
-      </button>
-      <button type="button" className="de-work-log-delete" aria-label={t("删除对话")} onClick={() => onDeleteConversation(conversation.id)}>×</button>
-    </article>)}
-    {hasMore && <button className="de-secondary-button" disabled={loadingMore} onClick={onLoadMore}>{t("加载更多")}</button>}
   </section>;
 }
 

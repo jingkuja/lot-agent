@@ -48,11 +48,11 @@ interface EmployeeWorkspaceProps {
   onNavigateAssistant: () => void;
 }
 
-/** Older module conversations end when the owner leaves them; the employee's own carry on. */
-const keepConversation = (conversation: Conversation | undefined) =>
+/** Older module conversations end when the owner leaves them; returning to Today starts a fresh session. */
+const isUnifiedConversation = (conversation: Conversation | undefined) =>
   !conversation || conversation.metadata?.digitalEmployeeFeatureScope === DIGITAL_EMPLOYEE_UNIFIED_SCOPE;
 
-/** One employee: its card, five entries and a conversation that stays mounted under every page. */
+/** One employee: its card, navigation, conversation list and a chat that stays mounted under every page. */
 export function EmployeeWorkspace({
   user, modelCatalog, pathname, active, dailyScan, schedules, assignments, pendingCount, waitingTasks, onPendingChange, onLogout, navigate, replacePath,
   onNavigateAssistant, onNavigateComicDrama,
@@ -60,6 +60,10 @@ export function EmployeeWorkspace({
   const { t } = useI18n();
   const location = useMemo(() => parseEmployeePath(pathname), [pathname]);
   const { view, tab, profileId } = location;
+  const keepConversation = useCallback(
+    (conversation: Conversation | undefined) => view !== "today" && isUnifiedConversation(conversation),
+    [view],
+  );
 
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
@@ -207,13 +211,6 @@ export function EmployeeWorkspace({
         assignments={assignments}
         onOpenAssignment={(id) => openView("assignments", id)}
         onOpenScheduledRun={(id) => navigate(`${employeePath("work-log", "scheduled")}/${encodeURIComponent(id)}`)}
-        conversations={digitalEmployeeConversations(context.conversations)}
-        activeConversationId={context.activeConversationId}
-        hasMore={context.hasMore}
-        loadingMore={context.loadingMore}
-        onLoadMore={context.loadMore}
-        onOpenWork={(id) => openView("work-log", id)}
-        onDeleteConversation={context.deleteConversation}
         onOpenProfile={openProfile}
         onDraftOutreach={(item) => draftOutreach(context, item)}
       />;
@@ -258,6 +255,7 @@ export function EmployeeWorkspace({
     digitalEmployeeBadge={pendingCount}
     requestedConversationId={location.conversationId}
     sidebar={(context) => <EmployeeSidebar
+      active={active}
       name={name}
       running={today?.running ?? []}
       waiting={pendingCount}
@@ -265,10 +263,16 @@ export function EmployeeWorkspace({
       assignments={assignments}
       waitingTasks={waitingTasks}
       isStreaming={context.isStreaming}
-      onNavigate={openView}
-      onNewConversation={() => {
-        navigate(CHAT_PATH);
-        context.newConversation();
+      conversations={digitalEmployeeConversations(context.conversations)}
+      activeConversationId={context.activeConversationId}
+      hasMore={context.hasMore}
+      loadingMore={context.loadingMore}
+      onLoadMore={context.loadMore}
+      onOpenConversation={openConversation}
+      onDeleteConversation={context.deleteConversation}
+      onNavigate={(next) => {
+        openView(next);
+        if (next === "today" && context.activeConversationId) context.newConversation();
       }}
       onStreamEnd={() => {
         setFocusOverride(null);

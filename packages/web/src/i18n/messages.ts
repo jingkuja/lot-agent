@@ -4689,4 +4689,11 @@ export const messages: Record<string, { en: string; id: string }> = {
   "默认模型设置": {"en": "Default model settings", "id": "Pengaturan model default"},
   "默认模型设置已保存": {"en": "Default model settings saved", "id": "Pengaturan model default tersimpan"},
   "默认视频模型": {"en": "Default video model", "id": "Model video default"},
+  "对话记录": {"en": "Conversations", "id": "Riwayat percakapan"},
+  "还没有对话记录": {"en": "No conversations yet", "id": "Belum ada percakapan"},
+  "管理飞书连接": {"en": "Manage Feishu", "id": "Kelola koneksi Feishu"},
+  "连接后可在飞书私聊机器人下发任务、接收简报提醒和回复确认。": {
+    "en": "Connect Feishu to send tasks via bot DM, receive brief reminders, and reply to approvals.",
+    "id": "Hubungkan Feishu untuk mengirim tugas lewat DM bot, menerima pengingat ringkasan, dan membalas konfirmasi.",
+  },
 };
