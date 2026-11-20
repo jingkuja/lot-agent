@@ -55,6 +55,11 @@ function subtaskFromGoal(goal: string): NewSubtask {
 
 const toYuan = (credits: number | null) => credits === null ? null : credits / CREDITS_PER_YUAN;
 
+function isScheduleOccurrenceConflict(error: unknown): boolean {
+  const pgError = error as { code?: string; constraint?: string };
+  return pgError?.code === "23505" && pgError.constraint === "idx_de_assignments_schedule_occurrence";
+}
+
 function view(card: AssignmentCard) {
   return {
     id: card.id, title: card.title, goal: card.goal, mode: card.mode, status: card.status,
@@ -120,16 +125,35 @@ export class AssignmentService {
     return modelId;
   }
 
-  async create(userId: string, input: CreateAssignmentInput) {
+  /** Schedule creation checks the same ownership and model rules without starting a task early. */
+  async validate(userId: string, input: CreateAssignmentInput): Promise<void> {
     this.assertEnabled();
+    await this.ownedAttachments(userId, input.attachments);
+    await this.chooseModel(userId, input.modelId);
+  }
+
+  async create(userId: string, input: CreateAssignmentInput, source?: { scheduleId: string; scheduledFor: string }) {
+    this.assertEnabled();
+    // A retry may happen after an attachment or model was removed; the committed occurrence still wins.
+    if (source) {
+      const existing = await this.repository.findScheduled(userId, source.scheduleId, source.scheduledFor);
+      if (existing) return view(existing);
+    }
     const attachments = await this.ownedAttachments(userId, input.attachments);
     const modelId = await this.chooseModel(userId, input.modelId);
-    const node = await this.repository.create({
-      userId, modelId, attachments, costLimit: toYuan(input.creditLimit), mode: input.mode, subtaskLimit: input.subtaskLimit ?? null,
-      subtasks: (input.subtasks ?? []).map(subtaskFromGoal),
-      title: initialTitle(input.goal, attachments), goal: input.goal || attachments.map((item) => item.filename).join("、"),
-    });
-    return view(await this.repository.get(userId, node.id));
+    try {
+      const node = await this.repository.create({
+        userId, modelId, attachments, costLimit: toYuan(input.creditLimit), mode: input.mode, subtaskLimit: input.subtaskLimit ?? null,
+        subtasks: (input.subtasks ?? []).map(subtaskFromGoal), source,
+        title: initialTitle(input.goal, attachments), goal: input.goal || attachments.map((item) => item.filename).join("、"),
+      });
+      return view(await this.repository.get(userId, node.id));
+    } catch (error) {
+      if (!source || !isScheduleOccurrenceConflict(error)) throw error;
+      const existing = await this.repository.findScheduled(userId, source.scheduleId, source.scheduledFor);
+      if (existing) return view(existing);
+      throw error;
+    }
   }
 
   async list(userId: string, filters: AssignmentFilters) {

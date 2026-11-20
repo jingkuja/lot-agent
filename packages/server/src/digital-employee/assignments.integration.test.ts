@@ -109,6 +109,7 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
   beforeEach(async () => {
     script = []; inputs.length = 0; sent.length = 0; held.clear(); roles.clear();
     await clearQueue();
+    await db.pool.query(`DELETE FROM de_assignment_schedules`);
     await db.pool.query(`UPDATE de_assignment_events SET feishu_claimed_at=now() WHERE feishu_claimed_at IS NULL`);
   });
   afterEach(() => expect(script).toEqual([]));
@@ -148,6 +149,116 @@ describe.skipIf(!testUrl)("task dispatch on PostgreSQL", () => {
       script.push(finish());
       await turn();
       expect(inputs[0]!.attachments).toMatchObject([{ assetId: id, mime: "application/pdf", url: `/static/uploads/${id}.pdf` }]);
+    });
+  });
+
+  describe("scheduled tasks", () => {
+    const input = {
+      assignment: { goal: "定时整理客户", mode: "autonomous" as const, attachments: [], modelId: null, creditLimit: null },
+      timing: { kind: "interval" as const, startAt: "2026-11-05T03:00:00.000Z", every: 30, unit: "minutes" as const }, timezone: "Asia/Shanghai",
+    };
+
+    it("uses the ordinary workflow once per occurrence, and keeps tasks when the rule is removed", async () => {
+      const userId = owner();
+      const created = await service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z"));
+      expect(created.nextRunAt).toBe("2026-11-05T03:00:00.000Z");
+      const due = new Date("2026-11-05T03:00:30.000Z");
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(1);
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(0);
+      const first = (await service.assignmentSchedules.list(userId))[0]!;
+      expect(first).toMatchObject({ nextRunAt: "2026-11-05T03:30:00.000Z", lastError: null });
+      expect(first.lastAssignmentId).not.toBeNull();
+      expect(await assignments().get(userId, first.lastAssignmentId!)).toMatchObject({ goal: "定时整理客户", status: "queued" });
+
+      // A retry still finds the committed occurrence without consulting the now-unavailable model catalog.
+      await db.pool.query(`UPDATE de_assignment_schedules SET next_run_at=$2 WHERE id=$1`, [created.id, first.lastRunAt]);
+      models.mockClear();
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(1);
+      expect(models).not.toHaveBeenCalled();
+      const { rows } = await db.pool.query(`SELECT id FROM de_assignments WHERE schedule_id=$1`, [created.id]);
+      expect(rows).toHaveLength(1);
+
+      await service.assignmentSchedules.setEnabled(userId, created.id, false, due);
+      expect(await service.assignmentSchedules.dispatchDue(new Date("2026-11-05T04:00:00.000Z"))).toBe(0);
+      const resumed = await service.assignmentSchedules.setEnabled(userId, created.id, true, new Date("2026-11-05T03:40:00.000Z"));
+      expect(resumed.nextRunAt).toBe("2026-11-05T04:00:00.000Z");
+      await service.assignmentSchedules.remove(userId, created.id);
+      expect(await assignments().get(userId, first.lastAssignmentId!)).toMatchObject({ id: first.lastAssignmentId });
+    });
+
+    it("lets concurrent dispatchers create only one assignment for an occurrence", async () => {
+      const userId = owner();
+      const created = await service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z"));
+      const due = new Date("2026-11-05T03:00:30.000Z");
+      const counts = await Promise.all([service.assignmentSchedules.dispatchDue(due), service.assignmentSchedules.dispatchDue(due)]);
+      expect(counts.reduce((sum, count) => sum + count, 0)).toBe(1);
+      const { rows } = await db.pool.query(`SELECT id FROM de_assignments WHERE schedule_id=$1`, [created.id]);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("retries a transient creation failure at the same occurrence", async () => {
+      const userId = owner();
+      const created = await service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z"));
+      const due = new Date("2026-11-05T03:00:30.000Z");
+      models.mockRejectedValueOnce(new Error("temporary model catalog failure"));
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(0);
+      warning.mockRestore();
+      expect((await service.assignmentSchedules.list(userId))[0]).toMatchObject({ nextRunAt: created.nextRunAt, lastRunAt: null });
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(1);
+      const { rows } = await db.pool.query(`SELECT id FROM de_assignments WHERE schedule_id=$1`, [created.id]);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("ends a failed one-off without inventing an assignment", async () => {
+      const userId = owner();
+      await service.assignmentSchedules.create(userId, {
+        ...input, timing: { kind: "once", at: "2026-11-05T03:00:00.000Z" },
+      }, new Date("2026-11-05T02:00:00.000Z"));
+      models.mockResolvedValueOnce([]);
+      const due = new Date("2026-11-05T03:00:30.000Z");
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(0);
+      expect((await service.assignmentSchedules.list(userId))[0]).toMatchObject({
+        enabled: false, nextRunAt: null, lastRunAt: "2026-11-05T03:00:00.000Z", lastAssignmentId: null,
+        lastError: DIGITAL_EMPLOYEE_LLM_UNAVAILABLE,
+      });
+      expect(await service.assignmentSchedules.dispatchDue(due)).toBe(0);
+      expect((await assignments().list(userId, { limit: 50 })).items).toEqual([]);
+    });
+
+    it("enforces the per-owner limit across concurrent creates", async () => {
+      const userId = owner();
+      await db.pool.query(
+        `INSERT INTO de_assignment_schedules (user_id, assignment_input, timing, timezone, next_run_at)
+         SELECT $1, $2::jsonb, $3::jsonb, $4, $5::timestamptz FROM generate_series(1, 19)`,
+        [userId, JSON.stringify(input.assignment), JSON.stringify(input.timing), input.timezone, input.timing.startAt]
+      );
+      const results = await Promise.allSettled([
+        service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z")),
+        service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z")),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")[0]).toMatchObject({ reason: expect.any(InputError) });
+      const { rows } = await db.pool.query(`SELECT count(*)::int AS count FROM de_assignment_schedules WHERE user_id=$1`, [userId]);
+      expect(rows[0]!.count).toBe(20);
+    });
+
+    it("finishes a one-off instead of offering an impossible resume", async () => {
+      const userId = owner();
+      const created = await service.assignmentSchedules.create(userId, {
+        ...input, timing: { kind: "once", at: "2026-11-05T03:00:00.000Z" },
+      }, new Date("2026-11-05T02:00:00.000Z"));
+      expect(await service.assignmentSchedules.dispatchDue(new Date("2026-11-05T03:00:00.000Z"))).toBe(1);
+      expect((await service.assignmentSchedules.list(userId))[0]).toMatchObject({ enabled: false, nextRunAt: null });
+      await expect(service.assignmentSchedules.setEnabled(userId, created.id, true)).rejects.toBeInstanceOf(InputError);
+    });
+
+    it("scopes every schedule operation to its owner", async () => {
+      const userId = owner();
+      const created = await service.assignmentSchedules.create(userId, input, new Date("2026-11-05T02:00:00.000Z"));
+      expect(await service.assignmentSchedules.list(owner())).toEqual([]);
+      await expect(service.assignmentSchedules.setEnabled(owner(), created.id, false)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.assignmentSchedules.remove(owner(), created.id)).rejects.toBeInstanceOf(NotFoundError);
     });
   });
 

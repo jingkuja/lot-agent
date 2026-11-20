@@ -2,8 +2,8 @@ import { request as send, type UploadedAttachment } from "../../api/client.js";
 import { recoverRead } from "./rate-limit-recovery.js";
 import type { EmployeeFocus } from "./focus.js";
 import type {
-  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, BoardEntry, ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule,
-  EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
+  Assignment, AssignmentDetail, AssignmentFilter, AssignmentInput, AssignmentPage, AssignmentSchedule, AssignmentScheduleInput, BoardEntry,
+  ConversationWork, CustomerWork, DecisionAnswer, EmployeeSchedule, EmployeeSettings, ProposalResult, ScheduleInput, ScheduleRun, TodayResponse, TodaySummary,
 } from "./types.js";
 import type {
   CustomerObservation,
@@ -86,6 +86,20 @@ export const employeeApi = {
 
   createAssignment: (input: AssignmentInput) =>
     request<Assignment>("/digital-employee/assignments", { method: "POST", body: JSON.stringify(input) }),
+
+  listAssignmentSchedules: () => request<{ items: AssignmentSchedule[] }>("/digital-employee/assignment-schedules"),
+
+  createAssignmentSchedule: (input: AssignmentScheduleInput) =>
+    request<AssignmentSchedule>("/digital-employee/assignment-schedules", { method: "POST", body: JSON.stringify(input) }),
+
+  pauseAssignmentSchedule: (id: string) =>
+    request<AssignmentSchedule>(`/digital-employee/assignment-schedules/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+
+  resumeAssignmentSchedule: (id: string) =>
+    request<AssignmentSchedule>(`/digital-employee/assignment-schedules/${encodeURIComponent(id)}/resume`, { method: "POST" }),
+
+  deleteAssignmentSchedule: (id: string) =>
+    request<{ ok: boolean }>(`/digital-employee/assignment-schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   getAssignment: (id: string) => request<AssignmentDetail>(`/digital-employee/assignments/${encodeURIComponent(id)}`),
 

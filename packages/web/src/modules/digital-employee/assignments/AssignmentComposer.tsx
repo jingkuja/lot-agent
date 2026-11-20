@@ -1,16 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, request, type UploadedAttachment } from "../../../api/client.js";
 import type { ModelCatalog } from "../../../hooks/useModels.js";
 import { useI18n } from "../../../i18n/index.js";
 import { employeeApi } from "../api.js";
-import type { Assignment } from "../types.js";
+import type { Assignment, AssignmentInput } from "../types.js";
 import { MODE_HINTS, MODE_LABELS } from "./copy.js";
 
 const MAX_FILES = 10;
 const MODES: Array<Assignment["mode"]> = ["autonomous", "responsive"];
 
+interface AssignmentComposerProps {
+  modelCatalog: ModelCatalog;
+  onCreated: () => void;
+  /** Scheduled and immediate tasks share the complete form; only the create action differs. */
+  onSubmit?: (input: AssignmentInput) => Promise<unknown>;
+  submitLabel?: string;
+  submitDisabled?: boolean;
+  extraFields?: ReactNode;
+}
+
 /** One sentence is enough. Everything else stays folded away and has a default. */
-export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: ModelCatalog; onCreated: () => void }) {
+export function AssignmentComposer({ modelCatalog, onCreated, onSubmit, submitLabel = "开始", submitDisabled = false, extraFields }: AssignmentComposerProps) {
   const { t, modelName } = useI18n();
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState<Assignment["mode"]>("autonomous");
@@ -50,13 +60,15 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
   const submit = async () => {
     setSaving(true); setError(null);
     try {
-      await employeeApi.createAssignment({
+      const input: AssignmentInput = {
         goal: goal.trim(), mode, modelId: modelId || undefined,
         attachments: files.map((file) => ({ assetId: file.assetId, filename: file.filename })),
         creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
         subtasks: subtasks.split("\n").map((line) => line.trim()).filter(Boolean),
         subtaskLimit: subtaskLimit.trim() ? Number(subtaskLimit) : null,
-      });
+      };
+      if (onSubmit) await onSubmit(input);
+      else await employeeApi.createAssignment(input);
       setGoal(""); setFiles([]); setCreditLimit(""); setModelId(""); setSubtasks(""); setSubtaskLimit("");
       onCreated();
     } catch (reason) {
@@ -93,6 +105,7 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
         <span>{t(MODE_LABELS[value])}</span>
       </label>)}
     </fieldset>
+    {extraFields}
     <details>
       <summary>{t("更多设置")}</summary>
       <div className="de-assignment-options">
@@ -124,7 +137,9 @@ export function AssignmentComposer({ modelCatalog, onCreated }: { modelCatalog: 
         {t(uploading ? "上传中…" : "附文件")}
       </button>
       <small>{t(MODE_HINTS[mode])}</small>
-      <button type="button" className="de-primary-button" disabled={empty || saving || uploading} onClick={() => void submit()}>{t("开始")}</button>
+      <button type="button" className="de-primary-button" disabled={empty || saving || uploading || submitDisabled} onClick={() => void submit()}>
+        {t(submitLabel)}
+      </button>
     </footer>
     {unreachable && <p className="de-assignment-hint">{t(mode === "responsive" ? "还没接入飞书，要回到这里才能看到问题和结果。" : "还没接入飞书，结果只能回到这里查看。")}</p>}
   </section>;

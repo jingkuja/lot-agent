@@ -5,6 +5,7 @@ import { employeeApi } from "../api.js";
 import type { Assignment, AssignmentFilter, AssignmentStatusFilter } from "../types.js";
 import { AssignmentCard } from "./AssignmentCard.js";
 import { AssignmentComposer } from "./AssignmentComposer.js";
+import { ScheduledAssignmentsPage } from "./ScheduledAssignmentsPage.js";
 import { dayLabel, groupByDay, isOpen, quickRange, startOfDay, toLocalInput, type QuickRange } from "./grouping.js";
 import { usePolling } from "../usePolling.js";
 import { useEmployeeLabels } from "../employee-labels.js";
@@ -50,6 +51,7 @@ export function AssignmentsPage({ employeeName, modelCatalog, onOpen }: { employ
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [tab, setTab] = useState<"now" | "scheduled">("now");
   const sentinel = useRef<HTMLDivElement>(null);
   const searching = search !== NO_SEARCH;
 
@@ -83,7 +85,7 @@ export function AssignmentsPage({ employeeName, modelCatalog, onOpen }: { employ
   }, [load]);
 
   const hasOpen = useMemo(() => [...items, ...pinned].some(isOpen), [items, pinned]);
-  usePolling(load, POLL_MS, hasOpen);
+  usePolling(load, POLL_MS, hasOpen && tab === "now");
 
   const loadMore = useCallback(async () => {
     if (!cursor || loadingMore) return;
@@ -137,6 +139,15 @@ export function AssignmentsPage({ employeeName, modelCatalog, onOpen }: { employ
 
   return <div className="de-page de-assignments-page">
     <header className="de-employee-page-head"><h1>{labels.assignments}</h1></header>
+    <nav className="de-employee-tabs de-assignment-tabs" aria-label={labels.assignments} role="tablist">
+      <button type="button" role="tab" aria-selected={tab === "now"} className={tab === "now" ? "active" : ""} onClick={() => setTab("now")}>
+        {t("开启任务")}
+      </button>
+      <button type="button" role="tab" aria-selected={tab === "scheduled"} className={tab === "scheduled" ? "active" : ""} onClick={() => setTab("scheduled")}>
+        {t("定时任务")}
+      </button>
+    </nav>
+    {tab === "scheduled" ? <ScheduledAssignmentsPage modelCatalog={modelCatalog} onOpen={onOpen} /> : <>
     <AssignmentComposer modelCatalog={modelCatalog} onCreated={() => { apply(NO_SEARCH); void load(); }} />
 
     <button type="button" className="de-secondary-button de-assignment-filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}>
@@ -183,5 +194,6 @@ export function AssignmentsPage({ employeeName, modelCatalog, onOpen }: { employ
     {cursor && <div ref={sentinel} className="de-assignment-more">
       <button type="button" className="de-secondary-button" disabled={loadingMore} onClick={() => void loadMore()}>{t(loadingMore ? "加载中…" : "加载更早的任务")}</button>
     </div>}
+    </>}
   </div>;
 }

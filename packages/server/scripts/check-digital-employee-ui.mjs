@@ -68,6 +68,17 @@ function fixtures() {
   return {
     settings: { employeeName: "小灵", feishuReminder: false, desktopReminder: false, workTone: null, preferredChannels: [], version: 0 },
     focusWrites: [], writes: [], assignmentQueries: [],
+    assignmentSchedules: [{
+      id: "as1",
+      assignment: { goal: "整理本周客户", mode: "autonomous", modelId: "test-llm", attachments: [], creditLimit: null, subtasks: [], subtaskLimit: null },
+      timing: { kind: "once", at: NOW }, timezone: "Asia/Shanghai", enabled: false, nextRunAt: null, lastRunAt: NOW,
+      lastAssignmentId: "t2", lastError: null, version: 2, createdAt: NOW,
+    }, {
+      id: "as2",
+      assignment: { goal: "整理昨日客户", mode: "autonomous", modelId: "test-llm", attachments: [], creditLimit: null, subtasks: [], subtaskLimit: null },
+      timing: { kind: "once", at: NOW }, timezone: "Asia/Shanghai", enabled: false, nextRunAt: null, lastRunAt: NOW,
+      lastAssignmentId: null, lastError: "附件不存在", version: 2, createdAt: NOW,
+    }],
     assignments: [
       task({}),
       task({ id: "t2", title: "整理客户清单", goal: "整理本周客户", status: "succeeded", createdAt: TODAY, currentTool: null,
@@ -255,6 +266,32 @@ function api(state, unexpected, dailyScan = false, schedules = false, assignment
     }
     if (path === "/api/feishu/status") return json({ configured: true, connected: false });
     if (path === "/api/assets/links") return json({ links: {} });
+    if (de === "/assignment-schedules" && method === "GET") return json({ items: state.assignmentSchedules });
+    if (de === "/assignment-schedules" && method === "POST") {
+      const { timing, timezone, ...assignment } = request.postDataJSON();
+      const created = {
+        id: `as${state.assignmentSchedules.length + 1}`, assignment, timing, timezone, enabled: true,
+        nextRunAt: timing.kind === "once" ? timing.at : timing.startAt, lastRunAt: null, lastAssignmentId: null, lastError: null,
+        version: 1, createdAt: NOW,
+      };
+      state.assignmentSchedules.unshift(created);
+      return json(created, 201);
+    }
+    const assignmentSchedule = de.match(/^\/assignment-schedules\/([^/]+)(?:\/(pause|resume))?$/);
+    if (assignmentSchedule) {
+      const item = state.assignmentSchedules.find((entry) => entry.id === assignmentSchedule[1]);
+      if (!item) return json({ error: "定时任务不存在" }, 404);
+      if (method === "DELETE") {
+        state.assignmentSchedules = state.assignmentSchedules.filter((entry) => entry.id !== item.id);
+        return json({ ok: true });
+      }
+      Object.assign(item, {
+        enabled: assignmentSchedule[2] === "resume",
+        nextRunAt: assignmentSchedule[2] === "resume" ? (item.timing.kind === "once" ? item.timing.at : item.timing.startAt) : null,
+        version: item.version + 1,
+      });
+      return json(item);
+    }
     if (de === "/assignments" && method === "GET") {
       state.assignmentQueries.push(Object.fromEntries(url.searchParams));
       const searching = !url.searchParams.has("openBefore");
@@ -1228,6 +1265,60 @@ try {
     await phone.page.locator(".de-assignment-filter-toggle").click();
     await phone.page.locator(".de-assignment-filters").waitFor();
     assert.equal(await phone.page.evaluate(() => getComputedStyle(document.querySelector(".de-assignment-list")).gridTemplateColumns.split(" ").length), 1);
+    await phone.close();
+  }
+
+  // Scheduled tasks share the composer, retain completed runs, and support pause, resume and delete.
+  {
+    const state = fixtures();
+    const { page, close } = await open("/digital-employee/assignments", { assignments: true, state });
+    assert.equal(await page.getByRole("tab", { name: "开启任务" }).getAttribute("aria-selected"), "true");
+    await page.getByRole("tab", { name: "定时任务" }).click();
+    const existing = page.locator(".de-assignment-schedule-card").filter({ hasText: "整理本周客户" });
+    await existing.getByText("已完成", { exact: true }).waitFor();
+    assert.equal(await existing.getByRole("button", { name: "恢复", exact: true }).count(), 0);
+    const failed = page.locator(".de-assignment-schedule-card").filter({ hasText: "整理昨日客户" });
+    await failed.getByText("创建失败", { exact: true }).waitFor();
+    await failed.getByText("上次未能创建任务：附件不存在", { exact: true }).waitFor();
+    assert.equal(await failed.getByRole("button", { name: "恢复", exact: true }).count(), 0);
+
+    await page.getByRole("textbox", { name: "交代一件事" }).fill("每两小时整理客户");
+    await page.getByLabel("首次执行时间").fill("2026-11-06T09:30");
+    await page.getByLabel("每隔", { exact: true }).fill("2");
+    await page.getByLabel("间隔单位").selectOption("hours");
+    await page.getByRole("button", { name: "创建定时任务" }).click();
+    const createdCard = page.locator(".de-assignment-schedule-card").filter({ hasText: "每两小时整理客户" });
+    await createdCard.getByText("已开启", { exact: true }).waitFor();
+    const created = JSON.parse(state.writes.findLast((entry) => entry.path.endsWith("/assignment-schedules")).body);
+    assert.deepEqual(created.timing, {
+      kind: "interval", startAt: new Date("2026-11-06T09:30").toISOString(), every: 2, unit: "hours",
+    });
+    assert.equal(created.goal, "每两小时整理客户");
+    assert.equal(created.mode, "autonomous");
+    const createdState = state.assignmentSchedules.find((item) => item.assignment.goal === "每两小时整理客户");
+
+    await createdCard.getByRole("button", { name: "暂停", exact: true }).click();
+    await createdCard.getByText("已暂停", { exact: true }).waitFor();
+    assert.equal(createdState.enabled, false);
+    await createdCard.getByRole("button", { name: "恢复", exact: true }).click();
+    await createdCard.getByText("已开启", { exact: true }).waitFor();
+    await createdCard.getByRole("button", { name: "删除", exact: true }).click();
+    await createdCard.waitFor({ state: "detached" });
+    assert.equal(state.assignmentSchedules.some((item) => item.id === createdState.id), false);
+
+    await existing.getByRole("button", { name: "查看最近任务" }).click();
+    await page.waitForURL("**/digital-employee/assignments/t2");
+    await page.getByRole("heading", { name: "整理客户清单" }).waitFor();
+    await close();
+
+    const phone = await open("/digital-employee/assignments", { assignments: true, language: "en", width: 390 });
+    await phone.page.getByRole("tab", { name: "Scheduled tasks" }).click();
+    await phone.page.getByRole("region", { name: "Existing scheduled tasks" }).waitFor();
+    await phone.page.locator(".de-assignment-schedule-card").getByText("Completed", { exact: true }).waitFor();
+    assert.ok(await noHorizontalScroll(phone.page), "scheduled tasks overflow at phone width");
+    await snap(phone.page, "assignment-schedules-en-390-light.png");
+    await phone.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await snap(phone.page, "assignment-schedules-en-390-dark.png");
     await phone.close();
   }
 

@@ -54,6 +54,26 @@ describe("task routes", () => {
     service.list.mockRejectedValue(new NotFoundError("任务分派未开启"));
     expect((await app({ assignments: service }).request("/digital-employee/assignments")).status).toBe(404);
   });
+
+  it("creates and controls schedules only for the logged-in owner", async () => {
+    const schedule = { id, enabled: true };
+    const service = {
+      list: vi.fn(async () => [schedule]), create: vi.fn(async () => schedule), setEnabled: vi.fn(async () => schedule), remove: vi.fn(async () => undefined),
+    };
+    const server = app({ assignmentSchedules: service });
+    const payload = {
+      goal: "整理客户", timing: { kind: "interval", startAt: "2026-11-06T01:00:00.000Z", every: 2, unit: "hours" }, timezone: "Asia/Shanghai",
+    };
+    expect((await server.request("/digital-employee/assignment-schedules", post(payload))).status).toBe(201);
+    expect(service.create).toHaveBeenCalledWith("u1", expect.objectContaining({
+      assignment: expect.objectContaining({ goal: "整理客户" }), timing: payload.timing,
+    }));
+    await server.request(`/digital-employee/assignment-schedules/${id}/pause`, post());
+    await server.request(`/digital-employee/assignment-schedules/${id}/resume`, post());
+    await server.request(`/digital-employee/assignment-schedules/${id}`, { method: "DELETE" });
+    expect(service.setEnabled.mock.calls).toEqual([["u1", id, false], ["u1", id, true]]);
+    expect(service.remove).toHaveBeenCalledWith("u1", id);
+  });
 });
 
 describe("digital employee profile routes", () => {

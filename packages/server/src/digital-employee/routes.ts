@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   parseAssignmentList, parseCreateAssignment, parseCreditLimit, parseDecisionAnswer, parseEventCursor, parseFollowUp, parseSubtask, parseSubtaskLimit,
 } from "./assignment-validators.js";
+import { parseAssignmentScheduleInput } from "./assignment-schedule-validators.js";
 import { parseEmployeeName } from "./employee-name.js";
 import { apiError, InputError } from "./errors.js";
 import { parseFocusInput } from "./focus.js";
@@ -81,6 +82,33 @@ export function createDigitalEmployeeRoutes(service: DigitalEmployeeService): Ho
   app.post("/assignments", async (c) => {
     try { return c.json(await service.assignments.create(c.get("userId"), parseCreateAssignment(await body(c))), 201); }
     catch (error) { return respondError(c, error); }
+  });
+
+  app.get("/assignment-schedules", async (c) => {
+    try { return c.json({ items: await service.assignmentSchedules.list(c.get("userId")) }); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignment-schedules", async (c) => {
+    try { return c.json(await service.assignmentSchedules.create(c.get("userId"), parseAssignmentScheduleInput(await body(c))), 201); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignment-schedules/:id/pause", async (c) => {
+    try { return c.json(await service.assignmentSchedules.setEnabled(c.get("userId"), parseEntityId(c.req.param("id"), "定时任务 ID"), false)); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.post("/assignment-schedules/:id/resume", async (c) => {
+    try { return c.json(await service.assignmentSchedules.setEnabled(c.get("userId"), parseEntityId(c.req.param("id"), "定时任务 ID"), true)); }
+    catch (error) { return respondError(c, error); }
+  });
+
+  app.delete("/assignment-schedules/:id", async (c) => {
+    try {
+      await service.assignmentSchedules.remove(c.get("userId"), parseEntityId(c.req.param("id"), "定时任务 ID"));
+      return c.json({ ok: true });
+    } catch (error) { return respondError(c, error); }
   });
 
   app.post("/assignments/decisions/:id/answer", async (c) => {

@@ -2,7 +2,7 @@ import type { JobQueue } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { CustomerAcquisitionService } from "./acquisition-service.js";
 import { BriefService, briefMessage } from "./brief-service.js";
-import { digitalEmployeeDailyScanEnabled, digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
+import { digitalEmployeeAssignmentsEnabled, digitalEmployeeDailyScanEnabled, digitalEmployeeSchedulesEnabled } from "./feature-scope.js";
 import { MarketingMaterialsService } from "./marketing-service.js";
 import { OpportunityService } from "./opportunity-service.js";
 import { PRODUCT_DOCUMENT_JOB, ProductDocumentService, type ProductDocumentParser } from "./product-document-service.js";
@@ -75,6 +75,12 @@ export function registerDigitalEmployeeJobs(service: DigitalEmployeeService, opt
     every(SCHEDULE_CHECK_MS, "Employee schedule dispatcher", async () => {
       const queued = await service.schedules.dispatchDue();
       if (queued > 0) console.log(`Queued ${queued} scheduled employee run(s)`);
+    });
+  }
+  if (digitalEmployeeAssignmentsEnabled()) {
+    every(SCHEDULE_CHECK_MS, "Employee assignment schedule dispatcher", async () => {
+      const created = await service.assignmentSchedules.dispatchDue();
+      if (created > 0) console.log(`Created ${created} scheduled assignment(s)`);
     });
   }
 }

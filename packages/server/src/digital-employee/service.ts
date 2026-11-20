@@ -57,6 +57,7 @@ import { ScheduleService } from "./schedule-service.js";
 import { EmployeeSettingsService } from "./settings-service.js";
 import { TodayService } from "./today-service.js";
 import { AssignmentService } from "./assignment-service.js";
+import { AssignmentScheduleService } from "./assignment-schedule-service.js";
 import { WorkLogService } from "./work-log-service.js";
 import type { CampaignContentGenerator, CampaignModelResolver } from "./acquisition-types.js";
 
@@ -127,6 +128,7 @@ export class DigitalEmployeeService {
   readonly schedules: ScheduleService;
   readonly today: TodayService;
   readonly assignments: AssignmentService;
+  readonly assignmentSchedules: AssignmentScheduleService;
   private readonly secretBox: SecretBox;
 
   constructor(
@@ -161,6 +163,7 @@ export class DigitalEmployeeService {
       imports: this.productImports,
       workLog: this.workLog,
     });
+    this.assignmentSchedules = new AssignmentScheduleService(db.pool, this.assignments);
     this.today = new TodayService(
       db.pool, this.settings, this.opportunities, this.customerAcquisition, this.proposals, this.briefs, this.schedules, this.assignments,
     );

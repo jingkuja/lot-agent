@@ -986,3 +986,26 @@ export interface AssignmentInput {
   subtasks?: string[];
   subtaskLimit?: number | null;
 }
+
+export type AssignmentScheduleTiming =
+  | { kind: "once"; at: string }
+  | { kind: "interval"; startAt: string; every: number; unit: "minutes" | "hours" | "days" };
+
+export interface AssignmentScheduleInput extends AssignmentInput {
+  timing: AssignmentScheduleTiming;
+  timezone: string;
+}
+
+export interface AssignmentSchedule {
+  id: string;
+  assignment: AssignmentInput & { modelId: string | null };
+  timing: AssignmentScheduleTiming;
+  timezone: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastAssignmentId: string | null;
+  lastError: string | null;
+  version: number;
+  createdAt: string;
+}

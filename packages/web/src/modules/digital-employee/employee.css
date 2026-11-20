@@ -863,6 +863,20 @@
 .de-assignment-mode legend { float: left; margin-right: 4px; padding: 0; color: var(--text-secondary); font-size: 12px; }
 .de-assignment-mode label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; cursor: pointer; }
 .de-assignment-options .is-wide { flex-basis: 100%; }
+.de-assignment-tabs { margin-bottom: 16px; }
+.de-assignment-schedule-fields { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; border-radius: var(--radius-md); background: var(--bg-hover); }
+.de-assignment-schedule-fields label { display: grid; flex: 1 1 140px; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.de-assignment-schedule-fields label.is-wide { flex-basis: 100%; }
+.de-assignment-schedule-fields input, .de-assignment-schedule-fields select { width: 100%; min-width: 0; min-height: 36px; padding: 0 10px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 13px; }
+.de-assignment-scheduled-list > h2 { margin-bottom: 12px; color: var(--text); font-size: 15px; }
+.de-assignment-schedule-list { display: grid; gap: 12px; }
+.de-assignment-schedule-card { display: grid; gap: 8px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
+.de-assignment-schedule-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.de-assignment-schedule-card header strong { min-width: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.de-assignment-schedule-card > p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.de-assignment-schedule-card > p.de-assignment-note { color: var(--error); }
+.de-assignment-schedule-card small { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-muted); font-size: 12px; }
+.de-assignment-schedule-card footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .de-assignment-options textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border-input); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 13px; resize: vertical; }
 .de-subtasks h2 small { margin-left: 8px; color: var(--text-muted); font-size: 12px; font-weight: 400; }
 .de-subtasks details { display: grid; gap: 10px; }

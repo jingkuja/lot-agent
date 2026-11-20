@@ -162,6 +162,8 @@ export interface NewAssignment {
   subtaskLimit?: number | null;
   /** Given at creation: planning is skipped and they start at once. */
   subtasks?: NewSubtask[];
+  /** A schedule occurrence is unique, so a retried dispatch returns the same root. */
+  source?: { scheduleId: string; scheduledFor: string };
 }
 
 export interface NewSubtask {
@@ -305,6 +307,7 @@ export class AssignmentRepository {
   private async insertNode(client: PoolClient, input: {
     id: string; userId: string; rootId: string; position: number; title: string; goal: string; mode: AssignmentMode; status: AssignmentStatus;
     modelId: string; attachments: AttachmentRef[]; costLimit: number | null; subtaskLimit: number | null; createdBy: "owner" | "employee";
+    source?: { scheduleId: string; scheduledFor: string };
   }): Promise<AssignmentNode> {
     const conversationId = randomUUID();
     await client.query(
@@ -316,11 +319,13 @@ export class AssignmentRepository {
     );
     const { rows } = await client.query(
       `INSERT INTO de_assignments
-         (id, user_id, root_id, position, title, goal, mode, status, conversation_id, model_id, attachments, cost_limit, subtask_limit, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14) RETURNING *`,
+         (id, user_id, root_id, position, title, goal, mode, status, conversation_id, model_id, attachments, cost_limit, subtask_limit, created_by,
+          schedule_id, scheduled_for)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16) RETURNING *`,
       [
         input.id, input.userId, input.rootId, input.position, input.title, input.goal, input.mode, input.status, conversationId, input.modelId,
-        JSON.stringify(input.attachments), input.costLimit, input.subtaskLimit, input.createdBy,
+        JSON.stringify(input.attachments), input.costLimit, input.subtaskLimit, input.createdBy, input.source?.scheduleId ?? null,
+        input.source?.scheduledFor ?? null,
       ]
     );
     return toNode(rows[0]);
@@ -333,7 +338,7 @@ export class AssignmentRepository {
       const root = await this.insertNode(client, {
         id, userId: input.userId, rootId: id, position: 0, title: input.title, goal: input.goal, mode: input.mode,
         status: subtasks.length ? "waiting_children" : "queued", modelId: input.modelId, attachments: input.attachments,
-        costLimit: input.costLimit, subtaskLimit: input.subtaskLimit ?? null, createdBy: "owner",
+        costLimit: input.costLimit, subtaskLimit: input.subtaskLimit ?? null, createdBy: "owner", source: input.source,
       });
       if (subtasks.length) await this.insertSubtasks(client, root, subtasks, "owner");
       return root;
@@ -375,6 +380,15 @@ export class AssignmentRepository {
     const { rows } = await this.pool.query(`SELECT ${CARD_COLUMNS} FROM de_assignments r WHERE r.id=$1 AND r.user_id=$2 AND r.id=r.root_id`, [id, userId]);
     if (!rows[0]) throw new NotFoundError("任务不存在");
     return toCard(rows[0]);
+  }
+
+  async findScheduled(userId: string, scheduleId: string, scheduledFor: string): Promise<AssignmentCard | null> {
+    const { rows } = await this.pool.query(
+      `SELECT ${CARD_COLUMNS} FROM de_assignments r
+       WHERE r.user_id=$1 AND r.schedule_id=$2 AND r.scheduled_for=$3 AND r.id=r.root_id`,
+      [userId, scheduleId, scheduledFor]
+    );
+    return rows[0] ? toCard(rows[0]) : null;
   }
 
   /** Roots only; a subtask counts through its parent, including in the keyword match. */
