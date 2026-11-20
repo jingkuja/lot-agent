@@ -189,7 +189,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
 
   return (
     <div className={`login-page login-page-${mode}`}>
-      <section className="login-showcase" aria-label={t("万象智枢产品介绍")}>
+      <section className="login-showcase" aria-label={t("万象灵工产品介绍")}>
         <div className="login-ai-canvas" aria-hidden="true">
           <div className="login-ai-grid" />
           <div className="login-ai-aurora login-ai-aurora-a" />
@@ -237,7 +237,7 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
           <span className="login-brand-mark" aria-hidden="true">
             <img src={BRAND_LOGO_SRC} alt="" />
           </span>
-          <span className="login-brand-name">{t("万象智枢")}</span>
+          <span className="login-brand-name">{t("万象灵工")}</span>
         </div>
 
         <div className="login-showcase-content">
@@ -341,11 +341,11 @@ export function Login({ onLogin, initialError = null }: LoginProps) {
       </section>
 
       <section className="login-access">
-        <div className="login-mobile-brand" aria-label={t("万象智枢")}>
+        <div className="login-mobile-brand" aria-label={t("万象灵工")}>
           <span className="login-mobile-brand-mark" aria-hidden="true">
             <img src={BRAND_LOGO_SRC} alt="" />
           </span>
-          {t("万象智枢")}</div>
+          {t("万象灵工")}</div>
         <div className="login-card">
           <LanguageSelect />
           <div className="login-card-heading">

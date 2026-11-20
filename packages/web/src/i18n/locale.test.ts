@@ -16,9 +16,9 @@ describe("interface language", () => {
     expect(translate("取消", "en")).toBe("Cancel");
     expect(translate("取消", "id")).toBe("Batal");
     expect(translate("取消", "zh")).toBe("取消");
-    expect(translate("万象智枢", "zh")).toBe("万象智枢");
-    expect(translate("万象智枢", "en")).toBe("Lingqu Claw");
-    expect(translate("万象智枢", "id")).toBe("Lingqu Claw");
+    expect(translate("万象灵工", "zh")).toBe("万象灵工");
+    expect(translate("万象灵工", "en")).toBe("Lingqu Claw");
+    expect(translate("万象灵工", "id")).toBe("Lingqu Claw");
     expect(translate("customer-provided content", "id")).toBe("customer-provided content");
   });
   it("interpolates without translating user values", () => {

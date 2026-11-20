@@ -55,7 +55,7 @@ export function BrandHeader({
         </span>
 
         <div className="brand-meta">
-          <span className="brand-title">{t("万象智枢")}</span>
+          <span className="brand-title">{t("万象灵工")}</span>
         </div>
 
         {user ? <AccountMenu user={user} onLogout={onLogout} /> : <LanguageSelect />}
