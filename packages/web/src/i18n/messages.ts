@@ -2014,7 +2014,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "加载中": {"en": "Loading", "id": "Memuat"},
   "充值积分": {"en": "Top up credits", "id": "Isi ulang kredit"},
   "订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费": {"en": "When subscription credit runs out, continue with the current key and charge your Lingqu AI balance", "id": "Saat kuota langganan habis, lanjutkan dengan key saat ini dan gunakan saldo Lingqu AI"},
-  "积分不足时使用灵渠 AI 余额": {"en": "Use Lingqu AI balance when credits run out", "id": "Gunakan saldo Lingqu AI saat kredit habis"},
+  "使用灵渠余额": {"en": "Use Lingqu balance", "id": "Gunakan saldo Lingqu"},
   "设置保存失败，请重试": {"en": "Could not save settings. Try again.", "id": "Gagal menyimpan pengaturan. Coba lagi."},
   "我的积分": {"en": "My credits", "id": "Kredit saya"},
   "积分仅用于 lot-agent 服务消费，": {"en": "Credits can only be used for lot-agent services. ", "id": "Kredit hanya dapat digunakan untuk layanan lot-agent. "},

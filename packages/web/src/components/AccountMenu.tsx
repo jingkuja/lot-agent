@@ -48,7 +48,7 @@ function BalanceFallbackRow() {
     <>
       <label className="account-balance-fallback" title={t("订阅 Key 额度不足时，继续使用当前 Key，并从灵渠 AI 余额扣费")}>
         <span aria-hidden>¥</span>
-        <span>{t("积分不足时使用灵渠 AI 余额")}</span>
+        <span>{t("使用灵渠余额")}</span>
         <input type="checkbox" role="menuitemcheckbox" checked={enabled} disabled={saving} onChange={(event) => update(event.target.checked)} />
         <i aria-hidden />
       </label>
@@ -157,7 +157,7 @@ export function AccountMenu({ user, onLogout }: AccountMenuProps) {
               {!international && (boundPhone ? (
                 <div className="account-phone-row">
                   <span aria-hidden>☎</span>
-                  <span className="account-phone-number" title={t("已绑定手机号")}>{t("手机号")}{boundPhone}</span>
+                  <span className="account-phone-number" title={t("已绑定手机号")}>{boundPhone}</span>
                   <button type="button" className="account-phone-change" onClick={() => openDialog("phone")}>
                     {t("更改")}</button>
                 </div>

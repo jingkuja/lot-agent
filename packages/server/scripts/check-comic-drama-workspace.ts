@@ -15,6 +15,7 @@ import { createComicDramaRoutes } from "../src/comic-drama/routes.js";
 import { PgComicDramaRepository } from "../src/comic-drama/repository.js";
 import { PgComicDictionary } from "../src/comic-drama/dictionary.js";
 import { PgComicLibrary } from "../src/comic-drama/library-repository.js";
+import { PgComicSettings } from "../src/comic-drama/settings-repository.js";
 import { ComicMediaLibrary } from "../src/comic-drama/media-library.js";
 import { createComicLibraryRoutes } from "../src/comic-drama/library-routes.js";
 import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-drama-library.js";
@@ -61,7 +62,7 @@ let clockOffset = 0;
 const files = new ComicMediaLibrary(fixtureMediaDir, library, {
   masterKey: "cd".repeat(32), now: () => Date.now() + clockOffset, publicBaseUrl: "https://comic-fixture.invalid",
 });
-app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(pool), files));
+app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(pool), files, new PgComicSettings(pool)));
 app.route(COMIC_MEDIA_PATH.slice(0, -1), files.publicRoutes({
   resolve: async token => token === "fixture-one" ? { userId: owner } : token === "fixture-two" ? { userId: other } : null,
 }));
@@ -244,6 +245,7 @@ try {
 
         await page.setViewportSize({ width: 1440, height: 900 });
         await page.getByRole("button", { name: "设置", exact: true }).click();
+        await page.getByRole("button", { name: "数据字典", exact: true }).click();
         await page.getByRole("button", { name: /添加字典条目/ }).click();
         await page.getByLabel("英文键").fill("rain_hood");
         await page.getByLabel("中文名称").fill("雨帽");
@@ -310,7 +312,7 @@ try {
         await page.getByRole("status").filter({ hasText: "已保存" }).waitFor();
 
         await page.getByRole("button", { name: "历史剧集", exact: true }).click();
-        const episodeRow = page.locator(".comic-history-list article").filter({ hasText: "W2 浏览器剧集" });
+        const episodeRow = page.locator(".comic-series-grid article").filter({ hasText: "W2 浏览器剧集" });
         await episodeRow.getByRole("button", { name: "续写下一集" }).click();
         assert.equal(await page.getByRole("checkbox", { name: "沿用上一集的角色与画风" }).isChecked(), true);
         await page.getByRole("button", { name: "创建并打开", exact: true }).click();
@@ -382,7 +384,7 @@ try {
           await page.getByRole("button", { name: "表情", exact: true }).click();
           await page.getByRole("button", { name: "生成表情", exact: true }).click();
           const expressionPicker = page.getByRole("dialog", { name: "生成表情", exact: true });
-          await expressionPicker.getByRole("combobox").selectOption("smile");
+          await expressionPicker.getByLabel("表情", { exact: true }).selectOption("smile");
           await expressionPicker.getByRole("button", { name: "预览费用", exact: true }).click();
           await fee.getByRole("button", { name: "确认费用并生成" }).click();
           await page.getByRole("img", { name: "微笑" }).waitFor();
@@ -397,11 +399,12 @@ try {
           await page.locator('input[name="seriesQuery"]').fill("W6 video fixture");
           await page.locator('select[name="adopted"]').selectOption("true");
           await Promise.all([
-            page.waitForResponse((response: { url(): string; ok(): boolean }) => response.ok() && /\/comic-drama\/videos\?.*adopted=true/.test(response.url())),
+            page.waitForResponse((response: { url(): string; ok(): boolean }) =>
+              response.ok() && /\/comic-drama\/(clips|videos)\?.*adopted=true/.test(response.url())),
             page.getByRole("button", { name: "筛选", exact: true }).click(),
           ]);
-          const adopted = page.locator(".comic-video-card").filter({ hasText: "W6 video fixture · 版本 1 · 已采用" });
-          await adopted.getByText("W6 video fixture · 版本 1 · 已采用").waitFor();
+          const adopted = page.locator(".comic-video-card").filter({ hasText: /W6 video fixture.*版本 1 · 已采用/ });
+          await adopted.getByText(/W6 video fixture.*版本 1 · 已采用/).waitFor();
           const open = adopted.getByRole("button", { name: "打开对应分镜" });
           await open.click();
           await page.waitForURL("**/series/" + videoEpisode);
@@ -419,7 +422,7 @@ try {
           const newest = page.locator(".comic-video-card").filter({ hasText: "版本 2" });
           await newest.getByText("视频已入库", { exact: true }).waitFor();
           await newest.getByRole("button", { name: "采用此版本", exact: true }).click();
-          await newest.getByText("版本 2 · 已采用", { exact: true }).waitFor();
+          await newest.getByText(/版本 2 · 已采用/).waitFor();
           assert.equal(generation.video.submitted.length, beforeVideo + 1);
           await newest.locator("video").evaluate((player: HTMLVideoElement) => { player.preload = "metadata"; player.load(); });
           await page.waitForFunction(() => Array.from(document.querySelectorAll("video")).some(player => player.videoWidth === 320 && player.duration === 4));
@@ -636,6 +639,7 @@ try {
           await page.goto(deepLink);
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
           const directorPanel = page.locator(".comic-director");
+          await directorPanel.getByRole("tab", { name: /剧本与拆分镜提案/ }).click();
           await directorPanel.getByLabel("剧本输入方式", { exact: true }).selectOption("file");
           await directorPanel.getByLabel("上传剧本文件", { exact: true }).setInputFiles({
             name: "fixture-script.txt", mimeType: "text/plain", buffer: Buffer.from("雨夜，便利店还开着。"),
@@ -656,15 +660,18 @@ try {
           assert.equal(await page.getByLabel("剧本正文", { exact: true }).inputValue(), directorDraft);
           await page.reload();
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await directorPanel.getByRole("tab", { name: /剧本与拆分镜提案/ }).click();
           await directorPanel.getByText("已采用剧本", { exact: true }).waitFor();
           await page.evaluate(() => localStorage.setItem("lot:language", "en"));
           await page.reload();
           await page.getByRole("navigation", { name: "Production steps" }).getByRole("button", { name: /Script/ }).click();
+          await directorPanel.getByRole("tab", { name: /Script & breakdown proposals/ }).click();
           await directorPanel.getByText("Script adopted", { exact: true }).waitFor();
           await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
           await page.goto(deepLink);
           console.log("PASS W10 Web: revision downloads after edits, cancellation and recovery, global history, director import, ambiguity and persisted approval");
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+          await directorPanel.getByRole("tab", { name: /剧本与拆分镜提案/ }).click();
           await directorPanel.getByLabel("导演任务", { exact: true }).selectOption("breakdown");
           await directorPanel.getByRole("button", { name: "生成拆分镜提案", exact: true }).click();
           await directorPanel.getByRole("heading", { name: "建议分镜", exact: true }).waitFor();
@@ -675,8 +682,8 @@ try {
           assert.equal(await casting.locator("option").filter({ hasText: /^老板 · (圆框眼镜|左脸有疤) · [\da-f]{8}$/ }).count(), 2);
           const sends = generation!.counts.submits;
           await directorPanel.getByText("导演生成确认", { exact: true }).click();
-          await directorPanel.getByLabel("选择生成分镜", { exact: true }).selectOption({ label: "W11 雨夜相逢" });
-          await directorPanel.getByRole("button", { name: "预览生成费用", exact: true }).click();
+          await directorPanel.getByRole("checkbox", { name: /W11 雨夜相逢/ }).check();
+          await directorPanel.getByRole("button", { name: "预览生成费用（1）", exact: true }).click();
           await page.getByRole("dialog", { name: "生成费用预览" }).getByRole("button", { name: "取消", exact: true }).click();
           await page.reload();
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
@@ -687,6 +694,7 @@ try {
           await page.evaluate(() => localStorage.setItem("lot:language", "id"));
           await page.reload();
           await page.getByRole("navigation", { name: "Tahap produksi" }).getByRole("button", { name: /Naskah/ }).click();
+          await directorPanel.getByRole("tab", { name: /Proposal naskah & storyboard/ }).click();
           await directorPanel.getByRole("heading", { name: "Usulan pembagian adegan", exact: true }).waitFor();
           await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
           await page.goto(deepLink);
@@ -757,6 +765,7 @@ try {
                 await desktopPage.locator(".comic-export-history li").first().getByRole("button", { name: "下载 MP4", exact: true }).waitFor();
                 await desktopPage.goto(new URL(new URL(deepLink).pathname, desktopPage.url()).href);
                 await desktopPage.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
+                await desktopPage.locator(".comic-director").getByRole("tab", { name: /剧本与拆分镜提案/ }).click();
                 await desktopPage.locator(".comic-director").getByText("已应用分镜", { exact: true }).waitFor();
                 console.log("PASS W10 Electron: export history with download, saved director proposal and applied script");
               }

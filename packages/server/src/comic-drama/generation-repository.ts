@@ -247,8 +247,18 @@ export class PgComicGeneration {
         AND job.status IN ('pending','failed','cancelled','succeeded') AND EXISTS
         (SELECT 1 FROM ${namespace}.cd_takes t LEFT JOIN image_call_receipts receipt
           ON receipt.task_id=job.id AND receipt.user_id=t.owner_id::text AND receipt.slot=t.slot
-          WHERE t.request_id=$4 AND t.owner_id=$2::uuid AND ${incomplete} AND ${canResumeImageReceipt})`, [taskId, owner, COMIC_IMAGE_TASK, requestId]);
-      return !!rowCount;
+          WHERE t.request_id=$4 AND t.owner_id=$2::uuid AND t.cancel_requested_at IS NULL AND ${incomplete}
+            AND ${canResumeImageReceipt})`, [taskId, owner, COMIC_IMAGE_TASK, requestId]);
+      if (!rowCount) return false;
+      await db.query(`UPDATE ${namespace}.cd_takes t SET status='pending', error=NULL
+        WHERE t.request_id=$1 AND t.owner_id=$2::uuid AND t.video_version IS NULL
+          AND t.cancel_requested_at IS NULL AND ${incomplete}
+          AND NOT EXISTS (
+            SELECT 1 FROM image_call_receipts receipt
+            WHERE receipt.task_id=$3 AND receipt.user_id=t.owner_id::text AND receipt.slot=t.slot
+              AND receipt.state NOT IN ('submitted','completed')
+          )`, [requestId, owner, taskId]);
+      return true;
     });
   }
 
@@ -299,8 +309,11 @@ export class PgComicGeneration {
   }
 
   async isImageTakeStopped(owner: string, id: string): Promise<boolean> {
-    const { rows } = await this.pool.query<{ stopped: boolean }>(`SELECT (cancel_requested_at IS NOT NULL OR status NOT IN ('pending','running')) AS stopped
-      FROM ${namespace}.cd_takes WHERE owner_id=$1 AND id=$2 AND video_version IS NULL`, [owner, id]);
+    const { rows } = await this.pool.query<{ stopped: boolean }>(
+      `SELECT (cancel_requested_at IS NOT NULL OR status NOT IN ('pending','running','recoverable')) AS stopped
+       FROM ${namespace}.cd_takes WHERE owner_id=$1 AND id=$2 AND video_version IS NULL`,
+      [owner, id],
+    );
     return !rows[0] || rows[0].stopped;
   }
 
@@ -311,7 +324,7 @@ export class PgComicGeneration {
       );
       if (!parent.rowCount) libraryMissing();
       const { rows: [row] } = await db.query<{ status: string; slot: number; receiptState: string | null }>(`SELECT t.status, t.slot,
-        (SELECT r.state FROM image_call_receipts r WHERE r.task_id=$3 AND r.user_id=$1::text AND r.slot=t.slot) AS "receiptState"
+        (SELECT r.state FROM image_call_receipts r WHERE r.task_id=$3 AND r.user_id=t.owner_id::text AND r.slot=t.slot) AS "receiptState"
         FROM ${namespace}.cd_takes t JOIN ${namespace}.cd_generation_requests req ON (req.owner_id,req.id)=(t.owner_id,t.request_id)
         WHERE t.owner_id=$1 AND t.id=$2 AND req.task_id=$3 AND t.video_version IS NULL FOR UPDATE OF t`, [owner, id, taskId]);
       if (!row) libraryMissing();

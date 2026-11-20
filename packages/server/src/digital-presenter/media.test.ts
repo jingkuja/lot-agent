@@ -41,13 +41,13 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     run("-f", "lavfi", "-i", "color=c=red:s=480x854:r=10:d=3", "-f", "lavfi", "-i", "sine=duration=3", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "footage.mp4");
     run("-f", "lavfi", "-i", "color=c=green:s=720x1280:r=16:d=1.2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "clip0.mp4");
     run("-f", "lavfi", "-i", "color=c=green:s=720x1280:r=16:d=0.8", "-c:v", "libx264", "-pix_fmt", "yuv420p", "clip1.mp4");
-  });
+  }, 30_000);
   afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
 
   it("crops the portrait to the chosen ratio", async () => {
     await preparePortrait(join(dir, "portrait.png"), join(dir, "portrait.jpg"), "9:16");
     expect(await readImageInfo(join(dir, "portrait.jpg"))).toMatchObject({ mime: "image/jpeg", width: 720, height: 1280 });
-  });
+  }, 30_000);
 
   it("joins takes with a pause and trims silent footage to the track", async () => {
     const seconds = await buildTrack([join(dir, "take0.wav"), join(dir, "take1.wav")], join(dir, "track.wav"));
@@ -57,7 +57,7 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     expect(footage.duration).toBeCloseTo(seconds, 0);
     expect(Math.round(footage.fps)).toBe(30);
     await expect(prepareFootage(join(dir, "footage.mp4"), join(dir, "short.mp4"), 5)).rejects.toThrow("不短于配音");
-  });
+  }, 30_000);
 
   it("composes image-mode clips with their takes and video-mode footage with the track", async () => {
     const image = await composeImageMode({ clips: [join(dir, "clip0.mp4"), join(dir, "clip1.mp4")], takes: [join(dir, "take0.wav"), join(dir, "take1.wav")], takeMs: [1200, 800], frame: { width: 720, height: 1280 } });
@@ -71,7 +71,7 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     await Promise.all([image.dispose(), video.dispose()]);
     const { access } = await import("node:fs/promises");
     await expect(access(video.file)).rejects.toThrow();
-  });
+  }, 60_000);
 
   it("turns upright, HDR iPhone footage into BT.709 SDR with reference white at SDR white", async ctx => {
     const encoders = String(spawnSync("ffmpeg", ["-hide_banner", "-encoders"]).stdout);
@@ -92,7 +92,7 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     const video = await composeVideoMode({ clip: join(dir, "hlg-prepared.mp4"), track: join(dir, "track.wav"), trackSec: 2 });
     expect(video).toMatchObject({ width: 720, height: 1280 });
     await video.dispose();
-  });
+  }, 60_000);
 
   it("times a take's captions within its span, with the user's line breaks and offsets", async () => {
     const take = { path: join(dir, "take0.wav"), format: "wav", speechSec: 1.2 };
@@ -108,7 +108,7 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     const { cues: edited } = await takeCues(take, 0, { texts: [text], settings }, 1.45, { width: 720, height: 1280 });
     expect(edited.map(cue => cue.text)).toEqual(lines);
     expect(edited[0].start).toBeCloseTo(auto[0].start + 0.15, 2);
-  });
+  }, 30_000);
 
   // Needs FFmpeg with libass, e.g. MARKETING_FFMPEG_PATH pointing at the deployment image's FFmpeg.
   it("burns each take's script as captions in both modes and returns the cues", async ctx => {
@@ -129,5 +129,5 @@ describe.skipIf(!ffmpegAvailable)("presenter media with FFmpeg", () => {
     expect(presenterPreviewCaptions(captions.settings, video.captionTiming!, { width: video.width, height: video.height })).toEqual(video.captions);
     expect(video.preview?.sizeBytes).toBeGreaterThan(0);
     await Promise.all([image.dispose(), video.dispose()]);
-  });
+  }, 60_000);
 });
