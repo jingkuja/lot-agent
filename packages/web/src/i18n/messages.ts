@@ -12,6 +12,25 @@ export const messages: Record<string, { en: string; id: string }> = {
   "这句配音正在合成": { en: "This line is being synthesized.", id: "Baris ini sedang disintesis." },
   "语音服务暂不可用，请检查模型账号": { en: "Speech is unavailable. Check your model account.", id: "Layanan suara tidak tersedia. Periksa akun model Anda." },
   "配音结果待核实，原请求可能已计费": { en: "Speech result is unverified. The gateway may have charged the request.", id: "Hasil suara belum terverifikasi. Gateway mungkin sudah menagih permintaan." },
+  "此句配音暂不可释放，请重新读取台词": { en: "This line cannot be released right now. Reload the dialogue.", id: "Baris ini belum dapat dilepas sekarang. Muat ulang dialog." },
+  "原配音请求可能已扣费。释放后可重新合成，新请求可能再次扣费。确认释放？": {
+    en: "The previous speech request may have been charged. Synthesizing again may incur another charge. Release it?",
+    id: "Permintaan suara sebelumnya mungkin sudah ditagih. Sintesis ulang mungkin dikenakan biaya lagi. Lepaskan?",
+  },
+  "费用待核实": { en: "Price pending verification", id: "Biaya perlu diverifikasi" },
+  "费用待核实，暂不可提交": { en: "Price pending verification; submission unavailable", id: "Biaya perlu diverifikasi; tidak dapat dikirim" },
+  "内容未通过安全合规检查，请修改剧本、分镜或台词后重试": {
+    en: "Content did not pass safety compliance screening. Edit the script, storyboard, or dialogue and try again.",
+    id: "Konten tidak lolos pemeriksaan kepatuhan keamanan. Ubah naskah, papan cerita, atau dialog lalu coba lagi.",
+  },
+  "导出正片包含 AI 生成内容，发布至外部平台时请按平台规范标注“内容由 AI 生成”。": {
+    en: "Exported videos contain AI-generated content. Label them as “AI-generated” per platform rules when publishing.",
+    id: "Video ekspor berisi konten buatan AI. Cantumkan label “Dibuat dengan AI” sesuai aturan platform saat memublikasikan.",
+  },
+  "导出最多支持 5 分钟、60 段视频及 240 条音频": {
+    en: "Export supports up to 5 minutes, 60 video clips, and 240 audio items.",
+    id: "Ekspor mendukung maksimal 5 menit, 60 klip video, dan 240 item audio.",
+  },
   "新建剪辑工程": { en: "New editing project", id: "Proyek edit baru" },
   "创建工程": { en: "Create project", id: "Buat proyek" },
   "工程名称": { en: "Project name", id: "Nama proyek" },

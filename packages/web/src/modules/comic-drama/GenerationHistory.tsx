@@ -66,3 +66,35 @@ export function RecoverComicImage({ take, refreshed }: { take: ComicImageTake; r
     {error && <span className="comic-error" role="alert">{t(error)}</span>}
   </>;
 }
+
+export function ImageTakeActions({ take, refreshed }: { take: ComicImageTake; refreshed: () => void }) {
+  const { t } = useI18n();
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const run = async (action: "recover" | "cancel" | "release") => {
+    if (pending.current) return;
+    if (action === "release" && !window.confirm(t("原请求可能已扣费。释放后可重新报价，新请求可能再次扣费。确认释放？"))) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      if (action === "recover") await comicGenerationApi.recover(take.requestId);
+      else await comicGenerationApi.imageAction(take.id, action);
+      refreshed();
+    } catch (reason) { setError(comicGenerationError(reason)); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  const canCancel = (take.state === "pending" || take.state === "running" || take.state === "recoverable") && !take.cancelRequested;
+  const canRecover = take.state === "recoverable";
+  const canRelease = take.state === "unknown";
+  if (!canCancel && !canRecover && !canRelease) return null;
+  return <>
+    <div className="comic-actions">
+      {canRecover && <button type="button" disabled={busy} onClick={() => void run("recover")}>{t(busy ? "提交中…" : "恢复原任务")}</button>}
+      {canCancel && <button type="button" disabled={busy} onClick={() => void run("cancel")}>{t("停止此项")}</button>}
+      {canRelease && <button type="button" disabled={busy} onClick={() => void run("release")}>{t("释放旧提交")}</button>}
+    </div>
+    {error && <span className="comic-error" role="alert">{t(error)}</span>}
+  </>;
+}

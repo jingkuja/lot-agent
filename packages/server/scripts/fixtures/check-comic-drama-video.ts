@@ -13,6 +13,7 @@ import {
 import type { ComicMediaLibrary } from "../../src/comic-drama/media-library.js";
 import { runComicVideoGeneration } from "../../src/comic-drama/video-worker.js";
 import { PgComicGeneration } from "../../src/comic-drama/generation-repository.js";
+import { queryComicDramaReport } from "../../src/comic-drama/operations-report.js";
 import type { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
 import { COMIC_VIDEO_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-queues.js";
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
@@ -192,6 +193,18 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal((await receipt(uncertain.id)).gatewayRequestId, "fixture-unknown-video");
   assert.ok((await preview(ep, [unknown])).confirmationId);
   assert.equal(submitted.length, 3);
+  const opsReport = await queryComicDramaReport(pool, 24);
+  const badReconcile = opsReport.toReconcile.find(row => row.take_id === bad.id);
+  assert.ok(badReconcile, "502 VIDEO_GATEWAY_FAILED take must appear in reconciliation report");
+  assert.equal(badReconcile.request_id, mixed.id);
+  assert.equal(badReconcile.task_id, mixed.taskId);
+  assert.equal(badReconcile.gateway_http_status, 502);
+  assert.equal(badReconcile.error, "VIDEO_GATEWAY_FAILED");
+  assert.equal(badReconcile.error_category, "gateway_5xx");
+  assert.equal(badReconcile.gateway_request_id, "fixture-rejected");
+  const releasedReconcile = opsReport.toReconcile.find(row => row.take_id === uncertain.id);
+  assert.equal(releasedReconcile?.error_category, "released");
+  assert.equal(releasedReconcile?.gateway_request_id, "fixture-unknown-video");
 
   await json(ep.path + `/clips/${rejected.id}/video/adopt`, "POST", { takeId: good.id, expectedClipRevision: rejected.revision }, 409);
   await json(clipPath + "/video/adopt", "POST", { takeId: good.id, expectedClipRevision: ready.revision });
@@ -251,7 +264,17 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   const siblingFrame = (await settled((await confirm(kling, await preview(kling, [sibling], "keyframe"))).id)).takes[0];
   await json(kling.path + `/clips/${sibling.id}/keyframe/confirm`, "POST",
     { keyframeTakeId: siblingFrame.id, expectedClipRevision: sibling.revision });
-  const run = await confirm(kling, await preview(kling, undefined, "from_keyframe", references));
+  const staleRefQuote = await preview(kling, [kling.detail.clips[0]], "from_keyframe", references);
+  const replaceMaterial = await app.request(COMIC_DRAMA_API_ROOT + `/materials/${savedFrame.id}/files`, {
+    method: "POST",
+    headers: { Authorization: "Bearer fixture-one", "Content-Type": "image/png" },
+    body: new Uint8Array(await comicFixturePng("#405060")),
+  });
+  assert.equal(replaceMaterial.status, 201);
+  assert.equal((await json<{ code: string }>(kling.path + "/generate", "POST", { confirmationId: staleRefQuote.confirmationId }, 409)).code, "QUOTE_STALE");
+  const latestVersions = await json<{ media: { id: string } }[]>(`/materials/${savedFrame.id}/versions`);
+  const freshReferences = { visualReferences: [{ materialId: savedFrame.id, mediaId: latestVersions[0].media.id, kind: "scene" }] };
+  const run = await confirm(kling, await preview(kling, undefined, "from_keyframe", freshReferences));
   await until(() => state.waiting);
   const stopped = await confirm(ep, await preview(ep, [rejected]));
   await json(`/video-takes/${run.takes[1].id}/cancel`, "POST", {});

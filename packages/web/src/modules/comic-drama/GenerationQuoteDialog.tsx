@@ -7,7 +7,7 @@ import { libraryError } from "./LibraryParts.js";
 const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"], string>> = {
   NO_SHOTS: "请填写镜头描述",
   BUSY: "已有待处理的生成任务",
-  PRICE_UNAVAILABLE: "图片模型或报价暂不可用",
+  PRICE_UNAVAILABLE: "费用待核实，暂不可提交",
   CAST_REFERENCE_MISSING: "缺少锁定的角色参考图",
   REFERENCE_LIMIT: "参考图数量超出模型限制",
   PROMPT_TOO_LONG: "分镜内容过长",
@@ -19,6 +19,7 @@ const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"],
 };
 const errors: Record<string, string> = {
   COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
+  CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
   QUOTE_EXPIRED: "报价已过期，请重新询价",
   PRICE_CHANGED: "模型或价格已更新，请重新询价",
   QUOTE_STALE: "素材或分镜已更新，请重新询价",
@@ -58,8 +59,11 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted 
     const timeout = setTimeout(() => setExpired(true), Math.max(0, Date.parse(quote.expiresAt) - Date.now()));
     return () => clearTimeout(timeout);
   }, [quote.expiresAt]);
-  const currency = new Intl.NumberFormat(locale, { style: "currency", currency: quote.currency, maximumFractionDigits: 6 });
-  const format = (micros: number | null) => micros === null ? "—" : currency.format(micros / 1_000_000);
+  const currency = new Intl.NumberFormat(locale, {
+    style: "currency", currency: quote.currency, minimumFractionDigits: 0, maximumFractionDigits: 6,
+  });
+  const priceUnverified = quote.totalMicros === null && quote.skipped.some(item => item.reason === "PRICE_UNAVAILABLE");
+  const format = (micros: number | null) => micros === null ? (priceUnverified ? t("费用待核实") : "—") : currency.format(micros / 1_000_000);
   const unavailable = !quote.confirmationId || retry === "new" || expired && retry !== "same";
   const submit = async () => {
     if (!quote.confirmationId || pending.current || unavailable) return;

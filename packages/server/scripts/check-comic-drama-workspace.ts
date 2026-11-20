@@ -279,8 +279,13 @@ try {
         await page.getByRole("dialog").getByRole("button", { name: "上传", exact: true }).click();
         await card.getByText(/版本 2/).waitFor();
         await card.getByRole("button", { name: "版本历史" }).click();
-        await page.getByRole("dialog").getByRole("img", { name: "版本 1" }).waitFor();
-        await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
+        const versionsDialog = page.getByRole("dialog", { name: "版本历史" });
+        await versionsDialog.getByRole("img", { name: "版本 1" }).waitFor();
+        await versionsDialog.getByRole("button", { name: "查看原件" }).first().click();
+        const originalDialog = page.getByRole("dialog", { name: "查看原件" });
+        await originalDialog.locator("img").waitFor();
+        await originalDialog.getByRole("button", { name: "关闭", exact: true }).click();
+        await versionsDialog.getByRole("button", { name: "关闭", exact: true }).click();
         await page.setViewportSize({ width: 390, height: 844 });
         await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
         assert.ok(await page.evaluate(() => {
@@ -524,10 +529,7 @@ try {
         let w9EditLink: string | undefined;
         if (pauseRender) {
           await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /剧本/ }).click();
-          await page.getByText("拆分镜差异样例", { exact: true }).click();
-          await page.getByRole("heading", { name: "将移除的分镜", exact: true }).waitFor();
-          await page.getByRole("button", { name: "追加预览", exact: true }).click();
-          await page.getByRole("heading", { name: "保留的分镜", exact: true }).waitFor();
+          assert.equal(await page.getByText("拆分镜差异样例").count(), 0);
           assert.equal(await page.getByLabel("剧本正文").inputValue(), "雨夜的便利店仍在营业。");
           await page.goto(base + "/comic-drama/editor/" + editFixture.a1.takeId);
           await page.getByRole("button", { name: "以此片源创建工程", exact: true }).click();
@@ -760,7 +762,18 @@ try {
               }
               await desktopPage.getByRole("button", { name: "素材库", exact: true }).click();
               await desktopPage.waitForFunction(() => Array.from(document.images).some(img => img.alt === "W3 夜景" && img.naturalWidth === 480));
-              console.log("PASS W2–W4 Electron: preload, deep link, locked cast snapshot and signed media preview through loopback");
+              const desktopCard = desktopPage.locator(".comic-library-card").filter({ hasText: "W3 夜景" });
+              await desktopCard.getByRole("button", { name: "版本历史" }).click();
+              const desktopVersions = desktopPage.getByRole("dialog", { name: "版本历史" });
+              await desktopVersions.getByRole("button", { name: "查看原件" }).first().click();
+              const desktopOriginal = desktopPage.getByRole("dialog", { name: "查看原件" });
+              await desktopPage.waitForFunction(() => {
+                const img = document.querySelector<HTMLImageElement>(".comic-media-viewer img");
+                return Boolean(img && img.complete && img.naturalWidth > 0);
+              });
+              await desktopOriginal.getByRole("button", { name: "关闭", exact: true }).click();
+              await desktopVersions.getByRole("button", { name: "关闭", exact: true }).click();
+              console.log("PASS W2–W4 Electron: preload, deep link, locked cast snapshot, in-app original viewer and signed media preview through loopback");
             } finally { await desktop.close(); }
           } finally { await rm(profile, { recursive: true, force: true }); }
         }

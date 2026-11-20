@@ -1,11 +1,14 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMIC_RENDER_FPS, comicFrame, comicRenderIssue, layoutComicTimeline, type ComicTimeline } from "@lot-agent/core/comic-drama";
+import {
+  COMIC_RENDER_FPS, COMIC_RENDER_MAX_INPUTS, comicFrame, comicRenderIssue, layoutComicTimeline, type ComicTimeline,
+} from "@lot-agent/core/comic-drama";
 import { ffmpeg, inspectMedia, mediaCapabilities, mediaProcess } from "../marketing-video/media.js";
 import { captionAss } from "../marketing-video/subtitles.js";
 
 export type ComicRenderSource = { path: string; durationMs: number };
+export const COMIC_RENDER_PREMIX_BATCH = 32;
 const fps = COMIC_RENDER_FPS;
 const rate = 48_000;
 const sec = (ms: number) => (ms / 1000).toFixed(6);
@@ -20,6 +23,110 @@ export class ComicRenderFailure extends Error {
 
 type Media = Awaited<ReturnType<typeof inspectMedia>>;
 type TrackSource = ComicRenderSource & { info: Media };
+type AudioTrackName = "voice" | "music" | "sfx";
+type AudioClip = ComicTimeline[AudioTrackName][number];
+export type PremixClipEntry = {
+  path: string;
+  format: string;
+  sourceDurationMs: number;
+  startMs: number;
+  clip: AudioClip;
+};
+export type PremixPass = {
+  output: string;
+  inputCount: number;
+  args: string[];
+};
+
+export function shouldPremixComicAudio(timeline: ComicTimeline): boolean {
+  return timeline.video.length + timeline.voice.length + timeline.sfx.length + timeline.music.length > COMIC_RENDER_MAX_INPUTS;
+}
+
+export function buildAudioItemFilter(clip: AudioClip, sourceDurationMs: number, startMs: number): string {
+  const filters = [stereo, `atrim=start=${sec(clip.sourceInMs)}`, "asetpts=N/SR/TB"];
+  if (clip.loop) filters.push(`aloop=loop=-1:size=${(sourceDurationMs - clip.sourceInMs) * rate / 1000}`);
+  filters.push(`atrim=duration=${sec(clip.durationMs)}`, `volume=${clip.volume}`);
+  if (clip.fadeInMs) filters.push(`afade=t=in:d=${sec(clip.fadeInMs)}`);
+  if (clip.fadeOutMs) filters.push(`afade=t=out:st=${sec(clip.durationMs - clip.fadeOutMs)}:d=${sec(clip.fadeOutMs)}`);
+  filters.push(delay(startMs));
+  return filters.join(",");
+}
+
+function buildStemMixPass(
+  inputs: { path: string; format: string; filter: string }[],
+  duration: string,
+  output: string,
+): PremixPass {
+  const args = ["-nostdin", "-y", "-v", "error", "-filter_complex_threads", "2"];
+  const graph: string[] = [];
+  const mix = ["[silence]"];
+  inputs.forEach((entry, index) => {
+    args.push("-threads", "1", "-protocol_whitelist", "file,pipe", "-f", entry.format, "-i", entry.path);
+    graph.push(`[${index}:a:0]${entry.filter}[a${index}]`);
+    mix.push(`[a${index}]`);
+  });
+  graph.push(`anullsrc=r=${rate}:cl=stereo:d=${duration}[silence]`);
+  graph.push(`${mix.join("")}amix=inputs=${mix.length}:duration=first:normalize=0[stem]`);
+  args.push("-filter_complex", graph.join(";"), "-map", "[stem]", "-t", duration,
+    "-f", "wav", "-c:a", "pcm_f32le", "-ar", String(rate), "-ac", "2", output);
+  return { output, inputCount: inputs.length, args };
+}
+
+/**
+ * Plans bounded-input FFmpeg premix passes for a single audio track so even 240 audio items
+ * never exceed `COMIC_RENDER_PREMIX_BATCH` inputs per FFmpeg process.
+ */
+export function planAudioStemPremix(
+  track: AudioTrackName,
+  entries: PremixClipEntry[],
+  duration: string,
+  batchSize = COMIC_RENDER_PREMIX_BATCH,
+): { passes: PremixPass[]; finalStem: string } {
+  const finalStem = `stem-${track}.wav`;
+  if (entries.length <= batchSize) {
+    const pass = buildStemMixPass(
+      entries.map(entry => ({
+        path: entry.path,
+        format: entry.format,
+        filter: buildAudioItemFilter(entry.clip, entry.sourceDurationMs, entry.startMs),
+      })),
+      duration,
+      finalStem,
+    );
+    return { passes: [pass], finalStem };
+  }
+  const passes: PremixPass[] = [];
+  let stageFiles: string[] = [];
+  for (let offset = 0, part = 0; offset < entries.length; offset += batchSize, part++) {
+    const chunk = entries.slice(offset, offset + batchSize);
+    const out = `stem-${track}-p0-${part}.wav`;
+    passes.push(buildStemMixPass(
+      chunk.map(entry => ({
+        path: entry.path,
+        format: entry.format,
+        filter: buildAudioItemFilter(entry.clip, entry.sourceDurationMs, entry.startMs),
+      })),
+      duration,
+      out,
+    ));
+    stageFiles.push(out);
+  }
+  let level = 1;
+  while (stageFiles.length > batchSize) {
+    const next: string[] = [];
+    for (let offset = 0, part = 0; offset < stageFiles.length; offset += batchSize, part++) {
+      const chunk = stageFiles.slice(offset, offset + batchSize);
+      const out = `stem-${track}-p${level}-${part}.wav`;
+      passes.push(buildStemMixPass(chunk.map(path => ({ path, format: "wav", filter: stereo })), duration, out));
+      next.push(out);
+    }
+    stageFiles = next;
+    level++;
+  }
+  passes.push(buildStemMixPass(stageFiles.map(path => ({ path, format: "wav", filter: stereo })), duration, finalStem));
+  return { passes, finalStem };
+}
+
 async function probe(source: ComicRenderSource, video: boolean, signal: AbortSignal): Promise<TrackSource> {
   const info = await inspectMedia(source.path, signal).catch(() => null);
   signal.throwIfAborted();
@@ -32,7 +139,7 @@ async function probe(source: ComicRenderSource, video: boolean, signal: AbortSig
 
 export async function composeComicRender(timeline: ComicTimeline, inputs: {
   videos: ReadonlyMap<string, ComicRenderSource>; audio: ReadonlyMap<string, ComicRenderSource>;
-}, signal: AbortSignal) {
+}, signal: AbortSignal, options: { forcePremix?: boolean } = {}) {
   const issue = comicRenderIssue(timeline);
   if (issue) throw new ComicRenderFailure(issue);
   const support = await mediaCapabilities();
@@ -50,15 +157,27 @@ export async function composeComicRender(timeline: ComicTimeline, inputs: {
   const [width, height] = bounds[timeline.aspectRatio];
   const layout = layoutComicTimeline(timeline);
   const duration = frameSec(comicFrame(layout.durationMs));
+  const audioTrackEntries = new Map<AudioTrackName, PremixClipEntry[]>();
+  for (const track of ["voice", "music", "sfx"] as const) {
+    const entries: PremixClipEntry[] = [];
+    for (const [index, clip] of timeline[track].entries()) {
+      const source = audioSources.get(clip.mediaId);
+      if (!source || clip.sourceInMs >= source.durationMs || (!clip.loop && clip.sourceInMs + clip.durationMs > source.durationMs)) {
+        throw new ComicRenderFailure("RENDER_SOURCE_CHANGED");
+      }
+      entries.push({ path: source.path, format: source.info.format, sourceDurationMs: source.durationMs, startMs: layout[track][index].startMs, clip });
+    }
+    if (entries.length) audioTrackEntries.set(track, entries);
+  }
+
   const args = ["-nostdin", "-y", "-v", "error", "-filter_complex_threads", "2"];
   const graph: string[] = [];
   const mix: string[] = ["[silence]"];
   let nextInput = 0;
-  const addInput = (source: TrackSource) => {
-    const format = source.info.format;
+  const addInput = (path: string, format: string) => {
     args.push("-threads", "1", "-protocol_whitelist", "file,pipe", "-f", format);
     if (format === "mov") args.push("-enable_drefs", "0");
-    args.push("-i", source.path);
+    args.push("-i", path);
     return nextInput++;
   };
   const scale = `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
@@ -68,7 +187,7 @@ export async function composeComicRender(timeline: ComicTimeline, inputs: {
     signal.throwIfAborted();
     const source = videoSources.get(clip.takeId);
     if (!source || source.durationMs !== clip.sourceDurationMs) throw new ComicRenderFailure("RENDER_SOURCE_CHANGED");
-    const input = addInput(source);
+    const input = addInput(source.path, source.info.format);
     const item = layout.video[index];
     const frames = comicFrame(item.endMs) - comicFrame(item.startMs);
     const from = Math.floor(clip.inMs * fps / 1000);
@@ -91,28 +210,35 @@ export async function composeComicRender(timeline: ComicTimeline, inputs: {
     graph.push(`[${input}:a:0]${filters.join(",")}[original${index}]`);
     mix.push(`[original${index}]`);
   }
-  for (const track of ["voice", "music", "sfx"] as const) {
-    for (const [index, clip] of timeline[track].entries()) {
-      const source = audioSources.get(clip.mediaId);
-      if (!source || clip.sourceInMs >= source.durationMs || (!clip.loop && clip.sourceInMs + clip.durationMs > source.durationMs)) {
-        throw new ComicRenderFailure("RENDER_SOURCE_CHANGED");
-      }
-      const label = `[${track}${index}]`;
-      const filters = [stereo, `atrim=start=${sec(clip.sourceInMs)}`, "asetpts=N/SR/TB"];
-      if (clip.loop) filters.push(`aloop=loop=-1:size=${(source.durationMs - clip.sourceInMs) * rate / 1000}`);
-      filters.push(`atrim=duration=${sec(clip.durationMs)}`, `volume=${clip.volume}`);
-      if (clip.fadeInMs) filters.push(`afade=t=in:d=${sec(clip.fadeInMs)}`);
-      if (clip.fadeOutMs) filters.push(`afade=t=out:st=${sec(clip.durationMs - clip.fadeOutMs)}:d=${sec(clip.fadeOutMs)}`);
-      filters.push(delay(layout[track][index].startMs));
-      graph.push(`[${addInput(source)}:a:0]${filters.join(",")}${label}`);
-      mix.push(label);
-    }
-  }
-  graph.push(`anullsrc=r=${rate}:cl=stereo:d=${duration}[silence]`);
-  graph.push(`${mix.join("")}amix=inputs=${mix.length}:duration=first:normalize=0,alimiter=limit=0.97:level=0:latency=1[audio]`);
+
+  const premix = options.forcePremix || shouldPremixComicAudio(timeline);
   const folder = await mkdtemp(join(tmpdir(), "lot-comic-render-"));
   const dispose = () => rm(folder, { recursive: true, force: true });
   try {
+    if (premix) {
+      for (const [track, entries] of audioTrackEntries) {
+        signal.throwIfAborted();
+        const plan = planAudioStemPremix(track, entries, duration);
+        for (const pass of plan.passes) {
+          signal.throwIfAborted();
+          await mediaProcess(ffmpeg(), pass.args, { cwd: folder, signal, timeoutMs: 300_000 });
+        }
+        const label = `[stem_${track}]`;
+        graph.push(`[${addInput(join(folder, plan.finalStem), "wav")}:a:0]${stereo}${label}`);
+        mix.push(label);
+      }
+    } else {
+      for (const [track, entries] of audioTrackEntries) {
+        for (const [index, entry] of entries.entries()) {
+          const label = `[${track}${index}]`;
+          const filter = buildAudioItemFilter(entry.clip, entry.sourceDurationMs, entry.startMs);
+          graph.push(`[${addInput(entry.path, entry.format)}:a:0]${filter}${label}`);
+          mix.push(label);
+        }
+      }
+    }
+    graph.push(`anullsrc=r=${rate}:cl=stereo:d=${duration}[silence]`);
+    graph.push(`${mix.join("")}amix=inputs=${mix.length}:duration=first:normalize=0,alimiter=limit=0.97:level=0:latency=1[audio]`);
     let captions = "";
     if (timeline.subtitles.length) {
       const cues = timeline.subtitles.map((caption, index) => ({

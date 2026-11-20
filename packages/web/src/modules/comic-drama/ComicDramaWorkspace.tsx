@@ -18,7 +18,6 @@ import { ComicVideoHistory } from "./ComicVideoHistory.js";
 import { ComicEditorSource } from "./ComicEditorSource.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
 import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
-import { ComicBreakdownSample } from "./ComicBreakdownSample.js";
 import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
 import type { DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
@@ -394,7 +393,6 @@ export function ComicDramaWorkspace({ user, pathname, active, navigate, replaceP
               <label>{t("剧本正文")}<textarea aria-label={t("剧本正文")} rows={16} maxLength={20000} disabled={locked}
                 value={editor.script?.content ?? detail.script?.content ?? ""} onChange={event => editScript(event.target.value)} /></label>
               {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
-              <ComicBreakdownSample />
             </section>
             <ComicDirectorPanel key={series.id} detail={detail} locked={locked || !!editor.issue}
               getSaved={async () => await flush() ? getDetail() : null} apply={applyProposal} applyRole={applyDirectorRole}

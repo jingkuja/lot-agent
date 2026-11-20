@@ -6,6 +6,7 @@ import {
   type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicVoiceBind, type ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { readComicDictionary } from "./dictionary.js";
+import { assertComicDramaCompliance } from "./compliance.js";
 import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
@@ -118,7 +119,7 @@ export class ComicEditSpeech {
     return null;
   }
 
-  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
+  private async prepare(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest) {
     const source = await this.lines(owner, editId, itemId, fields.expectedRevision);
     if (source.clipRevision !== fields.expectedClipRevision) throw new ComicLibraryError("EDIT_DIALOGUE_CHANGED", 409);
     const line = source.lines.find(line => line.id === lineId);
@@ -130,6 +131,21 @@ export class ComicEditSpeech {
     const instructions = emotions.find(entry => entry.key === line.emotionKey)?.labels.en;
     const input = { text: line.text, instructions, speed: line.speed };
     const fingerprint = digest([1, scope, version, voice, input, "wav"]);
+    return { line, voice, clone, input, fingerprint };
+  }
+
+  async release(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest) {
+    const { fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields);
+    const result = await this.pool.query(`UPDATE ${cd}.cd_speech_cache SET status='released',updated_at=now()
+      WHERE owner_id=$1 AND fingerprint=$2
+        AND (status IN ('unknown','released') OR (status='submitting' AND updated_at<now()-interval '5 minutes'))`,
+    [owner, fingerprint]);
+    if (!result.rowCount) throw new ComicLibraryError("EDIT_SPEECH_NOT_RELEASABLE", 409);
+  }
+
+  async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
+    const { line, voice, clone, input, fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields);
+    assertComicDramaCompliance([{ field: "dialogue", text: line.text }]);
     const existing = await this.cached(owner, fingerprint);
     if (existing) return existing;
     accepting?.();
@@ -138,7 +154,7 @@ export class ComicEditSpeech {
     if (!provider) throw new ComicLibraryError("EDIT_SPEECH_UNAVAILABLE", 503);
     signal.throwIfAborted();
     const claimed = await this.pool.query(`INSERT INTO ${cd}.cd_speech_cache AS c(owner_id,fingerprint,status) VALUES($1,$2,'submitting')
-      ON CONFLICT (owner_id,fingerprint) DO UPDATE SET status='submitting',updated_at=now(),gateway_request_id=NULL WHERE c.status='failed'`,
+      ON CONFLICT (owner_id,fingerprint) DO UPDATE SET status='submitting',updated_at=now(),gateway_request_id=NULL WHERE c.status IN ('failed','released')`,
     [owner, fingerprint]);
     if (!claimed.rowCount) {
       const winner = await this.cached(owner, fingerprint);

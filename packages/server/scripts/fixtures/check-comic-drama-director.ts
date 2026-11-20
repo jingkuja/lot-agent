@@ -5,6 +5,7 @@ import { Document, Packer, Paragraph } from "docx";
 import type { Hono } from "hono";
 import type { Pool } from "pg";
 import type { LLMProvider } from "@lot-agent/core";
+import { mapAnthropicStream, mapOpenAIStream, mapResponsesStream } from "@lot-agent/core";
 import {
   COMIC_DIRECTOR_AGENT_ID, COMIC_DRAMA_API_ROOT, COMIC_SCRIPT_DOCX,
   type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorState, type ComicScriptImport,
@@ -16,6 +17,46 @@ import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js
 
 type App = Hono<{ Variables: { userId: string } }>;
 export const directorDraft = "W10 导演草稿\n\n林夏推开便利店的门。\n老板：今天还营业。";
+
+async function* streamOf<T>(items: T[]): AsyncIterable<T> {
+  for (const item of items) yield item;
+}
+
+function openAiToolStream(id: string, name: string, args: unknown, finish: "tool_calls" | "length" | "content_filter" = "tool_calls") {
+  return mapOpenAIStream(streamOf([
+    { choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: finish }] },
+  ] as never[]));
+}
+
+function openAiTextStream(content: string, finish: "stop" | "length" | "content_filter" = "stop") {
+  return mapOpenAIStream(streamOf([
+    { choices: [{ delta: { content }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: finish }] },
+  ] as never[]));
+}
+
+function anthropicToolStream(id: string, name: string, args: unknown, stopReason: "tool_use" | "max_tokens" | "refusal" = "tool_use") {
+  return mapAnthropicStream(streamOf([
+    { type: "message_start", message: { id: "msg_" + id, usage: { input_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name, input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(args) } },
+    { type: "message_delta", usage: { output_tokens: 20 }, delta: { stop_reason: stopReason } },
+    { type: "message_stop" },
+  ] as never[]));
+}
+
+function responsesToolStream(id: string, name: string, args: unknown) {
+  return mapResponsesStream(streamOf([{
+    type: "response.completed",
+    response: {
+      id: "resp_" + id, status: "completed",
+      output: [{ type: "function_call", call_id: id, name, arguments: JSON.stringify(args), status: "completed" }],
+      usage: { input_tokens: 10, output_tokens: 20 },
+    },
+  }] as never[]), "fixture-director");
+}
+
 export function mountComicDirector(app: App, pool: Pool, owner: string, accepting?: () => void) {
   const calls: string[] = [];
   const llm: LLMProvider = {
@@ -29,22 +70,41 @@ export function mountComicDirector(app: App, pool: Pool, owner: string, acceptin
       if (tools?.[0]?.name === "breakdown_script") {
         assert.equal(tools.length, 1);
         if (input.source === "fixture unauthorized tool") {
-          yield { type: "tool_call", toolCall: { id: "refused", name: "request_generation", arguments: {} } };
-        } else {
-          const value = { clips: [{ scene: "W11 雨夜相逢", durationMs: 4000, shots: input.source === "fixture empty shot" ? [] : ["店主推开窗。"],
-            lines: [{ speaker: "老板", text: "营业到凌晨。" }] }], characters };
-          if (input.source === "fixture JSON adapter") yield { type: "text", content: JSON.stringify(value) };
-          else yield { type: "tool_call", toolCall: { id: "fixture-breakdown", name: "breakdown_script", arguments: value } };
+          yield* openAiToolStream("refused", "request_generation", {});
+          return;
         }
-        yield { type: "done", finishReason: "stop" };
+        const value = { clips: [{ scene: "W11 雨夜相逢", durationMs: 4000, shots: input.source === "fixture empty shot" ? [] : ["店主推开窗。"],
+          lines: [{ speaker: "老板", text: "营业到凌晨。" }] }], characters };
+        if (input.source === "fixture truncated") {
+          yield* openAiToolStream("trunc", "breakdown_script", value, "length");
+        } else if (input.source === "fixture filtered") {
+          yield* anthropicToolStream("filter", "breakdown_script", value, "refusal");
+        } else if (input.source === "fixture JSON adapter") {
+          yield* openAiTextStream(JSON.stringify(value));
+        } else if (input.source === "fixture anthropic tool") {
+          yield* anthropicToolStream("anth", "breakdown_script", value);
+        } else {
+          yield* openAiToolStream("fixture-breakdown", "breakdown_script", value);
+        }
         return;
       }
-      assert.ok(!tools || tools[0].name === "continue_series");
-      yield { type: "text", content: input.source === "fixture invalid" ? "{bad" : JSON.stringify({
+      if (tools?.[0]?.name === "continue_series") {
+        assert.equal(tools.length, 1);
+        const sequelPayload = { script: directorDraft, characters };
+        if (input.source === "fixture sequel truncated") {
+          yield* openAiTextStream(JSON.stringify(sequelPayload), "length");
+        } else if (input.source === "fixture sequel JSON") {
+          yield* openAiTextStream(JSON.stringify(sequelPayload));
+        } else {
+          yield* responsesToolStream("fixture-sequel", "continue_series", sequelPayload);
+        }
+        return;
+      }
+      assert.ok(!tools);
+      yield* openAiTextStream(input.source === "fixture invalid" ? "{bad" : JSON.stringify({
         script: directorDraft,
         characters,
-      }) };
-      yield { type: "done", finishReason: "stop" };
+      }));
     },
   };
   const repo = new PgComicDirector(pool);

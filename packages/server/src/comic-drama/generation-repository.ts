@@ -8,10 +8,16 @@ import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, taskQueueName } from "../jobs/task-
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { insertComicCharacterVersion, insertComicMedia } from "./library-repository.js";
 import { requireComicChoice } from "./dictionary.js";
+import { assertComicDramaCompliance } from "./compliance.js";
+import { comicQuoteCurrency } from "./pricing.js";
 
 export type ComicGenerationScope = { kind: "series" | "character"; id: string };
-export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second" };
-type FrozenQuote = { stamp: string; price: ComicPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[] };
+export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second"; currency?: "CNY" | "USD" };
+export type FrozenVisualReference = { materialId: string; mediaId: string; version: number };
+type FrozenQuote = {
+  stamp: string; price: ComicPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[];
+  visualReferences?: FrozenVisualReference[];
+};
 type RequestRow = { id: string; taskId: string | null; confirmed: boolean; valid: boolean; frozen: FrozenQuote };
 export type ComicWorkItem = { id: string; slot: number; input: ComicImageTakeInput };
 export const comicJobLockKey = (id: string) => `comic-drama-image:${id}`;
@@ -64,26 +70,29 @@ export class PgComicGeneration {
   }
 
   async quote(owner: string, scope: ComicGenerationScope, stamp: string, price: ComicPrice | null,
-    inputs: ComicTakeInput[], skipped: ComicGenerationQuote["skipped"], replaceAdopted?: string[]): Promise<ComicGenerationQuote> {
+    inputs: ComicTakeInput[], skipped: ComicGenerationQuote["skipped"], replaceAdopted?: string[],
+    visualReferences?: FrozenVisualReference[], defaultCurrency: "CNY" | "USD" = comicQuoteCurrency()): Promise<ComicGenerationQuote> {
+    const currency = price?.currency ?? defaultCurrency;
     const busy = await this.busy(owner, inputs);
     inputs = inputs.filter(input => {
       const reason = busy.has(targetId(input)) ? "BUSY" : !price ? "PRICE_UNAVAILABLE" : null;
       if (reason) skipped.push({ clipId: targetId(input), reason });
       return !reason;
     });
-    if (!inputs.length || !price) return { confirmationId: null, expiresAt: null, items: [], skipped, totalMicros: null, currency: "CNY" };
+    if (!inputs.length || !price) return { confirmationId: null, expiresAt: null, items: [], skipped, totalMicros: null, currency };
+    const storedPrice: ComicPrice = { ...price, currency };
     const { rows } = await this.pool.query<{ id: string; expiresAt: Date }>(`INSERT INTO ${namespace}.cd_generation_requests
       (owner_id,series_id,character_id,frozen,expires_at) VALUES($1,$2,$3,$4,now()+interval '10 minutes') RETURNING id,expires_at AS "expiresAt"`,
     [owner, scope.kind === "series" ? scope.id : null, scope.kind === "character" ? scope.id : null,
-      { stamp, price, inputs, replaceAdopted } satisfies FrozenQuote]);
-    const unit = price.unit ?? "image";
+      { stamp, price: storedPrice, inputs, replaceAdopted, ...(visualReferences?.length ? { visualReferences } : {}) } satisfies FrozenQuote]);
+    const unit = storedPrice.unit ?? "image";
     const items = inputs.map(input => {
       const quantity = unit === "second" && "durationMs" in input ? input.durationMs / 1000 : 1;
       const references = "firstFrame" in input && input.firstFrame ? [input.firstFrame, ...input.references] : input.references;
-      return { clipId: targetId(input), modelId: price.modelId, unit, quantity, amountMicros: price.amountMicros * quantity,
+      return { clipId: targetId(input), modelId: storedPrice.modelId, unit, quantity, amountMicros: storedPrice.amountMicros * quantity,
         referenceVersions: references.map(({ mediaId, version }) => ({ mediaId, version })) };
     });
-    return { confirmationId: rows[0].id, expiresAt: rows[0].expiresAt.toISOString(), items, skipped, currency: "CNY",
+    return { confirmationId: rows[0].id, expiresAt: rows[0].expiresAt.toISOString(), items, skipped, currency,
       totalMicros: items.reduce((total, item) => total + item.amountMicros, 0) };
   }
 
@@ -109,12 +118,17 @@ export class PgComicGeneration {
       const row = await this.request(owner, id, scope, db, true);
       if (row.confirmed) return { taskId: row.taskId ?? libraryMissing(), type: taskType(row.frozen.price), created: false };
       if (!row.valid) throw new ComicLibraryError("QUOTE_EXPIRED", 409);
-      const { stamp, price: savedPrice, inputs } = row.frozen;
-      if (!price || price.amountMicros !== savedPrice.amountMicros || price.modelId !== savedPrice.modelId || taskType(price) !== taskType(savedPrice)) {
+      const { stamp, price: savedPrice, inputs, visualReferences } = row.frozen;
+      const expectedCurrency = savedPrice.currency ?? "CNY";
+      const actualCurrency = price?.currency ?? expectedCurrency;
+      if (!price || price.amountMicros !== savedPrice.amountMicros || price.modelId !== savedPrice.modelId
+        || taskType(price) !== taskType(savedPrice) || actualCurrency !== expectedCurrency) {
         throw new ComicLibraryError("PRICE_CHANGED", 409);
       }
+      assertComicDramaCompliance(inputs.map((input, index) => ({ field: `prompt[${index}]`, text: input.prompt })));
       const current = scope.kind === "series" ? String(await this.lockSeries(db, owner, scope.id)) : await this.characterStamp(db, owner, scope.id);
       if (current !== stamp) throw new ComicLibraryError("QUOTE_STALE", 409);
+      await this.verifyVisualReferences(db, owner, visualReferences, inputs);
       const type = taskType(savedPrice);
       for (const input of inputs) {
         if ("target" in input) await requireComicChoice(db, owner, input.target.kind, input.target.key);
@@ -199,6 +213,95 @@ export class PgComicGeneration {
           ON receipt.task_id=job.id AND receipt.user_id=t.owner_id::text AND receipt.slot=t.slot
           WHERE t.request_id=$4 AND t.owner_id=$2::uuid AND ${incomplete} AND ${canResumeImageReceipt})`, [taskId, owner, COMIC_IMAGE_TASK, requestId]);
       return !!rowCount;
+    });
+  }
+
+  private async verifyVisualReferences(
+    db: ComicQuery, owner: string, frozen: FrozenVisualReference[] | undefined, inputs: ComicTakeInput[],
+  ) {
+    const refs = frozen?.length ? frozen : inputs.flatMap(input =>
+      "clipId" in input ? input.references.filter(ref => ref.kind === "style" || ref.kind === "scene" || ref.kind === "prop")
+        .map(ref => ({ materialId: null as string | null, mediaId: ref.mediaId, version: ref.version })) : []);
+    if (!refs.length) return;
+    const unique = new Map(refs.map(ref => [`${ref.materialId ?? ""}:${ref.mediaId}`, ref]));
+    const { rows } = await db.query<{ materialId: string; mediaId: string; version: number; latestVersion: number; archived: boolean }>(
+      `SELECT m.id AS "materialId", v.media_id AS "mediaId", v.version, (m.archived_at IS NOT NULL) AS archived,
+        (SELECT max(all_v.version) FROM ${namespace}.cd_material_versions all_v
+          WHERE all_v.owner_id=m.owner_id AND all_v.material_id=m.id) AS "latestVersion"
+      FROM ${namespace}.cd_materials m
+      JOIN ${namespace}.cd_material_versions v ON (m.owner_id,m.id)=(v.owner_id,v.material_id)
+      WHERE m.owner_id=$1 AND v.media_id=ANY($2::uuid[])`,
+      [owner, [...new Set([...unique.values()].map(item => item.mediaId))]],
+    );
+    for (const ref of unique.values()) {
+      const match = rows.find(row => row.mediaId === ref.mediaId && (!ref.materialId || row.materialId === ref.materialId));
+      if (!match || match.archived || match.version !== ref.version || match.latestVersion !== ref.version) {
+        throw new ComicLibraryError("QUOTE_STALE", 409);
+      }
+    }
+  }
+
+  async imageTake(owner: string, id: string): Promise<ComicImageTake & { taskId: string; slot: number }> {
+    const { rows } = await this.pool.query<ComicImageTake & { taskId: string; slot: number }>(`SELECT ${takeColumns},
+      job.id AS "taskId", t.slot ${joinTakes}
+      WHERE t.owner_id=$1 AND t.id=$2 AND t.video_version IS NULL`, [owner, id]);
+    return rows[0] ?? libraryMissing();
+  }
+
+  async isImageTakeStopped(owner: string, id: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ stopped: boolean }>(`SELECT (cancel_requested_at IS NOT NULL OR status NOT IN ('pending','running')) AS stopped
+      FROM ${namespace}.cd_takes WHERE owner_id=$1 AND id=$2 AND video_version IS NULL`, [owner, id]);
+    return !rows[0] || rows[0].stopped;
+  }
+
+  async cancelImageTake(owner: string, id: string, taskId: string) {
+    await libraryTransaction(this.pool, async db => {
+      const parent = await db.query<{ status: string }>(
+        "SELECT status FROM tasks WHERE id=$1 AND user_id=$2 AND type=$3 FOR UPDATE", [taskId, owner, COMIC_IMAGE_TASK],
+      );
+      if (!parent.rowCount) libraryMissing();
+      const { rows: [row] } = await db.query<{ status: string; slot: number; receiptState: string | null }>(`SELECT t.status, t.slot,
+        (SELECT r.state FROM image_call_receipts r WHERE r.task_id=$3 AND r.user_id=$1::text AND r.slot=t.slot) AS "receiptState"
+        FROM ${namespace}.cd_takes t JOIN ${namespace}.cd_generation_requests req ON (req.owner_id,req.id)=(t.owner_id,t.request_id)
+        WHERE t.owner_id=$1 AND t.id=$2 AND req.task_id=$3 AND t.video_version IS NULL FOR UPDATE OF t`, [owner, id, taskId]);
+      if (!row) libraryMissing();
+      if (row.status === "cancelled") return;
+      if (!["pending", "running", "recoverable"].includes(row.status)
+        || row.receiptState === "submitting" || row.receiptState === "unknown") {
+        throw new ComicLibraryError("TAKE_NOT_CANCELLABLE", 409);
+      }
+      const taskActive = parent.rows[0].status === "pending" || parent.rows[0].status === "running";
+      const settleImmediately = (!row.receiptState && (row.status === "pending" || !taskActive))
+        || (row.status === "recoverable" && !taskActive);
+      await db.query(`UPDATE ${namespace}.cd_takes SET cancel_requested_at=coalesce(cancel_requested_at,now()),
+        status=CASE WHEN $3 THEN 'cancelled' ELSE status END,
+        error=CASE WHEN $3 THEN NULL ELSE error END
+        WHERE owner_id=$1 AND id=$2 AND video_version IS NULL`, [owner, id, settleImmediately]);
+      await db.query(`UPDATE tasks job SET status='cancelled',updated_at=now() WHERE job.id=$1 AND job.status='pending' AND NOT EXISTS (
+        SELECT 1 FROM ${namespace}.cd_generation_requests r JOIN ${namespace}.cd_takes t ON (t.owner_id,t.request_id)=(r.owner_id,r.id)
+        WHERE r.task_id=job.id AND t.status IN ('pending','running'))`, [taskId]);
+    });
+  }
+
+  async releaseImageTake(owner: string, id: string, taskId: string) {
+    await libraryTransaction(this.pool, async db => {
+      if (!await this.tryTaskLock(db, taskId)) throw new ComicLibraryError("TAKE_NOT_RELEASABLE", 409);
+      const { rows: [row] } = await db.query<{ status: string; taskStatus: string; receiptState: string | null }>(`SELECT t.status,
+        job.status AS "taskStatus",
+        (SELECT r.state FROM image_call_receipts r WHERE r.task_id=job.id AND r.user_id=t.owner_id::text AND r.slot=t.slot) AS "receiptState"
+        FROM ${namespace}.cd_takes t
+        JOIN ${namespace}.cd_generation_requests req ON (req.owner_id,req.id)=(t.owner_id,t.request_id)
+        JOIN tasks job ON job.id=req.task_id AND job.user_id=req.owner_id::text
+        WHERE t.owner_id=$1 AND t.id=$2 AND job.id=$3 AND t.video_version IS NULL FOR UPDATE OF t`, [owner, id, taskId]);
+      if (!row) libraryMissing();
+      if (row.status === "released") return;
+      const taskFinished = row.taskStatus !== "pending" && row.taskStatus !== "running";
+      const isUnknown = row.status === "unknown"
+        || (["pending", "running", "recoverable"].includes(row.status)
+          && (row.receiptState === "submitting" || row.receiptState === "unknown"));
+      if (!taskFinished || !isUnknown) throw new ComicLibraryError("TAKE_NOT_RELEASABLE", 409);
+      await db.query(`UPDATE ${namespace}.cd_takes SET status='released', error='SUBMISSION_RELEASED'
+        WHERE owner_id=$1 AND id=$2 AND video_version IS NULL`, [owner, id]);
     });
   }
 

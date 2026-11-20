@@ -32,7 +32,7 @@ const sceneSchema = { type: "array", items: { type: "object", required: ["scene"
   properties: { scene: { type: "string" }, durationMs: { type: "integer" }, shots: { type: "array", items: { type: "string" } },
     lines: { type: "array", items: { type: "object", required: ["speaker", "text"], additionalProperties: false,
       properties: { speaker: { type: ["string", "null"] }, text: { type: "string" } } } } } } };
-function proposalTool(breakdown: boolean): Tool {
+export function proposalTool(breakdown: boolean): Tool {
   const schema = breakdown ? comicDirectorBreakdownSchema : comicDirectorModelSchema;
   const key = breakdown ? "clips" : "script";
   return {
@@ -48,7 +48,7 @@ function proposalTool(breakdown: boolean): Tool {
   };
 }
 
-async function collectProposal(llm: LLMProvider, messages: Message[], opts: ChatOptions, tool: Tool) {
+export async function collectProposal(llm: LLMProvider, messages: Message[], opts: ChatOptions, tool: Tool) {
   let text = "", done = false, input: unknown;
   for await (const chunk of llm.chat(messages, [{ name: tool.name, parameters: tool.parameters, description: tool.description }], opts)) {
     if (chunk.type === "tool_call") {
@@ -57,7 +57,9 @@ async function collectProposal(llm: LLMProvider, messages: Message[], opts: Chat
     }
     if (chunk.type === "text") text += chunk.content ?? "";
     if (text.length > 150_000) throw new LLMIncompleteError("output_limit", "");
-    if (chunk.type === "done") done = !chunk.finishReason || ["stop", "tool_use", "stop_sequence", "end_turn"].includes(chunk.finishReason);
+    if (chunk.type === "done") {
+      done = !chunk.finishReason || ["stop", "tool_calls", "tool_use", "stop_sequence", "end_turn"].includes(chunk.finishReason);
+    }
   }
   if (!done) throw new LLMIncompleteError("unfinished", "");
   if (input === undefined) return text;

@@ -3,6 +3,7 @@ import {
   type MarketingDraft, type MarketingReview, type MarketingReviewField, type MarketingReviewIssue,
 } from "@lot-agent/core/marketing-video";
 import { MARKETING_RISK_TABLE } from "./compliance-rules.js";
+export { MARKETING_RISK_TABLE };
 
 export const MARKETING_REVIEW_SOURCES = [
   { id: "risk-table", title: "黑名单风险词规则表.xlsx / Sheet1", checkedAt: "2026-10-15" },
@@ -58,12 +59,12 @@ const financialIds = new Set([1, 2, 3, 25, 26, 27, 28]);
 const certificateIds = new Set([7, 11, 16, 19, 21, 30, 31, 32]);
 const certificates = /(?:专利[号编]|证书|资质|国妆|备案号|合作协议|检测报告|第三方榜单|季度销量榜单|年度榜单|赛事奖项)/u;
 
-function contexts(text: string): string[] {
+export function complianceContexts(text: string): string[] {
   // Keep punctuation in the exact excerpt so replacements do not accumulate it.
   return text.match(/[^。！？!?；;\n]+[。！？!?；;]?/gu)?.filter(value => value.trim()) ?? [];
 }
 
-function educationalTerm(text: string, term: string, blacklist = false): boolean {
+export function isEducationalRiskTerm(text: string, term: string, blacklist = false): boolean {
   const positions = [...text.matchAll(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gu"))].map(match => match.index!);
   return positions.length > 0 && positions.every(index => {
     const before = text.slice(0, index).split(/[，,：:]/u).at(-1) ?? "";
@@ -116,8 +117,8 @@ function replacement(entry: ReviewEntry, id?: number, locale: ReviewLocale = "zh
 export function localMarketingReview(draft: MarketingDraft, locale: ReviewLocale = "zh"): MarketingReviewIssue[] {
   const issues: MarketingReviewIssue[] = [];
   for (const entry of marketingReviewFields(draft)) {
-    for (const context of contexts(entry.text)) {
-      const blacklisted = MARKETING_RISK_TABLE.blacklist.filter(term => context.includes(term) && !educationalTerm(context, term, true));
+    for (const context of complianceContexts(entry.text)) {
+      const blacklisted = MARKETING_RISK_TABLE.blacklist.filter(term => context.includes(term) && !isEducationalRiskTerm(context, term, true));
       if (blacklisted.length) issues.push({ field: entry.field, ...(entry.shotIndex === undefined ? {} : { shotIndex: entry.shotIndex }),
         text: context, reason: locale === "en" ? `Risk-table blacklist: ${blacklisted.join(", ")}. Check for prohibited sales, recruitment or promotion; educational warnings need clear context.` : locale === "id" ? `Daftar risiko: ${blacklisted.join(", ")}. Periksa penjualan, perekrutan, atau promosi terlarang; peringatan edukatif perlu konteks yang jelas.` : `命中风险表黑名单“${blacklisted.join("、")}”，需确认是否涉及违法交易、招募或推广；科普和警示应明确语境。`,
         suggestion: replacement(entry, undefined, locale), source: "risk-table", ruleId: "risk-table-blacklist", severity: promotion.test(context) ? "reject" : "suspect" });
@@ -125,7 +126,7 @@ export function localMarketingReview(draft: MarketingDraft, locale: ReviewLocale
         const id = Number(rule.id.replace("risk-table-", ""));
         const terms: readonly string[] = rule.terms;
         const spellings = terms.flatMap(term => term === "100%" ? [term, "100％", "百分之百", "百分百"] : [term]);
-        const matches = spellings.some(term => context.includes(term) && !educationalTerm(context, term) && !harmlessSense(id, context, term));
+        const matches = spellings.some(term => context.includes(term) && !isEducationalRiskTerm(context, term) && !harmlessSense(id, context, term));
         if (!matches) continue;
         const triggered = rule.triggers.some(term => context.includes(term.replace(/（.*?）/u, "")));
         const requiresEvidence = certificateIds.has(id) && certificates.test(context);

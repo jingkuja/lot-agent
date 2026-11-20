@@ -49,11 +49,16 @@ async function runTakes(deps: Dependencies, job: { id: string; userId: string },
   const download = deps.download ?? fetchPublicBinary;
   for (const take of items) {
     signal.throwIfAborted();
-    await repo.mark(owner, take.id, "running");
     const { input, slot } = take;
+    const existingReceipt = await receipts.get(slot);
+    if (await repo.isImageTakeStopped(owner, take.id)) {
+      if (!existingReceipt) await repo.mark(owner, take.id, "cancelled", null);
+      continue;
+    }
+    await repo.mark(owner, take.id, "running");
     try {
       const fingerprint = imageCallFingerprint(input, input.modelId, "comic-drama");
-      const receipt = await receipts.get(slot);
+      const receipt = existingReceipt ?? await receipts.get(slot);
       if (receipt && receipt.fingerprint !== fingerprint) {
         await repo.mark(owner, take.id, "unknown", "IMAGE_RESULT_UNKNOWN");
         continue;
@@ -71,6 +76,10 @@ async function runTakes(deps: Dependencies, job: { id: string; userId: string },
           deps.media.assertAvailable();
           const media = await Promise.all(input.references.map(async ({ mediaId }): Promise<ReferenceMedia> =>
             ({ type: "reference_image", url: await deps.media.imageReference(owner, mediaId, signal) })));
+          if (await repo.isImageTakeStopped(owner, take.id)) {
+            await repo.mark(owner, take.id, "cancelled", null);
+            continue;
+          }
           await provider.create({ model: input.modelId, prompt: input.prompt, n: 1, size: sizes[input.aspectRatio], media }, { signal, slot });
         }
         const pollSignal = AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]);

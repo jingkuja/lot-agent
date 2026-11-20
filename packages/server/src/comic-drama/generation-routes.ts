@@ -5,10 +5,12 @@ import type { Pool } from "pg";
 import { MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import {
   buildComicGenerationInput, comicCharacterUpload, comicDramaIdSchema, comicGenerationConfirmSchema,
-  comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicVideoProfile, type ComicCharacterUpload, type ComicGenerationPreviewRequest,
-  type ComicGenerationImage, type ComicGenerationQuote, type ComicImageTakeInput, type ComicTakeInput,
+  comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicTakeReleaseSchema, comicVideoProfile,
+  type ComicCharacterUpload, type ComicGenerationPreviewRequest, type ComicGenerationImage, type ComicGenerationQuote,
+  type ComicImageTakeInput, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK } from "../jobs/task-queues.js";
+import { assertComicDramaCompliance } from "./compliance.js";
 import { readComicDictionary } from "./dictionary.js";
 import { type ComicGenerationScope, type ComicPrice, PgComicGeneration } from "./generation-repository.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
@@ -62,6 +64,16 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       if (!clip || clip.revision !== target.expectedRevision) throw new ComicLibraryError("QUOTE_STALE", 409);
       return clip;
     });
+    assertComicDramaCompliance([
+      { field: "series.title", text: detail.series.title },
+      { field: "series.logline", text: detail.series.logline },
+      ...(detail.script ? [{ field: "script", text: detail.script.content }] : []),
+      ...clips.flatMap(clip => [
+        { field: "clip.scene", text: clip.draft.scene },
+        ...clip.draft.shots.map(shot => ({ field: "clip.shot", text: shot.description })),
+        ...clip.draft.lines.map(line => ({ field: "clip.line", text: line.text })),
+      ]),
+    ]);
     const isVideo = body.mode !== "keyframe";
     const videoModel = detail.series.videoModel;
     const [price, styles, frames, visualReferences] = await Promise.all([
@@ -91,7 +103,8 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       else inputs.push(built.input);
     }
     if (price && isVideo && inputs.some(input => input.references.length || ("firstFrame" in input && input.firstFrame))) media.assertVideoReferenceOrigin();
-    return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted);
+    const frozenVisualRefs = visualReferences.map(({ materialId, mediaId, version }) => ({ materialId, mediaId, version }));
+    return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted, frozenVisualRefs);
   }
   async function previewCharacter(owner: string, scope: ComicGenerationScope, target: ComicCharacterUpload) {
     const price = await quotePrice(owner);
@@ -102,6 +115,12 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       const choices = await readComicDictionary(db, owner, target.kind);
       const label = choices.find(item => item.key === target.key)?.labels.en ?? target.key;
       const outfit = target.kind === "slot" ? role.outfits.find(item => item.id === target.outfitId) : undefined;
+      assertComicDramaCompliance([
+        { field: "character.name", text: role.name },
+        { field: "character.appearance", text: role.appearance },
+        { field: "character.personality", text: role.personality },
+        ...(outfit ? [{ field: "character.outfit", text: outfit.name }] : []),
+      ]);
       const asset = ["face", "front"].flatMap(key => role.assets.filter(item => item.kind === "slot" && item.key === key
         && (!outfit || item.outfitId === outfit.id) && (target.kind !== "slot" || target.key !== key)))[0];
       const references: ComicGenerationImage[] = [];
@@ -194,6 +213,22 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     return c.json({ ok: true });
   });
   app.get("/characters/:id/generations", async c => c.json(await repo.characterHistory(c.get("userId"), pathId(c.req.param("id")))));
+  app.post("/image-takes/:id/cancel", limit, async c => {
+    const owner = c.get("userId");
+    const take = await repo.imageTake(owner, pathId(c.req.param("id")));
+    await repo.cancelImageTake(owner, take.id, take.taskId);
+    const { taskId: _taskId, slot: _slot, ...updated } = await repo.imageTake(owner, take.id);
+    return c.json(updated);
+  });
+  app.post("/image-takes/:id/release", limit, async c => {
+    const body = comicTakeReleaseSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const owner = c.get("userId");
+    const take = await repo.imageTake(owner, pathId(c.req.param("id")));
+    await repo.releaseImageTake(owner, take.id, take.taskId);
+    const { taskId: _taskId, slot: _slot, ...updated } = await repo.imageTake(owner, take.id);
+    return c.json(updated);
+  });
   app.route("/", createComicVideoRoutes({ repo: video, media, queue, library }));
   return app;
 }

@@ -47,7 +47,7 @@ const COMIC_PLATFORM = new Set(["server:index.ts", "server:workers/index.ts", "w
 const COMIC_SERVER_IMPORTS = new Set([
   "../generation/private-materials.js", "../marketing-video/media.js", "../marketing-video/subtitles.js", "../static-files.js", "../util/metered-upload.js",
   "../generation/image-receipts.js", "../jobs/task-queues.js", "../marketing-video/image-size.js", "../marketing-video/run.js",
-  "../services/agent-extensions.js", "../knowledge/ingestion/parser-process.js",
+  "../services/agent-extensions.js", "../knowledge/ingestion/parser-process.js", "../marketing-video/compliance.js", "../models/catalog.js",
 ]);
 const COMIC_WEB_IMPORTS = new Set(["../../api/client.js", "../../components/BrandHeader.js", "../../i18n/index.js"]);
 const COMIC_SOURCE = /(^|\/)comic-drama(?:\/|$)/;

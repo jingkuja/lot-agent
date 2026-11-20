@@ -114,14 +114,15 @@ export function ComicTimelineTracks({ timeline, videoSources, audioSources, sele
       const { lanes, rows } = stack(layout[track]);
       return <div key={track} className="comic-track-row">
         <span>{t(names[track])}</span>
-        <div className="comic-track-lane" data-track={track} style={{ height: `${rows * 2}rem` }}>
+        <div className="comic-track-lane" data-track={track} style={{ height: `calc(var(--comic-track-row, 2.25rem) * ${rows})` }}>
           {lanes.map(({ id, startMs, endMs, index, lane }) => {
           const title = itemTitle(track, index);
           const start = Math.min(99, startMs / total * 100);
           const width = Math.min(100 - start, (endMs - startMs) / total * 100);
           const pressed = track === "video" ? selectedVideo === id && !selection : selection?.id === id;
           return <button key={id} type="button" title={title} aria-label={t("{0} · {1} 秒", [title, seconds(startMs)])} aria-pressed={pressed}
-            data-overflow={overflow.has(id)} style={{ insetInlineStart: `${start}%`, width: `${width}%`, top: `calc(${lane * 2}rem + 2px)` }}
+            data-overflow={overflow.has(id)}
+            style={{ insetInlineStart: `${start}%`, width: `${width}%`, top: `calc(var(--comic-track-row, 2.25rem) * ${lane} + 3px)` }}
             onClick={() => choose(track, id, Math.min(startMs, layout.durationMs))}>{title}</button>;
           })}
           <i aria-hidden="true" style={{ insetInlineStart: `${playhead / total * 100}%` }} />

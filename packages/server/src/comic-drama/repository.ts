@@ -6,7 +6,7 @@ import {
 } from "@lot-agent/core/comic-drama";
 
 import { editSeriesCast, readSeriesCast, requireClipCast } from "./cast-store.js";
-import { readComicDictionary } from "./dictionary.js";
+import { readComicDictionary, requireComicChoice } from "./dictionary.js";
 
 const seriesFields = `id, parent_id AS "parentId", title, logline, series_group AS "seriesGroup", episode_no AS "episodeNo",
   style_key AS "styleKey", aspect_ratio AS "aspectRatio", video_model AS "videoModel", revision, archived_at AS "archivedAt"`;
@@ -118,6 +118,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
 
   create(owner: string, fields: ComicDramaSeriesInput): Promise<ComicDramaDetail> {
     return this.transaction(async client => {
+      await requireComicChoice(client, owner, "style", fields.styleKey);
       const series = await this.insert(client, owner, fields);
       await this.setCurrent(client, owner, series.id);
       return { series, clips: [], script: null, cast: [] };
@@ -170,6 +171,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return this.transaction(async client => {
       const current = await this.series(client, owner, id, true);
       requireRevision(current.revision, fields.expectedRevision);
+      if (current.styleKey !== fields.styleKey) await requireComicChoice(client, owner, "style", fields.styleKey);
       const { title, logline, seriesGroup, episodeNo, styleKey, aspectRatio, videoModel } = fields;
       const { rows } = await client.query<SeriesRow>(`UPDATE lot_comic_drama.cd_series SET title=$2,logline=$3,series_group=$4,episode_no=$5,
         style_key=$6,aspect_ratio=$7,video_model=$8,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${seriesFields}`,
@@ -247,7 +249,20 @@ export class PgComicDramaRepository implements ComicDramaRepository {
   saveClip(owner: string, id: string, clipId: string, { expectedRevision, draft }: ComicDramaClipUpdate) {
     return this.transaction(async client => {
       await this.series(client, owner, id, true);
-      requireRevision((await this.clip(client, id, clipId)).revision, expectedRevision);
+      const existing = await this.clip(client, id, clipId);
+      requireRevision(existing.revision, expectedRevision);
+      const existingFramings = new Set(existing.draft.shots.map(shot => shot.framingKey));
+      const existingMovements = new Set(existing.draft.shots.map(shot => shot.movementKey));
+      const existingEmotions = new Set(existing.draft.lines.map(line => line.emotionKey).filter((key): key is string => Boolean(key)));
+      for (const key of new Set(draft.shots.map(shot => shot.framingKey))) {
+        if (!existingFramings.has(key)) await requireComicChoice(client, owner, "framing", key);
+      }
+      for (const key of new Set(draft.shots.map(shot => shot.movementKey))) {
+        if (!existingMovements.has(key)) await requireComicChoice(client, owner, "movement", key);
+      }
+      for (const key of new Set(draft.lines.map(line => line.emotionKey).filter((value): value is string => Boolean(value)))) {
+        if (!existingEmotions.has(key)) await requireComicChoice(client, owner, "emotion", key);
+      }
       await requireClipCast(client, id, draft.cast);
       const { rows } = await client.query(`UPDATE lot_comic_drama.cd_clips SET draft=$2,revision=revision+1,updated_at=clock_timestamp()
         WHERE id=$1 RETURNING ${clipFields}`, [clipId, draft]);

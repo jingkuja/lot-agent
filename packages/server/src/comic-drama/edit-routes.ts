@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   comicDramaIdSchema, comicEditCreateSchema, comicEditDeleteSchema, comicEditListSchema, comicEditReplaceSchema, comicEditUpdateSchema,
-  comicSpeechRequestSchema, comicVoiceBindSchema,
+  comicSpeechReleaseSchema, comicSpeechRequestSchema, comicVoiceBindSchema,
 } from "@lot-agent/core/comic-drama";
 import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
@@ -72,6 +72,12 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
     const data = await speech.speak(c.get("userId"), id(c.req.param("id")), id(c.req.param("itemId")), id(c.req.param("lineId")),
       input.data, c.req.raw.signal, accepting);
     return c.json(data);
+  });
+  app.post("/edits/:id/items/:itemId/lines/:lineId/speech/release", limit, async c => {
+    const input = comicSpeechReleaseSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    await speech.release(c.get("userId"), id(c.req.param("id")), id(c.req.param("itemId")), id(c.req.param("lineId")), input.data);
+    return c.json({ ok: true });
   });
   return app;
 }

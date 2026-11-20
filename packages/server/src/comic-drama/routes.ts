@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema, comicDramaRevisionSchema,
-  comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
-  comicDramaSetCurrentSchema, createComicDramaSeriesSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema,
+  comicDramaScriptWriteSchema, comicDramaSeriesListSchema, comicDramaSetCurrentSchema, comicVideoProfile,
+  createComicDramaSeriesSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema,
   updateComicDramaSeriesSchema, type ComicDramaRepository,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError } from "./library-db.js";
@@ -38,7 +38,9 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     const input = createComicDramaSeriesSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     const owner = c.get("userId");
-    if (input.data.videoModel && !await canSelectModel(owner, input.data.videoModel)) return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    if (input.data.videoModel && (!comicVideoProfile(input.data.videoModel) || !await canSelectModel(owner, input.data.videoModel))) {
+      return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    }
     return c.json(await repo.create(owner, input.data), 201);
   });
   app.get("/series/current", async c => c.json({ seriesId: await repo.current(c.get("userId")) }));
@@ -54,7 +56,8 @@ export function createComicDramaRoutes(repo: ComicDramaRepository, canSelectMode
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     const owner = c.get("userId"), id = seriesId(c.req.param("id"));
     const { videoModel } = input.data;
-    if (videoModel && videoModel !== (await repo.get(owner, id)).series.videoModel && !await canSelectModel(owner, videoModel)) {
+    if (videoModel && videoModel !== (await repo.get(owner, id)).series.videoModel
+      && (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel))) {
       return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
     }
     return c.json(await repo.update(owner, id, input.data));

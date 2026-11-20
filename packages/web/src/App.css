@@ -50,6 +50,8 @@
   /* Elevation overlays (theme-aware so light/dark both read correctly) */
   --overlay-raise: rgba(12,38,43,0.04);
   --overlay-sink: rgba(12,38,43,0.03);
+  /* Modal scrim: always darkens the page so dialogs stay legible in both themes. */
+  --dialog-backdrop: rgba(6,22,27,0.48);
   --code-inline-bg: color-mix(in srgb, var(--accent) 12%, transparent);
   --code-block-bg: #f1f5f4;
 
@@ -167,6 +169,7 @@
 
   --overlay-raise: rgba(255,255,255,0.04);
   --overlay-sink: rgba(0,0,0,0.22);
+  --dialog-backdrop: rgba(0,0,0,0.62);
   --code-inline-bg: rgba(255,255,255,0.08);
   --code-block-bg: rgba(0,0,0,0.35);
 

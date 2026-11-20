@@ -87,6 +87,7 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
         </button>}
       </div>
     </header>
+    <p className="comic-render-notice" role="note">{t("导出正片包含 AI 生成内容，发布至外部平台时请按平台规范标注“内容由 AI 生成”。")}</p>
     {project && (dirty ? <p>{t("保存当前修订后即可导出")}</p> : issue ? <p>{t(comicRenderError(issue))}</p> : null)}
     {message && <p role="alert" className="comic-error">{t(message)}</p>}
     {loadError && <p role="alert" className="comic-error">{t("导出历史暂时无法读取")}</p>}

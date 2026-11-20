@@ -76,6 +76,9 @@ export function layoutComicTimeline(timeline: ComicTimeline) {
 
 export const COMIC_RENDER_FPS = 30;
 export const COMIC_RENDER_MAX_MS = 300_000;
+export const COMIC_RENDER_MAX_VIDEO_CLIPS = 60;
+export const COMIC_RENDER_MAX_AUDIO_ITEMS = 240;
+/** Max inputs for a single FFmpeg composition pass (audio tracks premix into stems when total exceeds this). */
 export const COMIC_RENDER_MAX_INPUTS = 64;
 export const comicFrame = (timeMs: number) => Math.round(timeMs * COMIC_RENDER_FPS / 1000);
 
@@ -91,8 +94,10 @@ export function comicTimelineOverflow(timeline: ComicTimeline) {
 export function comicRenderIssue(timeline: ComicTimeline) {
   const layout = layoutComicTimeline(timeline);
   if (!timeline.video.length) return "RENDER_NO_VIDEO";
+  const audioCount = timeline.voice.length + timeline.sfx.length + timeline.music.length;
   if (layout.durationMs > COMIC_RENDER_MAX_MS ||
-    timeline.video.length + timeline.voice.length + timeline.sfx.length + timeline.music.length > COMIC_RENDER_MAX_INPUTS) return "RENDER_LIMIT";
+    timeline.video.length > COMIC_RENDER_MAX_VIDEO_CLIPS ||
+    audioCount > COMIC_RENDER_MAX_AUDIO_ITEMS) return "RENDER_LIMIT";
   if (comicTimelineOverflow(timeline).length) return "RENDER_TRACK_OVERFLOW";
   if (layout.video.some((item, index) => {
     const start = comicFrame(item.startMs), end = comicFrame(item.endMs);

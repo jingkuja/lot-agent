@@ -220,6 +220,19 @@ export async function verifyComicGeneration(app: FixtureApp, pool: Pool, fixture
   assert.equal(unknown.takes[0].state, "unknown");
   await json(`/generation-requests/${unknown.id}/recover`, "POST", {}, 409);
   assert.equal((await json<ComicGenerationQuote>(character + "/generation-preview", "POST", { kind: "expression", key: "angry" })).confirmationId, null);
+  await json(`/image-takes/${unknown.takes[0].id}/cancel`, "POST", {}, 409);
+  await json(`/image-takes/${unknown.takes[0].id}/release`, "POST", {}, 400);
+  assert.equal((await request(`/image-takes/${unknown.takes[0].id}/release`, "POST", { acknowledgePossibleCharge: true }, "fixture-two")).status, 404);
+  const released = await json<{ state: string }>(`/image-takes/${unknown.takes[0].id}/release`, "POST", { acknowledgePossibleCharge: true });
+  assert.equal(released.state, "released");
+  assert.equal((await json<{ state: string }>(`/image-takes/${unknown.takes[0].id}/release`, "POST", { acknowledgePossibleCharge: true })).state, "released");
+  const unblocked = await json<ComicGenerationQuote>(character + "/generation-preview", "POST", { kind: "expression", key: "angry" });
+  assert.ok(unblocked.confirmationId);
+  state.failDelivery = true;
+  const cancelledRun = await json<ComicImageRequest>(character + "/generate", "POST", { confirmationId: unblocked.confirmationId }, 202);
+  const cancelledTake = await json<{ state: string }>(`/image-takes/${cancelledRun.takes[0].id}/cancel`, "POST", {});
+  assert.equal(cancelledTake.state, "cancelled");
+  assert.ok((await json<ComicGenerationQuote>(character + "/generation-preview", "POST", { kind: "expression", key: "angry" })).confirmationId);
   assert.equal(counts.submits, 4);
   console.log("PASS W5 PG/Redis/HTTP: no submit on preview, quote CAS/expiry, one confirmation, media queue, poll/download recovery, keyframe review, character assets");
 }

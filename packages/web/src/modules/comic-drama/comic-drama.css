@@ -115,7 +115,7 @@
   border: 0;
   border-radius: 12px;
   background: var(--accent-grad);
-  color: var(--icon-on-grad);
+  color: var(--text-on-accent);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -135,7 +135,7 @@
   width: 22px;
   height: 22px;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--icon-on-grad) 20%, transparent);
+  background: color-mix(in srgb, var(--text-on-accent) 20%, transparent);
 }
 
 .comic-sidebar .comic-nav button.comic-nav-current {
@@ -294,7 +294,7 @@
 .comic-dialog button.primary {
   background: var(--accent-grad);
   border-color: transparent;
-  color: var(--icon-on-grad);
+  color: var(--text-on-accent);
   font-weight: 650;
   box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--accent) 68%, transparent);
 }
@@ -890,7 +890,7 @@
 
 .comic-steps button[aria-pressed="true"] .comic-step-index {
   background: var(--accent-grad);
-  color: var(--icon-on-grad);
+  color: var(--text-on-accent);
 }
 
 .comic-step-icon {
@@ -965,7 +965,7 @@
 
 .comic-cut.selected .comic-cut-number {
   background: var(--accent-grad);
-  color: var(--icon-on-grad);
+  color: var(--text-on-accent);
 }
 
 .comic-strip .comic-add {
@@ -1148,6 +1148,7 @@
 .comic-dialog {
   width: min(520px, calc(100% - 28px));
   max-height: calc(100% - 28px);
+  overflow: auto;
   margin: auto;
   padding: 24px 26px;
   color: var(--text);
@@ -1158,8 +1159,53 @@
 }
 
 .comic-dialog::backdrop {
-  background: color-mix(in srgb, var(--text) 42%, transparent);
+  background: var(--dialog-backdrop);
   backdrop-filter: blur(6px);
+}
+
+.comic-media-trigger {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  cursor: zoom-in;
+}
+
+.comic-media-viewer {
+  width: min(860px, calc(100% - 28px));
+}
+
+.comic-media-viewer-body {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  margin-block: 12px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+.comic-media-viewer-body img {
+  display: block;
+  max-width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.comic-media-viewer-body audio {
+  width: 100%;
+}
+
+.comic-render-notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .comic-dialog h2 {
@@ -1774,8 +1820,9 @@
 }
 
 .comic-track-lane {
+  --comic-track-row: 2.25rem;
   position: relative;
-  height: 2.25rem;
+  height: var(--comic-track-row);
   margin: 4px 8px;
   background: color-mix(in srgb, var(--bg) 72%, var(--bg-hover));
   border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
@@ -1784,8 +1831,8 @@
 
 .comic-track-lane button {
   position: absolute;
-  top: 2px;
-  height: calc(2.25rem - 6px);
+  top: 3px;
+  height: calc(var(--comic-track-row) - 6px);
   min-width: 4px;
   padding: 0 7px;
   border-radius: 6px;

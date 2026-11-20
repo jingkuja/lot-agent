@@ -36,9 +36,16 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
     request<ComicDirectorProposal>(path + "/proposals/" + proposal.id + "/apply", "POST", { expectedRevision: proposal.baseRevision, decision }, status);
   assert.equal((await propose("fixture empty shot", add.seriesRevision)).status, "failed");
   assert.equal((await propose("fixture unauthorized tool", add.seriesRevision)).status, "failed");
+  assert.equal((await propose("fixture truncated", add.seriesRevision)).status, "failed");
+  assert.equal((await propose("fixture filtered", add.seriesRevision)).status, "failed");
   const adapterA = await propose("fixture native tool adapter", add.seriesRevision);
   const adapterB = await propose("fixture JSON adapter", add.seriesRevision);
+  const adapterC = await propose("fixture anthropic tool", add.seriesRevision);
+  assert.equal(adapterA.status, "ready");
+  assert.equal(adapterB.status, "ready");
+  assert.equal(adapterC.status, "ready");
   assert.deepEqual(adapterA.proposal?.clips?.map(clip => clip.scene), adapterB.proposal?.clips?.map(clip => clip.scene));
+  assert.deepEqual(adapterA.proposal?.clips?.map(clip => clip.scene), adapterC.proposal?.clips?.map(clip => clip.scene));
   assert.equal(adapterA.proposal?.clips?.[0].shots.length, 1);
   assert.equal((await current()).clips.length, 1);
   const [first, duplicate] = await Promise.all([decide(adapterA, "append"), decide(adapterA, "append")]);
@@ -65,7 +72,11 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   assert.equal(live.clips.length, 1);
   assert.notEqual(live.clips[0].id, amended.clips[1].id);
   assert.equal(live.clips[0].draft.scene, "W11 雨夜相逢");
+  assert.equal((await propose("fixture sequel truncated", replaced.appliedRevision!, "sequel")).status, "failed");
+  const sequelJson = await propose("fixture sequel JSON", replaced.appliedRevision!, "sequel");
+  assert.equal(sequelJson.status, "ready");
   const sequel = await propose("下一集继续故事", replaced.appliedRevision!, "sequel");
+  assert.equal(sequel.status, "ready");
   const next = await decide(sequel, "sequel");
   const sameNext = await decide(sequel, "sequel");
   assert.equal(next.sequelId, sameNext.sequelId);

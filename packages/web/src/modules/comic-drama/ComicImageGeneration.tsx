@@ -3,7 +3,7 @@ import type { ComicDramaClip, ComicDramaDetail, ComicGenerationMode, ComicGenera
 import { useI18n } from "../../i18n/index.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError, GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
-import { ComicTakeStatus, RecoverComicImage, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { MediaPreview } from "./LibraryParts.js";
 import { ClipVideoVersions, VideoTakeActions } from "./ComicVideoTakes.js";
 import { ComicVideoReferences, type ChosenVideoReference } from "./ComicVideoReferences.js";
@@ -145,7 +145,7 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
             {take.state === "ready" && stale && <small>{t("生成后分镜已修改")}</small>}
             {!disabled && take.state === "ready" && take.id !== approved && !stale &&
               <button type="button" disabled={busyTake !== null} onClick={() => void review(take.id)}>{t("确认此首帧")}</button>}
-            {take.state === "recoverable" && <RecoverComicImage take={take} refreshed={history.refresh} />}
+            <ImageTakeActions take={take} refreshed={history.refresh} />
           </article>;
         })}
       </div>}
@@ -165,7 +165,7 @@ function BatchStatus({ request, label, select, refreshed }: {
       <button type="button" onClick={() => select(take.targetId)}>{label(take.targetId)}</button>
       <ComicTakeStatus take={take} />
       {request.kind === "video" ? <VideoTakeActions take={take} refresh={() => { history.refresh(); refreshed(); }} /> :
-        take.state === "recoverable" && <RecoverComicImage take={take} refreshed={() => { history.refresh(); refreshed(); }} />}
+        <ImageTakeActions take={take} refreshed={() => { history.refresh(); refreshed(); }} />}
     </li>)}</ul>
   </section>;
 }

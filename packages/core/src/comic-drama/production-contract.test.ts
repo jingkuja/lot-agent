@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildComicGenerationInput, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicTimelineSchema, layoutComicTimeline,
-  type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
+  buildComicGenerationInput, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicRenderIssue, comicSpeechReleaseSchema,
+  comicTimelineSchema, layoutComicTimeline, type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput,
+  type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
 
@@ -119,5 +120,51 @@ describe("comic timeline contract", () => {
     expect(comicTimelineSchema.safeParse({ ...data, subtitles: [{
       id: uuid(55), anchor: { kind: "clip", videoItemId: uuid(56), offsetMs: 0 }, durationMs: 1000, text: "test",
     }] }).success).toBe(false);
+  });
+
+  it("allows 40-clip full episodes with 80+ audio lines and enforces per-kind ceilings", () => {
+    const video = Array.from({ length: 40 }, (_, i) => ({
+      id: uuid(100 + i), takeId: uuid(200 + i), sourceDurationMs: 6000, inMs: 0, outMs: 6000,
+      volume: 1, transitionIn: { kind: "cut" as const, durationMs: 0 as const },
+    }));
+    const voice = video.flatMap((clip, i) => [0, 1].map(slot => ({
+      id: uuid(300 + i * 2 + slot), mediaId: uuid(500 + i * 2 + slot),
+      anchor: { kind: "clip" as const, videoItemId: clip.id, offsetMs: slot * 2000 },
+      durationMs: 1500, sourceInMs: 0, volume: 1, fadeInMs: 0, fadeOutMs: 0, loop: false,
+    })));
+    const music = [{
+      id: uuid(900), mediaId: uuid(901), anchor: { kind: "timeline" as const, offsetMs: 0 },
+      durationMs: 240_000, sourceInMs: 0, volume: 0.3, fadeInMs: 0, fadeOutMs: 0, loop: true,
+    }];
+    const sfx = Array.from({ length: 10 }, (_, i) => ({
+      id: uuid(910 + i), mediaId: uuid(950 + i), anchor: { kind: "timeline" as const, offsetMs: i * 1000 },
+      durationMs: 500, sourceInMs: 0, volume: 1, fadeInMs: 0, fadeOutMs: 0, loop: false,
+    }));
+    expect(comicRenderIssue(comicTimelineSchema.parse({
+      schemaVersion: 1, aspectRatio: "9:16", video, voice, music, sfx, subtitles: [],
+    }))).toBeNull();
+
+    const tooManyVideos = Array.from({ length: 61 }, (_, i) => ({
+      id: uuid(1000 + i), takeId: uuid(1100 + i), sourceDurationMs: 4000, inMs: 0, outMs: 4000,
+      volume: 1, transitionIn: { kind: "cut" as const, durationMs: 0 as const },
+    }));
+    expect(comicRenderIssue(comicTimelineSchema.parse({
+      schemaVersion: 1, aspectRatio: "9:16", video: tooManyVideos, voice: [], music: [], sfx: [], subtitles: [],
+    }))).toBe("RENDER_LIMIT");
+
+    const tooManyAudio = Array.from({ length: 241 }, (_, i) => ({
+      id: uuid(2000 + i), mediaId: uuid(2500 + i), anchor: { kind: "timeline" as const, offsetMs: 0 },
+      durationMs: 500, sourceInMs: 0, volume: 1, fadeInMs: 0, fadeOutMs: 0, loop: false,
+    }));
+    expect(comicRenderIssue(comicTimelineSchema.parse({
+      schemaVersion: 1, aspectRatio: "9:16", video: [video[0]], voice: tooManyAudio, music: [], sfx: [], subtitles: [],
+    }))).toBe("RENDER_LIMIT");
+
+    expect(comicSpeechReleaseSchema.safeParse({
+      expectedRevision: 1, expectedClipRevision: 1, voice: { kind: "preset", preset: "alloy" }, acknowledgePossibleCharge: true,
+    }).success).toBe(true);
+    expect(comicSpeechReleaseSchema.safeParse({
+      expectedRevision: 1, expectedClipRevision: 1, voice: { kind: "preset", preset: "alloy" }, acknowledgePossibleCharge: false,
+    }).success).toBe(false);
   });
 });

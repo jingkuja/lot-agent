@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   comicSpeechPresets, type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicEditApi, editError } from "./edit-api.js";
 import { MediaPreview } from "./LibraryParts.js";
@@ -43,6 +44,9 @@ export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles
             generate={(selection, signal) => comicEditApi.speak(projectId, item.id, line.id, {
               expectedRevision: revision, expectedClipRevision: data.clipRevision!, voice: selection,
             }, signal)}
+            release={(selection, signal) => comicEditApi.releaseSpeech(projectId, item.id, line.id, {
+              expectedRevision: revision, expectedClipRevision: data.clipRevision!, voice: selection, acknowledgePossibleCharge: true,
+            }, signal)}
             attach={(take, durationMs) => {
               const entry: Audio = { id: attached?.id ?? crypto.randomUUID(), mediaId: take.mediaId, lineId: line.id,
                 anchor: { kind: "clip", videoItemId: item.id, offsetMs: offset }, durationMs, sourceInMs: 0,
@@ -54,9 +58,10 @@ export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles
   </section>;
 }
 
-function DialogueLine({ line, data, remaining, attached, disabled, generate, attach, remove, addCaption }: {
+function DialogueLine({ line, data, remaining, attached, disabled, generate, release, attach, remove, addCaption }: {
   line: ComicSpeechLines["lines"][number]; data: ComicSpeechLines; remaining: number; attached?: Audio; disabled: boolean;
   generate: (choice: ComicSpeechRequest["voice"], signal: AbortSignal) => Promise<ComicSpeechTake>;
+  release: (choice: ComicSpeechRequest["voice"], signal: AbortSignal) => Promise<{ ok: true }>;
   attach: (take: ComicSpeechTake, durationMs: number) => void; remove: () => void;
   addCaption?: () => void;
 }) {
@@ -64,37 +69,59 @@ function DialogueLine({ line, data, remaining, attached, disabled, generate, att
   const [selection, setSelection] = useState("");
   const [take, setTake] = useState<ComicSpeechTake | null>(null);
   const [error, setError] = useState("");
+  const [unknown, setUnknown] = useState(false);
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
   const matches = data.characters.filter(role => role.name === line.speaker || role.aliases.includes(line.speaker ?? ""));
   const choice = selection || (matches.length === 1 ? matches[0].id : data.presets[0] ?? data.characters[0]?.id ?? "");
+  const voiceChoice = (): ComicSpeechRequest["voice"] => {
+    const preset = comicSpeechPresets.find(key => key === choice);
+    return preset ? { kind: "preset" as const, preset } : { kind: "character" as const, characterId: choice };
+  };
   const synthesize = async () => {
     if (active.current || !choice) return;
-    const preset = comicSpeechPresets.find(key => key === choice);
-    const selection = preset ? { kind: "preset" as const, preset } : { kind: "character" as const, characterId: choice };
+    const controller = new AbortController();
+    active.current = controller;
+    setBusy(true);
+    setError("");
+    setUnknown(false);
+    try {
+      const result = await generate(voiceChoice(), controller.signal);
+      if (!controller.signal.aborted) setTake(result);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        setError(editError(reason));
+        setUnknown(reason instanceof ApiClientError && reason.code === "EDIT_SPEECH_UNKNOWN");
+      }
+    } finally { active.current = null; if (!controller.signal.aborted) setBusy(false); }
+  };
+  const releaseUnknown = async () => {
+    if (active.current || !choice) return;
+    if (!window.confirm(t("原配音请求可能已扣费。释放后可重新合成，新请求可能再次扣费。确认释放？"))) return;
     const controller = new AbortController();
     active.current = controller;
     setBusy(true);
     setError("");
     try {
-      const result = await generate(selection, controller.signal);
-      if (!controller.signal.aborted) setTake(result);
-    } catch (error) {
-      if (!controller.signal.aborted) setError(editError(error));
+      await release(voiceChoice(), controller.signal);
+      if (!controller.signal.aborted) setUnknown(false);
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(editError(reason));
     } finally { active.current = null; if (!controller.signal.aborted) setBusy(false); }
   };
   return <div className="comic-dialogue-line">
     <p>{line.speaker && <strong>{line.speaker} · </strong>}{line.text}</p>
     <div className="comic-actions">
       <select aria-label={t("配音音色")} value={choice} disabled={disabled || busy} onChange={event => {
-        setSelection(event.target.value); setTake(null); setError("");
+        setSelection(event.target.value); setTake(null); setError(""); setUnknown(false);
       }}>
         {!choice && <option value="">{t("暂无可用音色")}</option>}
         {data.presets.map(key => <option key={key} value={key}>{key}</option>)}
         {data.characters.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
       </select>
       <button type="button" disabled={!choice || disabled || busy} onClick={() => void synthesize()}>{t(busy ? "正在合成…" : "合成此句")}</button>
+      {unknown && <button type="button" disabled={!choice || disabled || busy} onClick={() => void releaseUnknown()}>{t("释放旧提交")}</button>}
       <button type="button" disabled={disabled || !addCaption} onClick={addCaption}>{t("这句加入字幕轨")}</button>
       {attached && <button type="button" disabled={disabled} onClick={remove}>{t("移除配音")}</button>}
     </div>

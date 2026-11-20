@@ -18,6 +18,7 @@ import { setupDownloadManager } from "./download-manager.js";
 import { registerIpc } from "./ipc.js";
 import { probeServer, startLocalServer } from "./local-server.js";
 import { SecureTokenStore, type TokenCipher } from "./secure-token.js";
+import { classifyWindowOpen } from "./window-open.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 /** Dev mode loads the vite dev server (HMR); prod loads the loopback server. */
@@ -278,10 +279,9 @@ async function main(): Promise<void> {
   });
   mainWindow.webContents.on("render-process-gone", () => toolHost.reset());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const target = new URL(url);
-    if (target.origin === rendererOrigin && target.pathname.startsWith("/static/")) {
-      mainWindow?.webContents.downloadURL(url);
-    } else if (/^https?:/.test(url)) void shell.openExternal(url);
+    const decision = classifyWindowOpen(url, rendererOrigin);
+    if (decision === "download") mainWindow?.webContents.downloadURL(url);
+    else if (decision === "external") void shell.openExternal(url);
     return { action: "deny" };
   });
   await mainWindow.loadURL(loadUrl);

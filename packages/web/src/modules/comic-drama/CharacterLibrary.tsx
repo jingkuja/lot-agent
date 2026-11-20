@@ -7,7 +7,7 @@ import { comicLibraryApi } from "./library-api.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { ComicCharacterVoice } from "./ComicCharacterVoice.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
-import { ComicTakeStatus, RecoverComicImage, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { ChoiceSelect, comicListWords, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
 
 const images = "image/jpeg,image/png,image/webp";
@@ -182,7 +182,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       <ul className="comic-generation-status-list">{needsAttention.map(take => <li key={take.id}>
         <strong>{take.characterTarget ? takeLabel(take.characterTarget) : character.name}</strong>
         <ComicTakeStatus take={take} />
-        {take.state === "recoverable" && <RecoverComicImage take={take} refreshed={generation.refresh} />}
+        <ImageTakeActions take={take} refreshed={generation.refresh} />
       </li>)}</ul>
     </section>}
     {rows.length === 0 && <div className="comic-empty">{t(kind === "slot" && !outfit ? "先创建一套造型" : "暂无角色图片")}</div>}

@@ -87,7 +87,7 @@ import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
 import { createOwnerLlmResolver } from "./digital-employee/runtime.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
-import { resolvePricing, resolveProvider } from "./models/catalog.js";
+import { quoteComicCatalogPrice } from "./comic-drama/pricing.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -472,6 +472,9 @@ async function main() {
     });
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`, generationRateLimit);
     app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech, rollout.accepting));
+    app.on("POST", [
+      `${COMIC_DRAMA_API_ROOT}/edits/:id/render`, `${COMIC_DRAMA_API_ROOT}/renders/:id/recover`,
+    ], generationRateLimit);
     app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(new PgComicRenders(service.db.pool, edits), comicMedia,
       service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined, rollout.accepting));
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`, generationRateLimit);
@@ -480,12 +483,16 @@ async function main() {
     app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(directorRepo, new ComicDirector(directorRepo, directorExtension, rollout.accepting), parser));
     app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia));
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
+      if (!comicVideoProfile(model)) return false;
       const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
       const catalog = await service.getUserModelCatalog(owner, key);
       return catalog?.video.some(item => item.id === model) === true;
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
-      app.on("POST", [`${COMIC_DRAMA_API_ROOT}/series/:id/generate`, `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`], generationRateLimit);
+      app.on("POST", [
+        `${COMIC_DRAMA_API_ROOT}/series/:id/generate`, `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`,
+        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/frame`,
+      ], generationRateLimit);
       const repo = new PgComicGeneration(service.db.pool);
       const pruneQuotes = () => void repo.pruneExpiredQuotes().catch(() => console.warn("[comic-drama] quote cleanup unavailable"));
       pruneQuotes();
@@ -494,23 +501,20 @@ async function main() {
         pool: service.db.pool, library, series, media: comicMedia, queue: service.jobQueue,
         accepting: rollout.accepting,
         quotePrice: async (owner, modelId = process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2") => {
-          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-          if (!key || resolveProvider(service.modelCatalog, modelId, "image") !== "openai-images") return null;
-          const price = service.modelCatalog.pricing[modelId];
-          const amountMicros = Math.round((price?.unitPrice ?? 0) * 1_000_000);
-          if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0 || amountMicros > Number.MAX_SAFE_INTEGER / 10) return null;
-          const catalog = await service.getUserModelCatalog(owner, key);
-          return catalog?.image.some(item => item.id === modelId) ? { modelId, amountMicros } : null;
-        },
-        quoteVideoPrice: async (owner, modelId) => {
-          if (!comicVideoProfile(modelId) || resolveProvider(service.modelCatalog, modelId, "video") !== "openai-video") return null;
+          const price = quoteComicCatalogPrice(service.modelCatalog, "image", modelId);
+          if (!price) return null;
           const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
           if (!key) return null;
-          const { unitPrice } = resolvePricing(service.modelCatalog, modelId, "video");
-          const amountMicros = Math.round(unitPrice * 1_000_000);
-          if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0 || amountMicros > Number.MAX_SAFE_INTEGER / 150) return null;
           const catalog = await service.getUserModelCatalog(owner, key);
-          return catalog?.video.some(item => item.id === modelId) ? { modelId, amountMicros, unit: "second" } : null;
+          return catalog?.image.some(item => item.id === modelId) ? price : null;
+        },
+        quoteVideoPrice: async (owner, modelId) => {
+          const price = quoteComicCatalogPrice(service.modelCatalog, "video", modelId);
+          if (!price) return null;
+          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+          if (!key) return null;
+          const catalog = await service.getUserModelCatalog(owner, key);
+          return catalog?.video.some(item => item.id === modelId) ? price : null;
         },
       }));
     }

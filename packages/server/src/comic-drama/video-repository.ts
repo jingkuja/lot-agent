@@ -39,7 +39,7 @@ export class PgComicVideo {
   }
 
   async references(owner: string, refs: NonNullable<ComicGenerationPreviewRequest["visualReferences"]>):
-  Promise<(ComicGenerationReference & { kind: "style" | "scene" | "prop" })[]> {
+  Promise<(ComicGenerationReference & { kind: "style" | "scene" | "prop"; materialId: string })[]> {
     if (!refs.length) return [];
     const { rows } = await this.pool.query<Omit<ComicGenerationReference, "kind"> & { id: string; materialKind: string }>(`SELECT
       m.id,m.kind AS "materialKind",m.name AS label,f.id AS "mediaId",f.mime,f.width,f.height,f.size_bytes AS "sizeBytes",v.version
@@ -49,8 +49,8 @@ export class PgComicVideo {
     return refs.map(ref => {
       const row = rows.find(item => item.id === ref.materialId && item.mediaId === ref.mediaId);
       if (!row || row.materialKind !== (ref.kind === "style" ? "other" : ref.kind)) throw new ComicLibraryError("INVALID_REFERENCE", 400);
-      const { id: _id, materialKind: _kind, ...asset } = row;
-      return { ...asset, kind: ref.kind };
+      const { id: materialId, materialKind: _kind, ...asset } = row;
+      return { ...asset, kind: ref.kind, materialId };
     });
   }
 

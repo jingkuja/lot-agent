@@ -1,7 +1,7 @@
 import type {
   ComicEdit, ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate,
-  ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest, ComicSpeechLines, ComicSpeechRequest, ComicSpeechTake, ComicVoiceBind,
-  ComicVoiceSettings,
+  ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest, ComicSpeechLines, ComicSpeechRelease,
+  ComicSpeechRequest, ComicSpeechTake, ComicVoiceBind, ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
 import { libraryError } from "./LibraryParts.js";
@@ -23,6 +23,8 @@ export const comicEditApi = {
   lines: (id: string, itemId: string, signal?: AbortSignal) => request<ComicSpeechLines>(item(id, itemId) + "/lines", { signal }),
   speak: (id: string, itemId: string, line: string, fields: ComicSpeechRequest, signal?: AbortSignal) =>
     send<ComicSpeechTake>(item(id, itemId) + "/lines/" + encodeURIComponent(line) + "/speech", "POST", fields, signal),
+  releaseSpeech: (id: string, itemId: string, line: string, fields: ComicSpeechRelease, signal?: AbortSignal) =>
+    send<{ ok: true }>(item(id, itemId) + "/lines/" + encodeURIComponent(line) + "/speech/release", "POST", fields, signal),
   voice: (id: string, signal?: AbortSignal) => request<ComicVoiceSettings>(voice(id), { signal }),
   bindVoice: (id: string, fields: ComicVoiceBind, signal?: AbortSignal) => send<{ ok: true }>(voice(id), "PUT", fields, signal),
   startRender: (id: string, fields: ComicRenderRequest) => send<ComicRender>(edit(id) + "/render", "POST", fields),
@@ -51,8 +53,10 @@ const errors: Record<string, string> = {
   EDIT_SPEECH_RUNNING: "这句配音正在合成",
   EDIT_SPEECH_UNAVAILABLE: "语音服务暂不可用，请检查模型账号",
   EDIT_SPEECH_UNKNOWN: "配音结果待核实，原请求可能已计费",
+  EDIT_SPEECH_NOT_RELEASABLE: "此句配音暂不可释放，请重新读取台词",
+  CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
   RENDER_NO_VIDEO: "请先添加视频片段",
-  RENDER_LIMIT: "导出最多支持 5 分钟及 64 个视频和音频条目",
+  RENDER_LIMIT: "导出最多支持 5 分钟、60 段视频及 240 条音频",
   RENDER_TRACK_OVERFLOW: "有配音、音乐、音效或字幕超出可用时间，请调整后导出",
   RENDER_FRAME_RANGE: "裁切或转场不足一帧，请调整时间",
   RENDER_QUEUE_UNAVAILABLE: "导出队列暂不可用",

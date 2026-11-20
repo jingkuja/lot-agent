@@ -60,8 +60,22 @@ export function resolveProvider(cfg: ModelCatalogConfig, id: string, type: strin
   return cfg.providerMap[id] ?? cfg.defaultProvider[type] ?? cfg.defaultProvider.llm;
 }
 
+/** Looks up configured pricing without fabricating a zero entry when unpriced. */
+export function lookupPricing(
+  cfg: ModelCatalogConfig,
+  id: string,
+  type: string,
+  options: { fallbackToDefault?: boolean } = {},
+): Pricing | null {
+  if (Object.hasOwn(cfg.pricing, id) && cfg.pricing[id]) return cfg.pricing[id];
+  if (options.fallbackToDefault && Object.hasOwn(cfg.defaultPricing, type) && cfg.defaultPricing[type]) {
+    return cfg.defaultPricing[type];
+  }
+  return null;
+}
+
 export function resolvePricing(cfg: ModelCatalogConfig, id: string, type: string): Pricing {
-  return cfg.pricing[id] ?? cfg.defaultPricing[type] ?? { inputPrice: 0, outputPrice: 0, unitPrice: 0 };
+  return lookupPricing(cfg, id, type, { fallbackToDefault: true }) ?? { inputPrice: 0, outputPrice: 0, unitPrice: 0 };
 }
 
 export function enrichCatalog(

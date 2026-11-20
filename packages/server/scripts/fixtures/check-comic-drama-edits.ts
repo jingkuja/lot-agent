@@ -178,6 +178,13 @@ export async function verifyComicEdits(app: App, pool: Pool, seriesRepo: PgComic
   dialogue = await json<ComicSpeechLines>(base);
   await first(lineA, preset, 409); await first(lineA, preset, 409);
   assert.equal(fixture.calls.length, 4);
+  const releaseBody = { expectedRevision: replaced.revision, expectedClipRevision: dialogue.clipRevision, voice: preset };
+  await json(base + "/" + lineA + "/speech/release", "POST", releaseBody, 400);
+  await json(base + "/" + lineA + "/speech/release", "POST", { ...releaseBody, acknowledgePossibleCharge: true }, 404, "fixture-two");
+  await json(base + "/" + lineA + "/speech/release", "POST", { ...releaseBody, acknowledgePossibleCharge: true }, 200);
+  await json(base + "/" + lineA + "/speech/release", "POST", { ...releaseBody, acknowledgePossibleCharge: true }, 200);
+  await first(lineA, preset, 409);
+  assert.equal(fixture.calls.length, 5, "releasing unknown speech unblocks subsequent synthesis");
   const voice = { ...preset, preset: "nova" };
   const spoken = await Promise.all([1, 2].map(() => request(base + "/" + lineB + "/speech", "POST", {
     expectedRevision: replaced.revision, expectedClipRevision: dialogue.clipRevision, voice,
@@ -185,7 +192,7 @@ export async function verifyComicEdits(app: App, pool: Pool, seriesRepo: PgComic
   assert.equal(spoken[0].ok || spoken[1].ok, true);
   assert.ok(spoken.every(response => response.ok || response.status === 409));
   assert.equal((await first(lineB, voice)).cached, true);
-  assert.equal(fixture.calls.length, 5, "concurrent uncached requests claim a single provider call");
+  assert.equal(fixture.calls.length, 6, "concurrent uncached requests claim a single provider call");
 
   const disposable = await json<ComicEdit>("/edits", "POST", { title: "W8 disposable" }, 201);
   await json("/edits/" + disposable.id, "DELETE", { expectedRevision: disposable.revision });

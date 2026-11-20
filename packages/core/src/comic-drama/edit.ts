@@ -51,8 +51,12 @@ export const comicSpeechRequestSchema = z.object({
     z.object({ kind: z.literal("character"), characterId: id }).strict(),
   ]),
 }).strict();
+export const comicSpeechReleaseSchema = comicSpeechRequestSchema.extend({
+  acknowledgePossibleCharge: z.literal(true),
+}).strict();
 export type ComicVoiceBind = z.infer<typeof comicVoiceBindSchema>;
 export type ComicSpeechRequest = z.infer<typeof comicSpeechRequestSchema>;
+export type ComicSpeechRelease = z.infer<typeof comicSpeechReleaseSchema>;
 export type ComicVoiceSettings = { binding: ComicVoiceBind; presets: readonly string[]; clonesEnabled: boolean; clones: { id: string; title: string }[] };
 export type ComicSpeechLines = {
   clipRevision: number | null;
