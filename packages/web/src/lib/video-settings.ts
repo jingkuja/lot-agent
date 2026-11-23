@@ -1,5 +1,24 @@
 import { isGrokVideoModel, isH3MaxModel, isKlingModel, isMinimaxH3Model } from "./model-filter.js";
 
+export type VideoFaceSwapResolution = "720p" | "1080p";
+
+export interface VideoFaceSwapQuality {
+  label: string;
+  resolution: VideoFaceSwapResolution;
+}
+
+export interface VideoFaceSwapSettings {
+  resolution: VideoFaceSwapResolution;
+}
+
+export const DEFAULT_VIDEO_FACE_SWAP_RESOLUTION: VideoFaceSwapResolution = "720p";
+
+/** 视频换脸画质档位：默认（720p）与质量（1080p）。 */
+export const VIDEO_FACE_SWAP_QUALITIES: readonly VideoFaceSwapQuality[] = [
+  { label: "默认", resolution: "720p" },
+  { label: "质量", resolution: "1080p" },
+];
+
 export interface VideoQuality {
   label: string;
   short: string;

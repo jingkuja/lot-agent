@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   billedVideoSeconds,
+  faceSwapVideoIssue,
   finalizeImageSettings,
   IMAGE_RATIOS,
   imageSizeForTier,
+  normalizeFaceSwapVideoInput,
   pickGenerationSettings,
   validateImageGenerationSettings,
   pickVideoReferenceInputs,
@@ -191,5 +193,29 @@ describe("pickGenerationSettings", () => {
     expect(resolveVideoGenerateAudio(false, [])).toBe(false);
     expect(resolveVideoGenerateAudio(undefined, undefined)).toBe(false);
     expect(resolveVideoGenerateAudio(true, undefined)).toBe(true);
+  });
+
+  it("validates and normalizes wan2.2-animate-mix face-swap inputs", () => {
+    const valid = {
+      input_reference: "/static/uploads/character.jpeg",
+      reference_video: "/static/uploads/performance.mp4",
+      resolution: "720p",
+    };
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", valid)).toBeUndefined();
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", { ...valid, resolution: "1080p" })).toBeUndefined();
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", { ...valid, input_reference: undefined })).toContain("人物图片");
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", { ...valid, reference_video: undefined })).toContain("原始视频");
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", { ...valid, resolution: "480p" })).toContain("720p");
+    expect(faceSwapVideoIssue("wan2.2-animate-mix", { ...valid, media: [{ type: "reference_image", url: "/x.png" }] })).toContain("仅支持");
+    expect(normalizeFaceSwapVideoInput({ resolution: "1080P", ratio: "16:9", durationSec: 5 }, {
+      input_reference: ["/static/uploads/character.jpeg"],
+      reference_video: ["/static/uploads/performance.mp4"],
+    })).toEqual({
+      settings: { resolution: "1080p" },
+      references: {
+        input_reference: "/static/uploads/character.jpeg",
+        reference_video: "/static/uploads/performance.mp4",
+      },
+    });
   });
 });

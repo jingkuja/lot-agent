@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   GROK_VIDEO_MODEL,
+  VIDEO_FACE_SWAP_MODEL,
+  faceSwapVideoInputIssue,
   grokVideoInputIssue,
   isGrokVideoModel,
   isPortraitVideoModel,
+  isVideoFaceSwapModel,
+  normalizeFaceSwapResolution,
   videoTierEdge,
   HappyhorseVideoAdapter,
   OpenaiVideoAdapter,
@@ -389,5 +393,80 @@ describe("OpenaiVideoAdapter portrait models", () => {
     expect(body).toEqual({ model: "videoretalk", seconds: "30", reference_video: "https://h/v.mp4", reference_audio: "https://h/a.wav", metadata: { video_extension: false } });
     expect(isPortraitVideoModel(" VideoRetalk ")).toBe(true);
     expect(isPortraitVideoModel("kling-video-v3-omni")).toBe(false);
+  });
+});
+
+describe("OpenaiVideoAdapter face-swap model (wan2.2-animate-mix)", () => {
+  const a = new OpenaiVideoAdapter();
+  it("matches wan2.2-animate-mix and normalizes resolution to 720p or 1080p", () => {
+    expect(isVideoFaceSwapModel(VIDEO_FACE_SWAP_MODEL)).toBe(true);
+    expect(isVideoFaceSwapModel(" WAN2.2-ANIMATE-MIX ")).toBe(true);
+    expect(isVideoFaceSwapModel("wan2.2-s2v")).toBe(false);
+    expect(normalizeFaceSwapResolution(undefined)).toBe("720p");
+    expect(normalizeFaceSwapResolution("720P")).toBe("720p");
+    expect(normalizeFaceSwapResolution("1080P")).toBe("1080p");
+    expect(normalizeFaceSwapResolution("480p")).toBe("720p");
+  });
+
+  it("builds the exact TokenHub /v1/videos body with scalar URLs and metadata", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "视频换脸",
+        durationSec: 5,
+        ratio: "16:9",
+        generate_audio: false,
+        resolution: "720p",
+        input_reference: ["https://example.com/character.jpeg"],
+        reference_video: ["https://example.com/performance.mp4"],
+      },
+      VIDEO_FACE_SWAP_MODEL,
+    );
+    expect(body).toEqual({
+      model: "wan2.2-animate-mix",
+      input_reference: "https://example.com/character.jpeg",
+      reference_video: "https://example.com/performance.mp4",
+      metadata: {
+        resolution: "720p",
+        check_image: true,
+        watermark: false,
+      },
+    });
+  });
+
+  it("supports quality (1080p) resolution", () => {
+    const body = a.buildCreateBody(
+      {
+        prompt: "",
+        resolution: "1080p",
+        input_reference: "https://example.com/character.jpeg",
+        reference_video: "https://example.com/performance.mp4",
+      },
+      VIDEO_FACE_SWAP_MODEL,
+    );
+    expect(body).toEqual({
+      model: "wan2.2-animate-mix",
+      input_reference: "https://example.com/character.jpeg",
+      reference_video: "https://example.com/performance.mp4",
+      metadata: {
+        resolution: "1080p",
+        check_image: true,
+        watermark: false,
+      },
+    });
+  });
+
+  it("validates required inputs and resolution for face-swap requests", () => {
+    const ok = { images: 1, videos: 1, audios: 0, firstFrame: false, lastFrame: false, resolution: "720p" };
+    expect(faceSwapVideoInputIssue(ok)).toBeUndefined();
+    expect(faceSwapVideoInputIssue({ ...ok, resolution: "1080p" })).toBeUndefined();
+    expect(faceSwapVideoInputIssue({ ...ok, resolution: undefined })).toBeUndefined();
+    expect(faceSwapVideoInputIssue({ ...ok, images: 0 })).toContain("人物图片");
+    expect(faceSwapVideoInputIssue({ ...ok, images: 2 })).toContain("1 张");
+    expect(faceSwapVideoInputIssue({ ...ok, videos: 0 })).toContain("原始视频");
+    expect(faceSwapVideoInputIssue({ ...ok, videos: 2 })).toContain("1 段");
+    expect(faceSwapVideoInputIssue({ ...ok, audios: 1 })).toContain("仅支持");
+    expect(faceSwapVideoInputIssue({ ...ok, firstFrame: true })).toContain("仅支持");
+    expect(faceSwapVideoInputIssue({ ...ok, lastFrame: true })).toContain("仅支持");
+    expect(faceSwapVideoInputIssue({ ...ok, resolution: "480p" })).toContain("720p");
   });
 });

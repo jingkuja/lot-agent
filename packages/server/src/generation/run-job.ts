@@ -1,4 +1,4 @@
-import { ProviderError } from "@lot-agent/core";
+import { isVideoFaceSwapModel, ProviderError } from "@lot-agent/core";
 import { GenerationError } from "./errors.js";
 import { createHash } from "node:crypto";
 import { ImageResultUnknown } from "./image-receipts.js";
@@ -210,7 +210,9 @@ function makeSetMsg(deps: RunJobDeps, job: JobLike, mediaType: MediaType, prompt
       durationSec: input.durationSec,
       ratio: input.ratio,
       ...(typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
-      ...(mediaType === "video" ? { generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio) } : {}),
+      ...(mediaType === "video" && !isVideoFaceSwapModel(deps.vendorModel)
+        ? { generate_audio: resolveVideoGenerateAudio(input.generate_audio, referenceAudio) }
+        : {}),
     },
   };
   return async (status: string, extra: Record<string, unknown>) => {

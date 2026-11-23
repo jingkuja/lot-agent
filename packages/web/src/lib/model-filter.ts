@@ -80,9 +80,18 @@ export function isGrokVideoModel(id: string | null | undefined): boolean {
   return (id ?? "").trim().toLowerCase() === "grok-imagine-video-1.5";
 }
 
-/** Video picker: Grok is shown as spacebunny; requests keep the real model id. */
+/** Dedicated video face-swap model (`wan2.2-animate-mix`); handled by its own composer tab. */
+export const VIDEO_FACE_SWAP_MODEL = "wan2.2-animate-mix";
+
+export function isVideoFaceSwapModel(id: string | null | undefined): boolean {
+  return (id ?? "").trim().toLowerCase() === VIDEO_FACE_SWAP_MODEL;
+}
+
+/** Video picker: hide dedicated face-swap model; Grok is shown as spacebunny; requests keep the real model id. */
 export function visibleVideoModels<T extends { id: string; label?: string }>(models: T[]): T[] {
-  return models.map((model) => isGrokVideoModel(model.id) ? { ...model, label: "spacebunny" } : model);
+  return models
+    .filter((model) => !isVideoFaceSwapModel(model.id))
+    .map((model) => isGrokVideoModel(model.id) ? { ...model, label: "spacebunny" } : model);
 }
 
 /** MiniMax H3 Max (ids like `h3-max` / `minimax-video-h3-max`) uses 480P / 768P. */

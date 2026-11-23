@@ -10,6 +10,7 @@ import { ImageComposeDialog, type ComposeImagesHandler } from "./ImageComposeDia
 import type { ComposeLayout, ExportPreset, RedoRequest } from "../lib/image-settings.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { InputBox, type InputBoxHandle, type InputMode } from "./InputBox.js";
+import { VideoFaceSwapComposer } from "./VideoFaceSwapComposer.js";
 import type { ImageSettings } from "./MediaSettings.js";
 import { TypingDots } from "./TypingDots.js";
 import { LandscapeBackdrop } from "./LandscapeBackdrop.js";
@@ -135,28 +136,7 @@ function InputBranding() {
   );
 }
 
-function Seedance25Hint() {
-  const { t, enabled, modelName } = useI18n();
-  return (
-    <div className="input-seedance-hint" role="note">
-      <span className="input-seedance-hint-icon" aria-hidden>⚠</span>
-      <div className="input-seedance-hint-body">
-        <strong>{enabled ? modelName("doubao-seedance-2-5") : "Seedance 2.5"}</strong>
-        <ul>
-          <li>
-            {t("使用参考图 / 参考视频 / 参考音频时，提示词必须按上传顺序显式写出")}{" "}
-            <code>@Image1</code>、<code>@Video1</code>、<code>@Audio1</code>
-            {t("，否则参考视频/音频会被静默降级为「风格暗示」甚至忽略。")}</li>
-          <li>
-            {t("若参考图或参考视频涉及真人，必须先到火山方舟官方完成真人认证；不支持直接使用含真人人脸的公网 URL。")}</li>
-          <li>{t("首帧图、尾帧图比例需要和生成视频比例一致。")}</li>
-          <li>
-            {t("提示词案例：")}<code>@Video1</code> {t("中增加一条鱼从湖面上跳出来")}</li>
-        </ul>
-      </div>
-    </div>
-  );
-}
+type VideoComposerTab = "quick" | "face_swap";
 
 export function ChatPanel({
   readOnly,
@@ -245,6 +225,7 @@ export function ChatPanel({
 
   // 图片合成 lists this conversation's finished images (and their composites), newest first.
   const [composeOpen, setComposeOpen] = useState(false);
+  const [videoTab, setVideoTab] = useState<VideoComposerTab>("quick");
   const conversationImages = useMemo(() => [...new Set(messages.flatMap((message) => {
     const generation = message.generation;
     if (generation?.mediaType !== "image" || generation.status !== "completed") return [];
@@ -262,35 +243,78 @@ export function ChatPanel({
 
   const inputEl = readOnly ? <p className="feishu-transcript-hint">{t("飞书任务与结果会自动同步到此处。请在飞书私聊机器人发送任务，输入 /cancel 可取消任务。")}</p> : (
     <>
-      {isEmpty && mode === "video" && <Seedance25Hint />}
       {inputAbove && <div className="input-switcher">{inputAbove}</div>}
       <DesktopWorkspaceBar disabled={isStreaming} control={desktopControl} />
-      <InputBox
-        key={mode === "image" ? imageDraftRevision : undefined}
-        ref={inputRef}
-        toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
-        onDraftChange={onDraftChange}
-        attachment={attachment}
-        onAttachmentConsumed={onAttachmentConsumed}
-        onManageKnowledge={onManageKnowledge}
-        onSend={onSend}
-        onStop={onStop}
-        disabled={isStreaming}
-        autoFocus={isEmpty}
-        mode={mode}
-        imageScenes={mode === "image"}
-        imageCollapsible={mode === "image" && !isEmpty}
-        placeholder={
-          mode === "ppt" ? t("描述要制作的 PPT，可上传模版与内容文件") : mode === "contract" ? t("上传旧版与新版合同，我来找出条款与主体差异") : mode !== "default" ? t("请输入内容") : undefined
-        }
-        models={modelList ?? []}
-        selectedModel={selectedModel ?? null}
-        onModelChange={onModelChange}
-        allowKnowledgeBase={agent?.id === "general"}
-        knowledgeBases={knowledgeBases}
-        onKnowledgeBasesChange={onKnowledgeBasesChange}
-        onComposeImages={composeImages}
-      />
+      {mode === "video" && (
+        <div className="video-mode-tabs-row">
+          <div className="video-mode-tabs" role="tablist" aria-label={t("视频创作模式")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={videoTab === "quick"}
+              className={`video-mode-tab${videoTab === "quick" ? " active" : ""}`}
+              disabled={isStreaming}
+              onClick={() => setVideoTab("quick")}
+            >
+              {t("快速生成")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={videoTab === "face_swap"}
+              className={`video-mode-tab${videoTab === "face_swap" ? " active" : ""}`}
+              disabled={isStreaming}
+              onClick={() => setVideoTab("face_swap")}
+            >
+              {t("视频换脸")}
+            </button>
+          </div>
+        </div>
+      )}
+      {mode === "video" && videoTab === "face_swap" ? (
+        <VideoFaceSwapComposer
+          key={imageDraftRevision}
+          disabled={isStreaming}
+          attachment={attachment}
+          onAttachmentConsumed={onAttachmentConsumed}
+          onDraftChange={onDraftChange}
+          onSend={onSend}
+          onStop={onStop}
+        />
+      ) : (
+        <InputBox
+          key={mode === "image" || mode === "video" ? imageDraftRevision : undefined}
+          ref={inputRef}
+          toolbarStart={<DesktopWorkspace key={activeConversationId ?? "new"} disabled={isStreaming} control={desktopControl} />}
+          onDraftChange={onDraftChange}
+          attachment={attachment}
+          onAttachmentConsumed={onAttachmentConsumed}
+          onManageKnowledge={onManageKnowledge}
+          onSend={onSend}
+          onStop={onStop}
+          disabled={isStreaming}
+          autoFocus={isEmpty}
+          mode={mode}
+          imageScenes={mode === "image"}
+          imageCollapsible={mode === "image" && !isEmpty}
+          placeholder={
+            mode === "ppt"
+              ? t("描述要制作的 PPT，可上传模版与内容文件")
+              : mode === "contract"
+                ? t("上传旧版与新版合同，我来找出条款与主体差异")
+                : mode !== "default"
+                  ? t("请输入内容")
+                  : undefined
+          }
+          models={modelList ?? []}
+          selectedModel={selectedModel ?? null}
+          onModelChange={onModelChange}
+          allowKnowledgeBase={agent?.id === "general"}
+          knowledgeBases={knowledgeBases}
+          onKnowledgeBasesChange={onKnowledgeBasesChange}
+          onComposeImages={composeImages}
+        />
+      )}
       {composeOpen && onComposeImages && (
         <ImageComposeDialog conversationImages={conversationImages} onCompose={onComposeImages} onClose={() => setComposeOpen(false)} />
       )}
@@ -319,9 +343,9 @@ export function ChatPanel({
     <h1 className="chat-empty-title">{t(agent?.name) ?? t("借势智算")}</h1>
     {agent?.description && <p className="chat-empty-desc">{t(agent.description)}</p>}
   </>;
-  const emptyImage = isEmpty && mode === "image";
-  // Keep the same input mounted through the first image submission.
-  if (isEmpty && !emptyImage) {
+  const emptyMedia = isEmpty && (mode === "image" || mode === "video");
+  // Keep the same composer mounted through the first image/video submission.
+  if (isEmpty && !emptyMedia) {
     if (emptyDashboard) {
       return (
         <div className="chat-panel chat-panel--empty chat-panel--digital-home">
@@ -344,9 +368,9 @@ export function ChatPanel({
   }
 
   return (
-    <div className={emptyImage ? "chat-panel chat-panel--empty" : "chat-panel"}>
-      {emptyImage && <LandscapeBackdrop className="chat-empty-landscape" />}
-      {!emptyImage && <div className="chat-messages">
+    <div className={emptyMedia ? "chat-panel chat-panel--empty" : "chat-panel"}>
+      {emptyMedia && <LandscapeBackdrop className="chat-empty-landscape" />}
+      {!emptyMedia && <div className="chat-messages">
         {messages.map((msg, i) => {
           const hasInteractive =
             msg.role === "assistant" &&
@@ -394,9 +418,9 @@ export function ChatPanel({
         <DesktopApprovalCards control={desktopControl} />
         <div ref={messagesEndRef} />
       </div>}
-      <div className={emptyImage ? "chat-empty-hero" : "chat-composer"}>
-        {emptyImage && emptyGreeting}
-        <div className={`input-area${emptyImage ? " input-area--centered" : ""}`}>{inputEl}</div>
+      <div className={emptyMedia ? "chat-empty-hero" : "chat-composer"}>
+        {emptyMedia && emptyGreeting}
+        <div className={`input-area${emptyMedia ? " input-area--centered" : ""}`}>{inputEl}</div>
       </div>
     </div>
   );

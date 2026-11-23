@@ -1,7 +1,7 @@
 import { parseChatSourceTypes } from "@lot-agent/core";
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { estimateCost, MAX_IMAGE_EDIT_REFERENCES, type ObjectStorage } from "@lot-agent/core";
+import { estimateCost, isVideoFaceSwapModel, MAX_IMAGE_EDIT_REFERENCES, type ObjectStorage } from "@lot-agent/core";
 import { activeMarketingVideoProfile } from "../marketing-video/model.js";
 import type { AgentService } from "../services/agent-service.js";
 import { staticPrefix } from "../util/public-base.js";
@@ -10,7 +10,16 @@ import { agentEventToSse } from "../services/sse-adapter.js";
 import { attachmentKind, type AttachmentRef } from "../services/attachment-extractor.js";
 import type { KnowledgeBaseRef } from "../services/rag-client.js";
 import type { StoredMessage } from "../db/database.js";
-import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import {
+  billedVideoSeconds,
+  faceSwapVideoIssue,
+  finalizeImageSettings,
+  grokVideoIssue,
+  normalizeFaceSwapVideoInput,
+  pickGenerationSettings,
+  pickVideoReferenceInputs,
+  resolveVideoGenerateAudio,
+} from "../generation/input.js";
 import { agentExtension, AgentConversationError } from "../services/agent-extensions.js";
 import {
   ImageSceneError, imageSceneNeedsReference, imageSceneUsesSet, parseImageScene, planImageScene, posterRemixBackgroundPrompt,
@@ -724,7 +733,11 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
         frozen = original.input;
         prompt = typeof meta.prompt === "string" && meta.prompt.trim() ? meta.prompt : original.input.prompt;
       }
-      if (!prompt) return c.json({ error: "prompt is required" }, 400);
+      const isFaceSwap = mediaType === "video" && conv.agent_id !== "marketing_video" && !frozen && isVideoFaceSwapModel(body.model);
+      if (!prompt) {
+        if (isFaceSwap) prompt = "视频换脸";
+        else return c.json({ error: "prompt is required" }, 400);
+      }
       const scene = mediaType === "image" ? parseImageScene(frozen ? frozen.scene : body.scene) : "free";
       if (!scene) return c.json({ error: "unknown image scene" }, 400);
       if (!frozen && body.posterReference !== undefined && scene !== "poster_remix") {
@@ -788,6 +801,13 @@ export function createGenerationRoutes(service: AgentService, deps: { assets?: O
       if (mediaType === "video") {
         const grokIssue = grokVideoIssue(resolvedModel, { ...settings, ...videoReferences, media });
         if (grokIssue) return c.json({ error: grokIssue }, 400);
+        const faceSwapIssue = faceSwapVideoIssue(resolvedModel, { ...settings, ...videoReferences, media });
+        if (faceSwapIssue) return c.json({ error: faceSwapIssue }, 400);
+        if (isVideoFaceSwapModel(resolvedModel)) {
+          const normalized = normalizeFaceSwapVideoInput(settings, videoReferences);
+          settings = normalized.settings;
+          videoReferences = normalized.references;
+        }
       }
       const type = mediaType === "image" ? "image.generate" : "video.generate";
 

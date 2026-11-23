@@ -680,6 +680,76 @@ it("allows Grok 1080p with only a first frame", async () => {
   expect(res.status).toBe(202);
 });
 
+it("accepts wan2.2-animate-mix face swap with required character image, video, and 720p/1080p resolution", async () => {
+  const service = fakeService();
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: "",
+      mediaType: "video",
+      model: "wan2.2-animate-mix",
+      settings: { resolution: "1080p", ratio: "16:9", durationSec: 8 },
+      input_reference: ["/static/uploads/character.jpeg"],
+      reference_video: ["/static/uploads/performance.mp4"],
+    }),
+  });
+  expect(res.status).toBe(202);
+  const body = await res.json() as { userMessage: { content: string }; assistantMessage: { metadata: { settings: unknown } } };
+  expect(body.userMessage.content).toBe("视频换脸");
+  expect(body.assistantMessage.metadata.settings).toEqual({ resolution: "1080p" });
+  expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+    "video.generate",
+    expect.objectContaining({
+      modelId: "wan2.2-animate-mix",
+      resolution: "1080p",
+      input_reference: "/static/uploads/character.jpeg",
+      reference_video: "/static/uploads/performance.mp4",
+    }),
+    "u1",
+  );
+});
+
+it.each([
+  [{ reference_video: "/static/uploads/performance.mp4", settings: { resolution: "720p" } }, "人物图片"],
+  [{ input_reference: "/static/uploads/character.jpeg", settings: { resolution: "720p" } }, "原始视频"],
+  [
+    {
+      input_reference: ["/static/uploads/a.jpeg", "/static/uploads/b.jpeg"],
+      reference_video: "/static/uploads/performance.mp4",
+      settings: { resolution: "720p" },
+    },
+    "1 张",
+  ],
+  [
+    {
+      input_reference: "/static/uploads/character.jpeg",
+      reference_video: "/static/uploads/performance.mp4",
+      reference_audio: "/static/uploads/a.wav",
+      settings: { resolution: "720p" },
+    },
+    "仅支持",
+  ],
+  [
+    {
+      input_reference: "/static/uploads/character.jpeg",
+      reference_video: "/static/uploads/performance.mp4",
+      settings: { resolution: "480p" },
+    },
+    "720p",
+  ],
+])("rejects invalid wan2.2-animate-mix face-swap payloads before billing %#", async (extra, expected) => {
+  const service = fakeService();
+  const res = await app(service).request("/conversations/c1/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "", mediaType: "video", model: "wan2.2-animate-mix", ...extra }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json() as { error: string }).error).toContain(expected);
+  expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+});
+
 
 it.each([16, 60, -1, 0, 3, 15.5, "15", null])("rejects invalid marketing video duration %s before billing or enqueueing", async (durationSec) => {
   const service = fakeService();

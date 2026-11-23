@@ -1,10 +1,19 @@
 import { KnowledgeJobs } from "../knowledge/ingestion/jobs.js";
 import { PgAnalysisStore } from "../marketing-analysis/repository.js";
 import { Hono } from "hono";
-import { estimateCost, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
+import { estimateCost, isVideoFaceSwapModel, MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import { makePricingLookup } from "../billing/pricing-lookup.js";
 import type { AgentService } from "../services/agent-service.js";
-import { billedVideoSeconds, finalizeImageSettings, grokVideoIssue, pickGenerationSettings, pickVideoReferenceInputs, resolveVideoGenerateAudio } from "../generation/input.js";
+import {
+  billedVideoSeconds,
+  faceSwapVideoIssue,
+  finalizeImageSettings,
+  grokVideoIssue,
+  normalizeFaceSwapVideoInput,
+  pickGenerationSettings,
+  pickVideoReferenceInputs,
+  resolveVideoGenerateAudio,
+} from "../generation/input.js";
 import { IMAGE_REDO_TASK, settleImageRedo } from "../generation/run-job.js";
 
 const ALLOWED_TYPES = ["image.generate", "video.generate"] as const;
@@ -41,10 +50,22 @@ export function sanitizeTaskInput(
     input.media = raw.media;
   }
   if (mediaType === "video") {
-    Object.assign(input, pickVideoReferenceInputs(raw));
+    const references = pickVideoReferenceInputs(raw);
+    Object.assign(input, references);
     input.generate_audio = resolveVideoGenerateAudio(input.generate_audio, input.reference_audio);
     const grokIssue = grokVideoIssue(input.modelId as string | undefined, input);
     if (grokIssue) throw new Error(grokIssue);
+    const faceSwapIssue = faceSwapVideoIssue(input.modelId as string | undefined, input);
+    if (faceSwapIssue) throw new Error(faceSwapIssue);
+    if (isVideoFaceSwapModel(input.modelId as string | undefined)) {
+      const normalized = normalizeFaceSwapVideoInput(pickGenerationSettings("video", raw), references);
+      return {
+        modelId: input.modelId,
+        ...(typeof input.prompt === "string" ? { prompt: input.prompt } : {}),
+        ...normalized.settings,
+        ...normalized.references,
+      };
+    }
   }
   return input;
 }

@@ -383,11 +383,13 @@ export function Workspace({
       settings?: unknown,
       knowledgeBases: KnowledgeBaseRef[] = [],
       requestId?: string,
+      modelOverride?: string,
     ) => {
       const kind = openAgent?.type || openAgent?.id;
       const dispatch = () => {
         if (kind === "image" || kind === "video") {
-          const modelId = kind === "image" ? resolveImageSelection(selectedModels.image, modelCatalog.image) : selectedModels.video;
+          const modelId = modelOverride
+            ?? (kind === "image" ? resolveImageSelection(selectedModels.image, modelCatalog.image) : selectedModels.video);
           return generateMedia(content, kind === "image" ? "image" : "video", settings, files, modelId ?? undefined, [], requestId);
         } else {
           send(content, files, undefined, selectedModels.llm ?? undefined, knowledgeBases);

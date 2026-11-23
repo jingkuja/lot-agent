@@ -249,6 +249,55 @@ describe("runGenerationJob", () => {
     expect(new Set(cacheKeys).size).toBe(3);
   });
 
+  it("posts the exact wan2.2-animate-mix face-swap body to /videos", async () => {
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      if (init?.method === "POST") return Response.json({ id: "fs-1", status: "queued" });
+      return Response.json({ status: "completed", progress: 100, metadata: { url: "https://video.example/swapped.mp4" } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const provider = new HttpVideoGenerationProvider({
+        baseUrl: "https://tokenhub.wetok.ai/v1",
+        apiKey: "test-key",
+        adapter: new OpenaiVideoAdapter(),
+        model: "wan2.2-animate-mix",
+      });
+      const { deps, calls } = fakeDeps(provider, {
+        modelId: "wan2.2-animate-mix",
+        vendorModel: "wan2.2-animate-mix",
+        resolveReferenceUrl: vi.fn(async (url: string) => `https://example.com${url}`),
+      });
+      await runGenerationJob(deps, {
+        ...job,
+        input: {
+          conversationId: "c1",
+          assistantMessageId: "m1",
+          prompt: "视频换脸",
+          resolution: "720p",
+          input_reference: "/character.jpeg",
+          reference_video: "/performance.mp4",
+        },
+      }, "video");
+      const [postUrl, postInit] = fetcher.mock.calls[0] as [string, RequestInit];
+      expect(postUrl).toBe("https://tokenhub.wetok.ai/v1/videos");
+      expect(JSON.parse(String(postInit.body))).toEqual({
+        model: "wan2.2-animate-mix",
+        input_reference: "https://example.com/character.jpeg",
+        reference_video: "https://example.com/performance.mp4",
+        metadata: {
+          resolution: "720p",
+          check_image: true,
+          watermark: false,
+        },
+      });
+      expect(calls.message.at(-1)).toMatchObject({ status: "completed" });
+      expect(calls.message.at(-1).metadata.settings).toMatchObject({ resolution: "720p" });
+      expect("generate_audio" in calls.message.at(-1).metadata.settings).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the task id on the message through completion so lost submissions stay recoverable", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

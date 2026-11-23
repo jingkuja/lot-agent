@@ -68,6 +68,65 @@ export function isPortraitVideoModel(model: string | null | undefined): boolean 
   return (PORTRAIT_VIDEO_MODELS as readonly string[]).includes((model ?? "").trim().toLowerCase());
 }
 
+/** Dedicated video face-swap model: swaps a character portrait into a performance video. */
+export const VIDEO_FACE_SWAP_MODEL = "wan2.2-animate-mix";
+export const VIDEO_FACE_SWAP_RESOLUTIONS = ["720p", "1080p"] as const;
+export type VideoFaceSwapResolution = (typeof VIDEO_FACE_SWAP_RESOLUTIONS)[number];
+
+export function isVideoFaceSwapModel(model: string | null | undefined): boolean {
+  return (model ?? "").trim().toLowerCase() === VIDEO_FACE_SWAP_MODEL;
+}
+
+export function normalizeFaceSwapResolution(value: string | null | undefined): VideoFaceSwapResolution {
+  return (value ?? "").trim().toLowerCase() === "1080p" ? "1080p" : "720p";
+}
+
+export interface FaceSwapVideoInputSummary {
+  images: number;
+  videos: number;
+  audios: number;
+  firstFrame: boolean;
+  lastFrame: boolean;
+  resolution?: string;
+}
+
+/** wan2.2-animate-mix requires exactly one character image and one source video, with 720p or 1080p. */
+export function faceSwapVideoInputIssue(input: FaceSwapVideoInputSummary): string | undefined {
+  if (input.images === 0) return "视频换脸请上传人物图片";
+  if (input.images > 1) return "视频换脸仅支持上传 1 张人物图片";
+  if (input.videos === 0) return "视频换脸请上传原始视频";
+  if (input.videos > 1) return "视频换脸仅支持上传 1 段原始视频";
+  if (input.audios > 0 || input.firstFrame || input.lastFrame) return "视频换脸仅支持人物图片和原始视频";
+  if (input.resolution !== undefined) {
+    const normalized = input.resolution.trim().toLowerCase();
+    if (!(VIDEO_FACE_SWAP_RESOLUTIONS as readonly string[]).includes(normalized)) {
+      return "视频换脸清晰度仅支持 720p 或 1080p";
+    }
+  }
+  return undefined;
+}
+
+function firstReference(value: ReferenceInput | undefined): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (Array.isArray(value)) return value.find((item) => typeof item === "string" && item.trim())?.trim();
+  return undefined;
+}
+
+/** Face-swap request matches TokenHub `/v1/videos` for `wan2.2-animate-mix`. */
+function faceSwapCreateBody(req: VideoGenerationRequest, model: string): Record<string, unknown> {
+  const body: Record<string, unknown> = { model };
+  const inputReference = firstReference(req.input_reference);
+  const referenceVideo = firstReference(req.reference_video);
+  if (inputReference) body.input_reference = inputReference;
+  if (referenceVideo) body.reference_video = referenceVideo;
+  body.metadata = {
+    resolution: normalizeFaceSwapResolution(req.resolution ?? req.quality),
+    check_image: true,
+    watermark: false,
+  };
+  return body;
+}
+
 /** `seconds` only sizes the gateway's pre-charge; the voice track sets the real length,
  * which the gateway settles from the vendor's usage. VideoRetalk never loops footage to
  * fit a longer track: callers trim the footage to the track instead. */
@@ -233,6 +292,7 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
   }
   override buildCreateBody(req: VideoGenerationRequest, model: string): unknown {
     if (isPortraitVideoModel(model)) return portraitCreateBody(req, model);
+    if (isVideoFaceSwapModel(model)) return faceSwapCreateBody(req, model);
     const body: Record<string, unknown> = { model, prompt: req.prompt };
     body.generate_audio = resolveGenerateAudio(req);
     // TokenHub reads resolution from metadata, not a top-level resolution or quality.

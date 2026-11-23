@@ -1,4 +1,10 @@
-import { grokVideoInputIssue, isGrokVideoModel } from "@lot-agent/core";
+import {
+  faceSwapVideoInputIssue,
+  grokVideoInputIssue,
+  isGrokVideoModel,
+  isVideoFaceSwapModel,
+  normalizeFaceSwapResolution,
+} from "@lot-agent/core";
 
 /**
  * Per-media whitelist for client-supplied generation settings.
@@ -169,6 +175,37 @@ export function grokVideoIssue(modelId: string | undefined, input: Record<string
     resolutions: [input.resolution, input.quality, input.size].map((value) => typeof value === "string" ? value : undefined),
     durationSec: typeof input.durationSec === "number" ? input.durationSec : undefined,
   });
+}
+
+/** Face-swap model (`wan2.2-animate-mix`) requires one character image, one source video, and 720p or 1080p. */
+export function faceSwapVideoIssue(modelId: string | undefined, input: Record<string, unknown>): string | undefined {
+  if (!isVideoFaceSwapModel(modelId)) return undefined;
+  const count = (value: unknown) => Array.isArray(value) ? value.length : typeof value === "string" && value.trim() ? 1 : 0;
+  const media = Array.isArray(input.media) ? input.media as { type?: unknown }[] : [];
+  if (media.length > 0) return "视频换脸仅支持人物图片和原始视频";
+  return faceSwapVideoInputIssue({
+    images: count(input.input_reference),
+    videos: count(input.reference_video),
+    audios: count(input.reference_audio),
+    firstFrame: !!input.first_frame,
+    lastFrame: !!input.last_frame,
+    resolution: typeof input.resolution === "string" ? input.resolution : undefined,
+  });
+}
+
+/** Normalize validated face-swap settings and scalar references for storage and queueing. */
+export function normalizeFaceSwapVideoInput(
+  settings: Record<string, GenerationSettingValue>,
+  references: Record<string, string | string[]>,
+): { settings: { resolution: "720p" | "1080p" }; references: { input_reference: string; reference_video: string } } {
+  const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? "";
+  return {
+    settings: { resolution: normalizeFaceSwapResolution(typeof settings.resolution === "string" ? settings.resolution : undefined) },
+    references: {
+      input_reference: first(references.input_reference),
+      reference_video: first(references.reference_video),
+    },
+  };
 }
 
 /** Video quota/metering needs a positive second count. Seedance reference-video

@@ -903,8 +903,15 @@ describe("deployment feedback idempotency", () => {
 });
 
 describe("campaignVideoModels", () => {
-  it("hides Grok video from Acquisition model choices", () => {
-    expect(campaignVideoModels([{ id: "doubao-seedance-2-5" }, { id: "grok-imagine-video-1.5" }, { id: "kling-video-v3-omni" }]))
-      .toEqual([{ id: "doubao-seedance-2-5", label: "doubao-seedance-2-5" }, { id: "kling-video-v3-omni", label: "kling-video-v3-omni" }]);
+  it("hides Grok and face-swap video models from Acquisition model choices", () => {
+    expect(campaignVideoModels([
+      { id: "doubao-seedance-2-5" },
+      { id: "grok-imagine-video-1.5" },
+      { id: "wan2.2-animate-mix" },
+      { id: "kling-video-v3-omni" },
+    ])).toEqual([
+      { id: "doubao-seedance-2-5", label: "doubao-seedance-2-5" },
+      { id: "kling-video-v3-omni", label: "kling-video-v3-omni" },
+    ]);
   });
 });

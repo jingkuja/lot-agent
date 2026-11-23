@@ -4,6 +4,7 @@ import {
   H3_MAX_VIDEO_QUALITIES,
   KLING_VIDEO_QUALITIES,
   MINIMAX_H3_VIDEO_QUALITIES,
+  VIDEO_FACE_SWAP_QUALITIES,
   VIDEO_QUALITIES,
   pickVideoQuality,
   videoQualitiesForModel,
@@ -63,5 +64,14 @@ describe("Grok video qualities", () => {
     expect(GROK_REFERENCE_VIDEO_QUALITIES.map((q) => q.short)).toEqual(["480p", "720p"]);
     expect(pickVideoQuality(GROK_REFERENCE_VIDEO_QUALITIES, "1080p").short).toBe("720p");
     expect(videoQualitiesForModel("kling-video-v3-omni", true)).toBe(KLING_VIDEO_QUALITIES);
+  });
+});
+
+describe("VIDEO_FACE_SWAP_QUALITIES", () => {
+  it("maps 默认 to 720p and 质量 to 1080p", () => {
+    expect(VIDEO_FACE_SWAP_QUALITIES).toEqual([
+      { label: "默认", resolution: "720p" },
+      { label: "质量", resolution: "1080p" },
+    ]);
   });
 });

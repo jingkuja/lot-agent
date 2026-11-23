@@ -112,3 +112,48 @@ it("resumes both chat media cards and cancels one without interrupting the text 
   expect(chat.isStreaming).toBe(true);
   expect(chat.messages.find(message => message.id === "video-message")?.generation?.status).toBe("cancelled");
 });
+
+it("sends scalar input_reference and reference_video for wan2.2-animate-mix face swap", async () => {
+  vi.mocked(api.uploadFile)
+    .mockResolvedValueOnce({
+      assetId: "a1", filename: "character.jpeg", mime: "image/jpeg", size: 10, url: "/static/uploads/character.jpeg", kind: "image",
+    })
+    .mockResolvedValueOnce({
+      assetId: "a2", filename: "performance.mp4", mime: "video/mp4", size: 20, url: "/static/uploads/performance.mp4", kind: "doc",
+    });
+  vi.mocked(api.generate).mockResolvedValue({
+    taskId: "face-swap-task",
+    userMessage: { id: "u-fs", content: "视频换脸（默认 · 720p）" },
+    assistantMessage: {
+      id: "a-fs", role: "assistant", status: "generating",
+      metadata: { mediaType: "video", status: "generating", supportsProgress: true },
+    },
+  });
+  vi.mocked(api.getTask).mockResolvedValue({
+    id: "face-swap-task", status: "succeeded", progress: 100,
+    output: { assets: [{ url: "/static/assets/out.mp4", mime: "video/mp4" }] },
+  });
+  mount();
+  const result = await act(async () => chat.generateMedia(
+    "视频换脸（默认 · 720p）",
+    "video",
+    { resolution: "720p" },
+    [
+      { file: new File(["img"], "character.jpeg", { type: "image/jpeg" }), slot: "video_reference_image" },
+      { file: new File(["vid"], "performance.mp4", { type: "video/mp4" }), slot: "video_reference_video" },
+    ],
+    "wan2.2-animate-mix",
+  ));
+  expect(result).toBe("accepted");
+  expect(api.generate).toHaveBeenCalledWith(
+    "chat",
+    expect.objectContaining({
+      mediaType: "video",
+      model: "wan2.2-animate-mix",
+      settings: { resolution: "720p" },
+      input_reference: "/static/uploads/character.jpeg",
+      reference_video: "/static/uploads/performance.mp4",
+    }),
+    expect.any(AbortSignal),
+  );
+});

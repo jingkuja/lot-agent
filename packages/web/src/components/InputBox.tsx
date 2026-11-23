@@ -1,6 +1,7 @@
 import { useI18n } from "../i18n/index.js";
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import { ImageSettingsPicker, VIDEO_DURATIONS, VideoSettingsPicker, type ImageSettings, type VideoSettings } from "./MediaSettings.js";
+import type { VideoFaceSwapSettings } from "../lib/video-settings.js";
 import {
   DEFAULT_IMAGE_QUALITY,
   DEFAULT_IMAGE_RATIO,
@@ -65,9 +66,10 @@ interface InputBoxProps {
   onSend?: (
     content: string,
     files: PickedFile[],
-    settings?: ImageSettings | VideoSettings,
+    settings?: ImageSettings | VideoSettings | VideoFaceSwapSettings,
     knowledgeBases?: KnowledgeBaseRef[],
     requestId?: string,
+    modelOverride?: string,
   ) => void | Promise<void | "accepted" | "rejected" | "unknown">;
   onStop?: () => void;
   disabled?: boolean;

@@ -1,4 +1,4 @@
-import { visibleImageModels, type CatalogModel } from "./model-filter.js";
+import { visibleImageModels, visibleVideoModels, type CatalogModel } from "./model-filter.js";
 
 export type ModelGroup = "llm" | "image" | "video";
 
@@ -19,10 +19,13 @@ export function fillModelDefaults(
   prev: SelectedModels,
   catalog: { llm: CatalogModel[]; image: CatalogModel[]; video: CatalogModel[] }
 ): SelectedModels {
+  const visibleVideos = visibleVideoModels(catalog.video);
   return {
     llm: prev.llm ?? catalog.llm[0]?.id ?? null,
     image: resolveImageSelection(prev.image, catalog.image),
-    video: prev.video ?? catalog.video[0]?.id ?? null,
+    video: prev.video && visibleVideos.some((model) => model.id === prev.video)
+      ? prev.video
+      : visibleVideos[0]?.id ?? prev.video ?? null,
   };
 }
 

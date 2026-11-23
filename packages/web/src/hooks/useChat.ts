@@ -10,6 +10,7 @@ import { showAlert, notifyDesktop } from "../lib/notify.js";
 import {
   generationComposites, generationRedo, whiteBackgroundChecks, type ComposeLayout, type ExportPreset, type ImageSettings, type RedoRequest,
 } from "../lib/image-settings.js";
+import { isVideoFaceSwapModel } from "../lib/model-filter.js";
 import {
   chatReducer,
   initialChatState,
@@ -594,7 +595,8 @@ export function useChat(
       posterOverride?: PosterPreviewEdit,
     ): Promise<"accepted" | "rejected" | "unknown"> => {
       const cid = cidRef.current;
-      if (!cid || !prompt.trim() || state.isStreaming) return "rejected";
+      const faceSwap = mediaType === "video" && isVideoFaceSwapModel(modelId);
+      if (!cid || (!prompt.trim() && !faceSwap) || state.isStreaming) return "rejected";
       if (mediaType === "image") requestId ??= randomId();
       const imageSettings: Partial<ImageSettings> = mediaType === "image" && settings && typeof settings === "object" ? settings as ImageSettings : {};
       const { scene, posterReference, realText, ...imageParameters } = imageSettings;
@@ -663,8 +665,8 @@ export function useChat(
           mediaType,
           settings: mediaType === "image" ? imageParameters : settings,
           media: media.length ? media : undefined,
-          input_reference: inputReference.length ? inputReference : undefined,
-          reference_video: referenceVideo.length ? referenceVideo : undefined,
+          input_reference: inputReference.length ? (faceSwap ? inputReference[0] : inputReference) : undefined,
+          reference_video: referenceVideo.length ? (faceSwap ? referenceVideo[0] : referenceVideo) : undefined,
           reference_audio: referenceAudio.length ? referenceAudio : undefined,
           first_frame: firstFrame,
           last_frame: lastFrame,

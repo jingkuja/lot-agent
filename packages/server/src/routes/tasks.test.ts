@@ -144,4 +144,43 @@ describe("POST /tasks input whitelisting", () => {
       "u1"
     );
   });
+
+  it("validates and normalizes wan2.2-animate-mix tasks", async () => {
+    const service = fakeService();
+    const bad = await app(service).request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "video.generate",
+        input: { modelId: "wan2.2-animate-mix", input_reference: "/static/uploads/character.jpeg" },
+      }),
+    });
+    expect(bad.status).toBe(400);
+    expect(service.jobQueue.enqueue).not.toHaveBeenCalled();
+
+    const ok = await app(service).request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "video.generate",
+        input: {
+          modelId: "wan2.2-animate-mix",
+          resolution: "720p",
+          input_reference: ["/static/uploads/character.jpeg"],
+          reference_video: ["/static/uploads/performance.mp4"],
+        },
+      }),
+    });
+    expect(ok.status).toBe(202);
+    expect(service.jobQueue.enqueue).toHaveBeenCalledWith(
+      "video.generate",
+      {
+        modelId: "wan2.2-animate-mix",
+        resolution: "720p",
+        input_reference: "/static/uploads/character.jpeg",
+        reference_video: "/static/uploads/performance.mp4",
+      },
+      "u1",
+    );
+  });
 });

@@ -13,7 +13,7 @@ import { parsePptApproval, PPT_APPROVAL_PREFIX } from "@lot-agent/core/presentat
 import { exportConfirmedPpt } from "./ppt-confirmation.js";
 import { chatMediaPolicy, directVideoRequest, runDirectVideoTool } from "./chat-media-routing.js";
 import { renderPptPreview } from "../ppt/preview.js";
-import { isAnthropicModel, isPortraitVideoModel, parseChatSourceTypes } from "@lot-agent/core";
+import { isAnthropicModel, isPortraitVideoModel, isVideoFaceSwapModel, parseChatSourceTypes } from "@lot-agent/core";
 import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
@@ -565,7 +565,7 @@ export class AgentService {
       return {
         ...catalog,
         llm: orderLlmModels(catalog.llm),
-        video: catalog.video.filter(({ id }) => !isPortraitVideoModel(id)),
+        video: catalog.video.filter(({ id }) => !isPortraitVideoModel(id) && !isVideoFaceSwapModel(id)),
       };
     }
     if (!apiKey) {

@@ -10,7 +10,7 @@ function svc(cacheHit: string | null) {
   return {
     redis: { get: vi.fn().mockResolvedValue(cacheHit), set: vi.fn() },
     db: { getUserApiKey: vi.fn().mockResolvedValue("sk-user") },
-    tokenhub: { listModels: vi.fn().mockResolvedValue({ llm: ["gpt-5.4"], image: [], video: ["wan2.2-s2v", "veo3.1", "VideoRetalk"] }) },
+    tokenhub: { listModels: vi.fn().mockResolvedValue({ llm: ["gpt-5.4"], image: [], video: ["wan2.2-s2v", "wan2.2-animate-mix", "veo3.1", "VideoRetalk"] }) },
     modelCatalog: {
       defaultProvider: { llm: "openai", image: "chat-completions", video: "happyhorse" },
       providerMap: {}, pricing: {},
@@ -68,7 +68,7 @@ describe("GET /api/models", () => {
     const cached = JSON.stringify({
       llm: [{ id: "claude-sonnet-4", type: "llm", provider: "openai" }, { id: "gpt-5.4", type: "llm", provider: "openai" }],
       image: [],
-      video: [{ id: "videoretalk" }, { id: "veo3.1" }, { id: "wan2.2-s2v" }],
+      video: [{ id: "videoretalk" }, { id: "wan2.2-animate-mix" }, { id: "veo3.1" }, { id: "wan2.2-s2v" }],
     });
     const service = svc(cached);
     const res = await mount(service).request("/");
