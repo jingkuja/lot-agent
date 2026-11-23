@@ -10,6 +10,24 @@ const fail = () =>
 afterEach(() => vi.unstubAllEnvs());
 
 describe("TokenhubClient", () => {
+  it("requests a model estimate using the caller's bearer key and deployment mode", async () => {
+    vi.stubEnv("globle", "1");
+    const f = vi.fn().mockResolvedValue(ok({
+      model: "gpt-5.4", pricing_scheme: "tiered_expr", estimated_quota: 6250, estimated_points: 1.25,
+    }));
+    const client = new TokenhubClient("https://h/api/agent-market", f as typeof fetch);
+    const body = { model: "gpt-5.4", input_tokens: 1000, output_tokens: 250 };
+    await expect(client.estimateModelCost("sk-caller", body)).resolves.toEqual({
+      model: "gpt-5.4", pricingScheme: "tiered_expr", estimatedQuota: 6250, estimatedPoints: 1.25,
+    });
+    expect(f).toHaveBeenCalledWith("https://h/api/agent-market/models/estimate", expect.objectContaining({
+      method: "POST", headers: {
+        "Content-Type": "application/json", "X-Agent-Globle": "1", Authorization: "Bearer sk-caller",
+      },
+      body: JSON.stringify(body), signal: expect.any(AbortSignal),
+    }));
+  });
+
   it("sends registration bindings and both verification codes through the signed control plane", async () => {
     const f = vi.fn().mockResolvedValue(ok({
       user_id: 7,
@@ -421,10 +439,12 @@ describe("TokenhubClient", () => {
 
   it.each(["0", "1"])("lists models with deployment permissions for globle=%s", async globle => {
     vi.stubEnv("globle", globle);
-    const f = vi.fn().mockResolvedValue(ok({ llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"] }));
+    const f = vi.fn().mockResolvedValue(ok({
+      llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"], video_token_models: ["veo3.1"],
+    }));
     const c = new TokenhubClient("https://h/api/agent-market", f as unknown as typeof fetch);
     await expect(c.listModels("sk-X")).resolves.toEqual({
-      llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"],
+      llm: ["gpt-5.4"], image: ["gpt-image-2"], video: ["veo3.1"], video_token_models: ["veo3.1"],
     });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("https://h/api/agent-market/models");

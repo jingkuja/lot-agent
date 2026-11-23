@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { createModelRoutes } from "./models.js";
 import { AgentService } from "../services/agent-service.js";
+import { TokenhubClientError } from "../tokenhub/client.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -30,6 +31,86 @@ function mount(service: import("../services/agent-service.js").AgentService) {
   app.route("/", createModelRoutes(service));
   return app;
 }
+
+describe("POST /api/models/estimate", () => {
+  const body = { model: "gpt-5.4", input_tokens: 1000, output_tokens: 200 };
+  const submit = (service: AgentService, data: unknown = body) => mount(service).request("/estimate", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+
+  it("uses the logged-in user's model key and returns the gateway's points estimate", async () => {
+    const service = svc(null);
+    const quote = { model: body.model, pricingScheme: "ratio", estimatedQuota: 550, estimatedPoints: 0.11 };
+    service.tokenhub.estimateModelCost = vi.fn().mockResolvedValue(quote);
+
+    const res = await submit(service, { ...body, apiKey: "untrusted-key" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(quote);
+    expect(service.db.getUserApiKey).toHaveBeenCalledWith("u1", service.managedKeysEnabled);
+    expect(service.tokenhub.estimateModelCost).toHaveBeenCalledWith("sk-user", body, expect.any(AbortSignal));
+  });
+
+  it("rejects an empty request and preserves gateway model access errors", async () => {
+    const service = svc(null);
+    service.tokenhub.estimateModelCost = vi.fn().mockRejectedValue(new TokenhubClientError("private detail", undefined, undefined, 403));
+    expect((await submit(service, null)).status).toBe(400);
+    expect(service.tokenhub.estimateModelCost).not.toHaveBeenCalled();
+
+    const res = await submit(service);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Model access denied", code: "model_access_denied" });
+  });
+
+  it.each([
+    ["doubao-seedance-2-5", "480p", 90],
+    ["doubao-seedance-2.5", "1280x720", 130],
+    ["doubao-seedance-2-5", "1080p", 160],
+    ["doubao-seedance-2.5", "4K", 220],
+    ["doubao-seedance-2.0", "480p", 80],
+    ["other-video", "720", 120],
+    ["other-video", "2K", 150],
+    ["other-video", "2160x3840", 200],
+  ])("estimates %s at %s on the Agent server", async (model, resolution, rate) => {
+    const service = svc(null);
+    vi.mocked(service.tokenhub.listModels).mockResolvedValue({
+      llm: [], image: [], video: [model], video_token_models: [model],
+    });
+    service.tokenhub.estimateModelCost = vi.fn();
+    const res = await submit(service, { model, video: { resolution, seconds: 5 } });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ model, pricingScheme: "video_token", estimatedPoints: rate * 5, estimatedQuota: null });
+    expect(service.tokenhub.listModels).toHaveBeenCalledWith("sk-user", expect.any(AbortSignal));
+    expect(service.tokenhub.estimateModelCost).not.toHaveBeenCalled();
+  });
+
+  it("requires a usable duration and resolution for a token-priced video", async () => {
+    const service = svc(null);
+    const model = "doubao-seedance-2.5";
+    vi.mocked(service.tokenhub.listModels).mockResolvedValue({
+      llm: [], image: [], video: [model], video_token_models: [model],
+    });
+    service.tokenhub.estimateModelCost = vi.fn();
+    expect((await submit(service, { model, video: { resolution: "720p", seconds: -1 } })).status).toBe(400);
+    expect((await submit(service, { model, video: { resolution: "unknown", seconds: 5 } })).status).toBe(400);
+    expect(service.tokenhub.estimateModelCost).not.toHaveBeenCalled();
+  });
+
+  it("uses the gateway's estimate for a per-second video", async () => {
+    const service = svc(null);
+    const model = "grok-imagine-video-1.5";
+    const estimate = { model, video: { resolution: "720p", seconds: 5, input_image_count: 2 } };
+    const quote = { model, pricingScheme: "video_per_second", estimatedQuota: 550, estimatedPoints: 0.11 };
+    vi.mocked(service.tokenhub.listModels).mockResolvedValue({
+      llm: [], image: [], video: [model], video_token_models: ["doubao-seedance-2.5"],
+    });
+    service.tokenhub.estimateModelCost = vi.fn().mockResolvedValue(quote);
+    const res = await submit(service, estimate);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(quote);
+    expect(service.tokenhub.estimateModelCost).toHaveBeenCalledWith("sk-user", estimate, expect.any(AbortSignal));
+  });
+});
 
 describe("GET /api/models", () => {
   it.each(["0", "1"])("isolates the catalog cache by deployment mode globle=%s", async globle => {

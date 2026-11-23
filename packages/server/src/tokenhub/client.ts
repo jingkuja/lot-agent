@@ -15,6 +15,7 @@ export interface TokenhubModels {
   llm: string[];
   image: string[];
   video: string[];
+  video_token_models?: string[];
 }
 
 export interface ManagedKeyCredential {
@@ -108,10 +109,39 @@ interface Envelope<T> {
 }
 
 export class TokenhubClientError extends Error {
-  constructor(message: string, readonly code?: string, readonly data?: unknown) {
+  constructor(message: string, readonly code?: string, readonly data?: unknown, readonly status?: number) {
     super(message);
     this.name = "TokenhubClientError";
   }
+}
+
+export interface ModelEstimateRequest {
+  model: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_input_tokens?: number;
+  request_parameters?: Record<string, unknown>;
+  image?: {
+    size?: string;
+    count?: number;
+    reference_count?: number;
+    tokens?: {
+      text_input_tokens?: number;
+      cached_text_input_tokens?: number;
+      image_input_tokens?: number;
+      cached_image_input_tokens?: number;
+      text_output_tokens?: number;
+      image_output_tokens?: number;
+    };
+  };
+  video?: { resolution?: string; seconds?: number; total_tokens?: number; has_video_input?: boolean; input_image_count?: number };
+}
+
+export interface ModelEstimate {
+  model: string;
+  pricingScheme: string;
+  estimatedQuota: number;
+  estimatedPoints: number;
 }
 
 export interface WeChatMiniAccountSnapshot {
@@ -575,7 +605,36 @@ export class TokenhubClient {
         deadline.signal,
         gatewayModelHeaders()
       );
-      return { llm: data.llm ?? [], image: data.image ?? [], video: data.video ?? [], ...(data.asr ? { asr: data.asr } : {}), ...(data.audio ? { audio: data.audio } : {}) };
+      return {
+        llm: data.llm ?? [],
+        image: data.image ?? [],
+        video: data.video ?? [],
+        ...(Array.isArray(data.video_token_models) ? { video_token_models: data.video_token_models } : {}),
+        ...(data.asr ? { asr: data.asr } : {}),
+        ...(data.audio ? { audio: data.audio } : {}),
+      };
+    } finally { deadline.dispose(); }
+  }
+
+  async estimateModelCost(apiKey: string, args: ModelEstimateRequest, signal?: AbortSignal): Promise<ModelEstimate> {
+    const errorCode = "tokenhub_model_estimate_failed";
+    const deadline = createDeadline(15_000, signal);
+    try {
+      const data = await this.post<{
+        model: string; pricing_scheme: string; estimated_quota: number; estimated_points: number;
+      }>("/models/estimate", args, errorCode, {
+        ...gatewayModelHeaders(),
+        Authorization: `Bearer ${apiKey}`,
+      }, deadline.signal);
+      if (data.model !== args.model || typeof data.pricing_scheme !== "string" ||
+        !Number.isSafeInteger(data.estimated_quota) || data.estimated_quota < 0 ||
+        !Number.isFinite(data.estimated_points) || data.estimated_points < 0) {
+        throw new TokenhubClientError(errorCode);
+      }
+      return {
+        model: data.model, pricingScheme: data.pricing_scheme,
+        estimatedQuota: data.estimated_quota, estimatedPoints: data.estimated_points,
+      };
     } finally { deadline.dispose(); }
   }
 
@@ -583,7 +642,8 @@ export class TokenhubClient {
     path: string,
     body: unknown,
     errCode: string,
-    extraHeaders?: Record<string, string>
+    extraHeaders?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<T> {
     return this.unwrap<T>(
       () =>
@@ -591,8 +651,9 @@ export class TokenhubClient {
           method: "POST",
           headers: { "Content-Type": "application/json", ...extraHeaders },
           body: JSON.stringify(body),
+          ...(signal ? { signal } : {}),
         }),
-      errCode
+      errCode, signal
     );
   }
 
@@ -672,7 +733,7 @@ export class TokenhubClient {
         status: res.status,
         message: env?.message,
       });
-      throw new TokenhubClientError(errCode, env?.code, env?.data);
+      throw new TokenhubClientError(errCode, env?.code, env?.data, res.status);
     }
     return env.data;
   }
