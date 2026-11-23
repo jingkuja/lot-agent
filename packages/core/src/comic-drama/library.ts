@@ -88,8 +88,7 @@ export const comicSaveMediaAsMaterial = z.object({
 export const comicUserPreferencesSchema = z.object({
   defaultVideoModel: z.string().trim().min(1).max(128).nullable().optional(),
   defaultImageModel: z.string().trim().min(1).max(128).nullable().optional(),
-  defaultTextModel: z.string().trim().min(1).max(128).nullable().optional(),
-}).strict();
+}).strip();
 export const comicStyleReferenceBindSchema = z.object({ mediaId: id }).strict();
 export const comicLibrarySearch = z.object({
   query: z.string().trim().max(120).optional(), archived: z.enum(["true", "false"]).default("false"),

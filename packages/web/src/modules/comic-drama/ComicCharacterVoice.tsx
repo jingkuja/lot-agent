@@ -35,7 +35,7 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
     void comicEditApi.voice(id, controller.signal).then(data => {
       if (!controller.signal.aborted) {
         setKind(data.binding.kind);
-        setPreset(data.binding.kind === "preset" ? data.binding.preset : data.presets[0] ?? "");
+        setPreset(data.binding.kind === "preset" && data.presets.includes(data.binding.preset) ? data.binding.preset : data.presets[0] ?? "");
         setCloneId(data.binding.kind === "clone" ? data.binding.itemId : data.clones[0]?.id ?? "");
         setSettings(data);
       }

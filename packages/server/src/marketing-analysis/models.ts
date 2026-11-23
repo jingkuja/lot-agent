@@ -6,12 +6,13 @@ import { createHash } from "node:crypto";
 import { LLMResponseError, OpenAIResponsesProvider, isQuotaError, type ContentPart, type LLMProvider, type Message } from "@lot-agent/core";
 import { ANALYSIS_LIMITS, AnalysisSummarySchema, OcrOutputSchema, VisualOutputSchema, validateObservation, validateSummary, type AnalysisSpeech, type AnalysisSnapshot, type AnalysisSummary, type FrameEvidence, type ScreenText, type VisualObservation, type AnalysisCallLedger } from "@lot-agent/core/marketing-analysis";
 import { AnalysisError } from "./errors.js";
+import { DEFAULT_OCR_MODEL } from "../models/media-defaults.js";
 import { gatewayModelHeaders } from "../tokenhub/model-access.js";
 
 /** `visual` reads the frames and must take images, so it never follows a change of the copy model;
  * `synthesis` writes the summary and the copy from text alone, with the copy model of the studio,
  * and like the studio switches to `synthesisFallback`, then `synthesisLastResort`, for a while after failures. */
-export const ANALYSIS_MODELS = { ocr: "deepseek-v4.1-flash", visual: "kimi-k3", synthesis: MARKETING_COPY_MODEL,
+export const ANALYSIS_MODELS = { ocr: DEFAULT_OCR_MODEL, visual: "kimi-k3", synthesis: MARKETING_COPY_MODEL,
   synthesisFallback: MARKETING_COPY_FALLBACK_MODEL, synthesisLastResort: MARKETING_COPY_LAST_RESORT_MODEL } as const;
 /** Earlier copy models. A step recorded with one is only replayed from its receipt (or stays unknown), never sent again. */
 const RETIRED_SYNTHESIS_MODELS = ["qwen3.8-max"];

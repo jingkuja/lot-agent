@@ -113,7 +113,9 @@ export const DEFAULT_MARKETING_VIDEO_PROFILE = marketingVideoProfile(DEFAULT_MAR
 
 const IMAGE_FORMAT_NAMES = { "image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP" } as const;
 /** `mime` must come from the file signature on the server; width/height 0 means unreadable. */
-export function marketingReferenceImageIssue(profile: MarketingVideoProfile, image: { mime: string; size: number; width: number; height: number }): string | undefined {
+export function marketingReferenceImageIssue(
+  profile: Pick<MarketingVideoProfile, "referenceImage">, image: { mime: string; size: number; width: number; height: number },
+): string | undefined {
   const rules = profile.referenceImage;
   if (!rules.formats.includes(image.mime as never)) return `当前视频模型的参考图仅支持 ${rules.formats.map(format => IMAGE_FORMAT_NAMES[format]).join("、")} 格式`;
   if (!image.size || image.size > rules.maxBytes) return `参考图大小不能超过 ${Math.round(rules.maxBytes / 1024 / 1024)}MB`;

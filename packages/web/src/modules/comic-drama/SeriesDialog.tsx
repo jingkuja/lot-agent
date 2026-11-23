@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { comicVideoProfile, type ComicDramaListing, type ComicDramaSeries, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
+import { comicVideoOptions, type ComicDramaListing, type ComicDramaSeries, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
 import { ChoiceSelect } from "./LibraryParts.js";
@@ -13,7 +13,7 @@ export function SeriesDialog({ series, models, close, save, error }: {
   save: (fields: ComicDramaSeriesInput) => Promise<boolean>;
   error: string | null;
 }) {
-  const { t, modelName } = useI18n();
+  const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<ComicDramaListing["entries"]>([]);
@@ -24,7 +24,7 @@ export function SeriesDialog({ series, models, close, save, error }: {
   const [styleKey, setStyleKey] = useState(series?.styleKey ?? "thick_painting");
   const [aspectRatio, setAspectRatio] = useState<ComicDramaSeriesInput["aspectRatio"]>(series?.aspectRatio ?? "9:16");
   const [videoModel, setVideoModel] = useState(series?.videoModel ?? "");
-  const available = models.filter(model => comicVideoProfile(model.id));
+  const available = comicVideoOptions(models, videoModel);
 
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => {
@@ -44,7 +44,7 @@ export function SeriesDialog({ series, models, close, save, error }: {
     setEpisodeNo(String((chosen.episodeNo ?? 1) + 1));
     if (inherit) setStyleKey(chosen.styleKey);
     setAspectRatio(chosen.aspectRatio);
-    if (chosen.videoModel) setVideoModel(chosen.videoModel);
+    setVideoModel(comicVideoOptions(models, chosen.videoModel).find(model => model.id === chosen.videoModel)?.id ?? "");
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -103,7 +103,7 @@ export function SeriesDialog({ series, models, close, save, error }: {
           <option value="">{t(series ? "稍后选择" : "沿用默认视频模型")}</option>
           {series?.videoModel && !available.some(model => model.id === series.videoModel) &&
             <option value={series.videoModel}>{series.videoModel}</option>}
-          {available.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
+          {available.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}
         </select></label>
         {error && <p className="comic-error" role="alert">{error}</p>}
         <div className="comic-actions">

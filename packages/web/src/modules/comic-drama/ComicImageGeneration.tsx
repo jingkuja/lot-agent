@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { comicVideoModel } from "@lot-agent/core/comic-drama";
 import type {
   ComicDramaClip, ComicDramaDetail, ComicGenerationMode, ComicGenerationQuote, ComicImageRequest, ComicLibraryPage, ComicMaterial,
 } from "@lot-agent/core/comic-drama";
@@ -43,6 +44,7 @@ export function ComicImageGeneration({
   const [visual, setVisual] = useState<ChosenVideoReference[]>([]);
   const lastQuickToken = useRef(0);
   const isVideo = mode !== "keyframe";
+  const videoModel = comicVideoModel(detail.series.videoModel);
   const pending = useRef(false);
   const clip = detail.clips.find(item => item.id === selected) ?? detail.clips[0];
   const selection = detail.clips.filter(item => checked.includes(item.id)).map(item => item.id);
@@ -67,7 +69,8 @@ export function ComicImageGeneration({
       }));
       if (targets.length !== ids.length) { setError("素材或分镜已更新，请重新询价"); return; }
       setQuote(await comicGenerationApi.preview(scope, { mode: targetMode, expectedSeriesRevision: saved.series.revision, targets,
-        ...(targetIsVideo && visual.length ? { visualReferences: visual.map(({ kind, materialId, mediaId }) => ({ kind, materialId, mediaId })) } : {}),
+        ...(targetMode === "references" && visual.length
+          ? { visualReferences: visual.map(({ kind, materialId, mediaId }) => ({ kind, materialId, mediaId })) } : {}),
       }));
     } catch (reason) { setError(comicGenerationError(reason)); }
     finally { setQuoting(false); pending.current = false; }
@@ -163,8 +166,11 @@ export function ComicImageGeneration({
       </ul>
       {detail.clips.length > 0 && !disabled && <>
         {isVideo && <>
-          <p className="comic-generation-note">{detail.series.videoModel ?? t("请先在剧集设置中选择支持的视频模型")}</p>
-          <ComicVideoReferences references={visual} change={setVisual} />
+          <p className="comic-generation-note">{videoModel ? t(videoModel.label) : t("请先在剧集设置中选择支持的视频模型")}</p>
+          {videoModel && <p className="comic-generation-note">{t("视频时长须为 4 至 {0} 整秒", [videoModel.profile.shotMaxSeconds])}</p>}
+          {videoModel && (mode === "references"
+            ? <ComicVideoReferences references={visual} change={setVisual} limit={videoModel.profile.referenceImages.total} />
+            : <p className="comic-generation-note">{t("首帧模式只发送已确认的首帧，其他素材可用于直接参考生成。")}</p>)}
           <label className="comic-video-replace"><input type="checkbox" checked={replaceAdopted}
             onChange={event => setReplaceAdopted(event.target.checked)} />{t("为已采用的分镜生成新版")}</label>
         </>}

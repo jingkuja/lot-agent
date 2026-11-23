@@ -1,5 +1,5 @@
 import type { ComicSeriesCast } from "./cast.js";
-import { comicVideoProfile } from "./generation.js";
+import { comicVideoModel, comicVideoProfile } from "./models.js";
 import type { ComicDramaClip, ComicDramaDetail, ComicDramaSeries } from "./index.js";
 
 /** Matches MAX_IMAGE_EDIT_REFERENCES (5) without importing Node-only provider modules into browser bundles. */
@@ -163,7 +163,7 @@ export function checkComicClipIssues(
   const limit = profile ? profile.referenceImages.total : COMIC_KEYFRAME_MAX_REFERENCES;
   const count = countComicClipReferences(clip, {
     hasStyleRef: opts?.hasStyleRef,
-    includeKeyframe: !!profile && !!clip.progress?.keyframeApproved,
+    includeKeyframe: !!profile && !comicVideoModel(series.videoModel) && !!clip.progress?.keyframeApproved,
   });
   if (count > limit) {
     issues.push({

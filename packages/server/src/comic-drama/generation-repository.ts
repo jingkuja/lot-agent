@@ -6,12 +6,12 @@ import {
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, taskQueueName } from "../jobs/task-queues.js";
 import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
-import { insertComicCharacterVersion, insertComicMedia } from "./library-repository.js";
+import { insertComicCharacterVersion, insertComicMaterialVersion, insertComicMedia } from "./library-repository.js";
 import { requireComicChoice } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
 import { comicQuoteCurrency } from "./pricing.js";
 
-export type ComicGenerationScope = { kind: "series" | "character"; id: string };
+export type ComicGenerationScope = { kind: "series" | "character" | "material"; id: string };
 export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second"; currency?: "CNY" | "USD" };
 export type FrozenVisualReference = { materialId: string | null; mediaId: string; version: number; styleKey?: string };
 type FrozenQuote = {
@@ -24,10 +24,12 @@ export const comicJobLockKey = (id: string) => `comic-drama-image:${id}`;
 const taskType = (price: ComicPrice) => price.unit === "second" ? COMIC_VIDEO_TASK : COMIC_IMAGE_TASK;
 
 function targetId(input: ComicTakeInput) {
-  return "clipId" in input ? input.clipId : input.characterId;
+  if ("clipId" in input) return input.clipId;
+  return "characterId" in input ? input.characterId : input.materialId;
 }
 function targetKey(input: ComicTakeInput) {
   if ("clipId" in input) return `${input.mode === "keyframe" ? "keyframe" : "video"}:${input.clipId}`;
+  if ("materialId" in input) return `material:${input.materialId}`;
   const { target, characterId } = input;
   return `${target.kind}:${characterId}:${target.kind === "slot" ? target.outfitId : ""}:${target.key}`;
 }
@@ -61,7 +63,7 @@ export class PgComicGeneration {
   private async request(owner: string, id: string, scope?: ComicGenerationScope, db: ComicQuery = this.pool, lock = false) {
     const { rows } = await db.query<RequestRow>(`SELECT id,task_id AS "taskId",confirmed_at IS NOT NULL AS confirmed,
       expires_at>clock_timestamp() AS valid,frozen FROM ${namespace}.cd_generation_requests
-      WHERE owner_id=$1 AND id=$2 ${scope ? `AND ${scope.kind === "series" ? "series_id" : "character_id"}=$3` : ""}
+      WHERE owner_id=$1 AND id=$2 ${scope ? `AND ${scope.kind === "series" ? "series_id" : scope.kind === "character" ? "character_id" : "material_id"}=$3` : ""}
       ${lock ? "FOR UPDATE" : ""}`, scope ? [owner, id, scope.id] : [owner, id]);
     return rows[0] ?? libraryMissing();
   }
@@ -87,8 +89,9 @@ export class PgComicGeneration {
     if (!inputs.length || !price) return { confirmationId: null, expiresAt: null, items: [], skipped, totalMicros: null, currency };
     const storedPrice: ComicPrice = { ...price, currency };
     const { rows } = await this.pool.query<{ id: string; expiresAt: Date }>(`INSERT INTO ${namespace}.cd_generation_requests
-      (owner_id,series_id,character_id,frozen,expires_at) VALUES($1,$2,$3,$4,now()+interval '10 minutes') RETURNING id,expires_at AS "expiresAt"`,
+      (owner_id,series_id,character_id,material_id,frozen,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '10 minutes') RETURNING id,expires_at AS "expiresAt"`,
     [owner, scope.kind === "series" ? scope.id : null, scope.kind === "character" ? scope.id : null,
+      scope.kind === "material" ? scope.id : null,
       { stamp, price: storedPrice, inputs, replaceAdopted, ...(visualReferences?.length ? { visualReferences } : {}) } satisfies FrozenQuote]);
     const unit = storedPrice.unit ?? "image";
     const items = inputs.map(input => {
@@ -103,6 +106,12 @@ export class PgComicGeneration {
 
   async characterStamp(db: ComicQuery, owner: string, id: string) {
     const { rows } = await db.query<{ stamp: string }>(`SELECT updated_at::text AS stamp FROM ${namespace}.cd_characters
+      WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, id]);
+    return rows[0]?.stamp ?? libraryMissing();
+  }
+
+  async materialStamp(db: ComicQuery, owner: string, id: string) {
+    const { rows } = await db.query<{ stamp: string }>(`SELECT updated_at::text AS stamp FROM ${namespace}.cd_materials
       WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, id]);
     return rows[0]?.stamp ?? libraryMissing();
   }
@@ -131,12 +140,19 @@ export class PgComicGeneration {
         throw new ComicLibraryError("PRICE_CHANGED", 409);
       }
       assertComicDramaCompliance(inputs.map((input, index) => ({ field: `prompt[${index}]`, text: input.prompt })));
-      const current = scope.kind === "series" ? String(await this.lockSeries(db, owner, scope.id)) : await this.characterStamp(db, owner, scope.id);
+      const current = scope.kind === "series" ? String(await this.lockSeries(db, owner, scope.id))
+        : await (scope.kind === "character" ? this.characterStamp(db, owner, scope.id) : this.materialStamp(db, owner, scope.id));
       if (current !== stamp) throw new ComicLibraryError("QUOTE_STALE", 409);
       await this.verifyVisualReferences(db, owner, visualReferences, inputs);
       const type = taskType(savedPrice);
       for (const input of inputs) {
-        if ("target" in input) await requireComicChoice(db, owner, input.target.kind, input.target.key);
+        if ("characterId" in input) await requireComicChoice(db, owner, input.target.kind, input.target.key);
+        else if ("materialId" in input) {
+          const { rows: materials } = await db.query(
+            `SELECT 1 FROM ${namespace}.cd_materials WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, input.materialId],
+          );
+          if (!materials.length) libraryMissing();
+        }
         else if (type === COMIC_VIDEO_TASK) {
           const { rows: [clip] } = await db.query<{ frame: string | null; frameMedia: string | null; adopted: string | null }>(`SELECT
             keyframe_take_id AS frame, keyframe_media_id AS "frameMedia", adopted_video_take_id AS adopted
@@ -437,6 +453,8 @@ export class PgComicGeneration {
       await insertComicMedia(db, media);
       if ("characterId" in input) {
         await insertComicCharacterVersion(db, owner, input.characterId, input.target, media.id);
+      } else if ("materialId" in input && typeof input.materialId === "string") {
+        await insertComicMaterialVersion(db, owner, input.materialId, media.id);
       }
       await db.query(`UPDATE ${namespace}.cd_takes SET status='ready',media_id=$3,progress=100,error=NULL,completed_at=now() WHERE owner_id=$1 AND id=$2`,
         [owner, take.id, media.id]);

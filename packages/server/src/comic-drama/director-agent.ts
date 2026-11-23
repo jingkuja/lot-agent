@@ -8,6 +8,7 @@ import {
   type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicLibraryRepository,
 } from "@lot-agent/core/comic-drama";
 import { AgentConversationError, type AgentExtension } from "../services/agent-extensions.js";
+import { comicDirectorChatOptions, comicDirectorModelFault, type ComicDirectorLlm } from "./director-model.js";
 import type { PgComicDirector } from "./director-repository.js";
 import { ComicDramaError } from "./repository.js";
 import type { PgComicSettings } from "./settings-repository.js";
@@ -33,7 +34,9 @@ export type ComicDirectorToolsOptions = {
 };
 
 const scoped = "Open this director conversation from its comic-drama episode";
-type DirectorExtension = AgentExtension & Required<Pick<AgentExtension, "beginTurn" | "resolveModel">>;
+type DirectorExtension = Omit<AgentExtension, "resolveModel"> & Required<Pick<AgentExtension, "beginTurn">> & {
+  resolveModel(userId: string | undefined): Promise<ComicDirectorLlm>;
+};
 const episodeId = (metadata: unknown) => comicDramaIdSchema.safeParse(
   typeof metadata === "object" && metadata !== null && "comicSeriesId" in metadata ? metadata.comicSeriesId : undefined);
 export function createComicDirectorExtension(repo: PgComicDirector, resolveModel: DirectorExtension["resolveModel"], enabled: boolean): DirectorExtension {
@@ -505,7 +508,7 @@ export class ComicDirector {
     await this.extension.beginTurn({
       agentId: COMIC_DIRECTOR_AGENT_ID, userId: owner, conversationId: session.conversationId, metadata: { comicSeriesId: series }, toolNames: [],
     });
-    const { llm, usedModelId } = await this.extension.resolveModel(owner);
+    const { llm, usedModelId, failed } = await this.extension.resolveModel(owner);
     const history = await this.repo.chatMessages(session.conversationId, 12);
     const toolbox = createComicDirectorTools(owner, series, this.toolsDeps, {
       expectedRevision: input.expectedRevision,
@@ -545,21 +548,30 @@ export class ComicDirector {
     for (let step = 0; step < 4; step++) {
       signal.throwIfAborted();
       let stepText = "";
+      let done = false;
       const calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }> = [];
-      for await (const chunk of llm.chat(messages, toolbox.definitions, {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
-        params: { maxTokens: 3200 },
-      })) {
-        if (chunk.type === "text" && chunk.content) stepText += chunk.content;
-        if (chunk.type === "tool_call" && chunk.toolCall) {
-          const rawArgs = chunk.toolCall.arguments;
-          calls.push({
-            id: chunk.toolCall.id || randomUUID(),
-            name: chunk.toolCall.name,
-            arguments: rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as Record<string, unknown> : {},
-          });
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
+      try {
+        for await (const chunk of llm.chat(messages, toolbox.definitions, comicDirectorChatOptions(usedModelId, deadline, { maxTokens: 3200 }))) {
+          if (chunk.type === "text" && chunk.content) stepText += chunk.content;
+          if (chunk.type === "tool_call" && chunk.toolCall) {
+            const rawArgs = chunk.toolCall.arguments;
+            calls.push({
+              id: chunk.toolCall.id || randomUUID(),
+              name: chunk.toolCall.name,
+              arguments: rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as Record<string, unknown> : {},
+            });
+          }
+          if (chunk.type === "done") {
+            done = !chunk.finishReason || ["stop", "tool_calls", "tool_use", "stop_sequence", "end_turn"].includes(chunk.finishReason);
+          }
         }
+        if (!done || (!calls.length && !stepText.trim())) throw new LLMIncompleteError("unfinished", stepText);
+      } catch (error) {
+        if (comicDirectorModelFault(error, signal, deadline)) failed?.();
+        throw error;
       }
+      signal.throwIfAborted();
       if (!calls.length) {
         replyText = stepText.trim();
         break;
@@ -615,11 +627,10 @@ export class ComicDirector {
       await this.extension.beginTurn({
         agentId: COMIC_DIRECTOR_AGENT_ID, userId: owner, conversationId: proposal.conversationId, metadata: { comicSeriesId: series }, toolNames: [],
       });
-      const { llm, usedModelId } = await this.extension.resolveModel(owner);
+      const { llm, usedModelId, failed } = await this.extension.resolveModel(owner);
       model = usedModelId;
       signal.throwIfAborted();
       invoked = true;
-      let attempts = 0;
       const breakdown = input.action === "breakdown";
       const tool = input.action && input.action !== "script" ? proposalTool(breakdown) : null;
       const system = breakdown
@@ -633,16 +644,19 @@ export class ComicDirector {
           mode: input.mode, language: input.language, source: input.text, title: episode.title, logline: episode.logline, existingScript: proposal.original,
         }) },
       ];
-      const options: ChatOptions = {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(110_000)]),
-        params: { maxTokens: 6500, ...(tool ? {} : { responseFormat: "json_object" }) },
-        onAttempt: () => { if (attempts++ > 0) throw new Error("DIRECTOR_DUPLICATE_ATTEMPT"); },
-      };
-      const text = tool ? await collectProposal(llm, messages, options, tool) : await complete(llm, messages, options);
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(110_000)]);
+      const options = comicDirectorChatOptions(usedModelId, deadline, { maxTokens: 6500, ...(tool ? {} : { responseFormat: "json_object" }) });
+      let text: string;
+      try { text = tool ? await collectProposal(llm, messages, options, tool) : await complete(llm, messages, options); }
+      catch (error) {
+        if (comicDirectorModelFault(error, signal, deadline)) failed?.();
+        throw error;
+      }
       try {
         const parsed = (breakdown ? comicDirectorBreakdownSchema : comicDirectorModelSchema).safeParse(JSON.parse(text));
         result = parsed.success ? parsed.data : "failed";
       } catch { result = "failed"; }
+      if (result === "failed" && !signal.aborted) failed?.();
     } catch (error) { result = invoked && !(error instanceof LLMIncompleteError) ? "unknown" : "failed"; }
     return this.repo.finish(owner, series, proposal.id, result, model, previousScenes);
   }

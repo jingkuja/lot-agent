@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG, comicDirectorChatInputSchema,
-  comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicRenderIssue, comicSpeechReleaseSchema,
+  comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions, comicRenderIssue, comicSpeechReleaseSchema,
   comicTimelineSchema, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline,
-  matchComicCharacters, planClipSfxPlacements,
+  comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, matchComicCharacters, planClipSfxPlacements, selectComicImageModel,
   type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
@@ -11,7 +11,7 @@ import { FakeComicGenerationProvider } from "./generation-fixture.js";
 const uuid = (n: number) => `abcdef01-2345-4567-8abc-${String(n).padStart(12, "0")}`;
 const series: ComicDramaSeries = {
   id: uuid(1), title: "雨夜便利店", parentId: null, logline: "", seriesGroup: null, episodeNo: null,
-  styleKey: "thick_painting", videoModel: "grok-imagine-video-1.5", aspectRatio: "9:16", revision: 4, archivedAt: null,
+  styleKey: "thick_painting", videoModel: "doubao-seedance-2-5", aspectRatio: "9:16", revision: 4, archivedAt: null,
 };
 const snapshot: ComicCastSnapshot = {
   schemaVersion: 1, characterId: uuid(2), name: "Lin", aliases: [], age: "", personality: "", appearance: "short hair",
@@ -41,13 +41,54 @@ const freeze = (result: ReturnType<typeof buildComicGenerationInput>): ComicFroz
 };
 
 describe("comic generation contracts", () => {
+  it("uses the account catalog for image tiers and the three standard video choices", () => {
+    const catalog = (...ids: string[]) => ids.map(id => ({ id }));
+    const images = catalog("gpt-image-2", "lingqu-image", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "linqu-image");
+    expect(comicImageOptions(images).map(model => [model.id, model.label])).toEqual([
+      ["gpt-image-2.5-flare", "默认"], ["gpt-image-2.5-sunburst", "旗舰"], ["linqu-image", "无限制出图"],
+    ]);
+    expect(selectComicImageModel(images, "gpt-image-2")).toBe("gpt-image-2.5-flare");
+    expect(selectComicImageModel(images, "lingqu-image")).toBe("linqu-image");
+    expect(selectComicImageModel(catalog("gpt-image-2"))).toBeNull();
+    const videos = catalog("grok-imagine-video-1.5", "doubao-seedance-2-5-flash-261115", "doubao-seedance-2-0-fast-260128",
+      "minimax-video-h3-max", "minimax-video-h3", "doubao-seedance-2-0-260128", "doubao-seedance-2-5");
+    expect(comicVideoOptions(videos).map(model => model.id)).toEqual(["doubao-seedance-2-5", "doubao-seedance-2-0-260128", "minimax-video-h3"]);
+    expect(comicVideoProfile("MiniMax-H3")?.promptMaxChars).toBe(7000);
+    expect(comicVideoProfile("kling-video-v3-omni")).toBeUndefined();
+    expect(comicUserPreferencesSchema.parse({ defaultImageModel: "gpt-image-2.5-flare", defaultTextModel: "legacy" })).toEqual({
+      defaultImageModel: "gpt-image-2.5-flare",
+    });
+  });
+
+  it("freezes model-specific video settings and separates strict first frames from references", () => {
+    const h3 = freeze(buildComicGenerationInput({ ...base, modelId: "minimax-video-h3", mode: "from_keyframe", firstFrame: keyframe }));
+    expect(h3).toMatchObject({ resolution: "768P", firstFrame: { mediaId: keyframe.mediaId }, references: [] });
+    expect(h3.prompt).toContain("short hair");
+    expect(comicFrozenGenerationSchema.parse(h3)).toEqual(h3);
+    const seedance = { ...base, modelId: "doubao-seedance-2-5", mode: "references" as const };
+    const visualReferences = Array.from({ length: 28 }, (_, i) =>
+      ({ ...image(i + 20), mediaId: uuid(i + 20), version: 1, kind: "prop" as const, label: "prop" }));
+    const longClip = { ...clip, draft: { ...clip.draft, durationMs: 30_000 } };
+    const video = freeze(buildComicGenerationInput({ ...seedance, clip: longClip, visualReferences }));
+    expect(video).toMatchObject({ durationMs: 30_000, resolution: "720p", firstFrame: null });
+    expect(video.references).toHaveLength(30);
+    expect(video.prompt).toContain("@Image30");
+    const excess = buildComicGenerationInput({ ...seedance, clip: longClip, visualReferences: [...visualReferences, visualReferences[0]] });
+    expect(excess).toMatchObject({ ok: false, issues: [{ code: "REFERENCE_LIMIT" }] });
+    expect(buildComicGenerationInput({ ...seedance, modelId: "doubao-seedance-2-0", clip: longClip })).toMatchObject({
+      ok: false, issues: [{ code: "DURATION_UNSUPPORTED" }],
+    });
+    expect(buildComicGenerationInput({ ...seedance, clip: { ...clip, draft: { ...clip.draft, scene: "Use @Audio1" } } })).toMatchObject({
+      ok: false, issues: [{ code: "PROMPT_REFERENCE_UNBOUND" }],
+    });
+  });
   it("binds media versions from the episode snapshot in provider order, even when the library has updates", () => {
     const scene = { ...image(10), mediaId: uuid(10), version: 1, kind: "scene" as const, label: "shop interior" };
-    const result = freeze(buildComicGenerationInput({ ...base, mode: "from_keyframe", firstFrame: { ...keyframe, url: "https://fixture.invalid/signed" } as typeof keyframe, visualReferences: [scene] }));
+    const result = freeze(buildComicGenerationInput({ ...base, mode: "references", visualReferences: [scene] }));
     expect(result.references.map(ref => [ref.mediaId, ref.version])).toEqual([[uuid(4), 1], [uuid(5), 3], [uuid(10), 1]]);
-    expect(result.firstFrame?.takeId).toBe(uuid(9));
-    expect(result.prompt).toContain("<IMAGE_0> is Lin's appearance");
-    expect(result.prompt).toContain("<IMAGE_2> is the scene reference: shop interior");
+    expect(result.firstFrame).toBeNull();
+    expect(result.prompt).toContain("@Image1 is Lin's appearance");
+    expect(result.prompt).toContain("@Image3 is the scene reference: shop interior");
     expect(result.seriesRevision).toBe(4);
     expect(result.clipRevision).toBe(7);
     expect(JSON.stringify(result)).not.toContain("http");
@@ -60,7 +101,8 @@ describe("comic generation contracts", () => {
     });
     const visualReferences = Array.from({ length: 6 }, (_, i) =>
       ({ ...image(i + 20), mediaId: uuid(i + 20), version: 1, kind: "prop" as const, label: "prop" }));
-    expect(buildComicGenerationInput({ ...base, mode: "references", modelId: "kling-video-v3-omni", visualReferences })).toMatchObject({
+    expect(buildComicGenerationInput({ ...base, mode: "references", modelId: "doubao-seedance-2-0",
+      visualReferences: [...visualReferences, ...visualReferences.slice(0, 4)] })).toMatchObject({
       ok: false, issues: [{ code: "REFERENCE_LIMIT" }],
     });
     expect(buildComicGenerationInput({ ...base, mode: "keyframe", cast: [] })).toMatchObject({
@@ -186,12 +228,12 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
         ],
         cast: [{ characterId: snapshot.characterId, slotKey: "front", expressionKey: "smile" }],
         sceneRef: { materialId: uuid(73), mediaId: uuid(74), name: "雨夜街道" },
-        propRefs: Array.from({ length: 5 }, (_, i) => ({ materialId: uuid(80 + i), mediaId: uuid(90 + i) })),
+        propRefs: Array.from({ length: 6 }, (_, i) => ({ materialId: uuid(80 + i), mediaId: uuid(90 + i) })),
         sfxRefs: [{ materialId: uuid(99), mediaId: uuid(98), name: "雨声" }],
       }),
     };
-    const klingSeries = { ...series, videoModel: "kling-video-v3-omni" };
-    const issues = checkComicSeriesIssues({ series: klingSeries, clips: [denseClip], cast }, { hasStyleRef: true });
+    const seedanceSeries = { ...series, videoModel: "doubao-seedance-2-0" };
+    const issues = checkComicSeriesIssues({ series: seedanceSeries, clips: [denseClip], cast }, { hasStyleRef: true });
     expect(issues.map(issue => issue.code)).toEqual([
       "SPEAKER_NOT_IN_CAST",
       "REFERENCE_LIMIT_EXCEEDED",

@@ -140,6 +140,7 @@ export const migrations: Migration[] = [
   assignmentSchedules,
   comicDramaV1Remediation,
   comicVideoCredits,
+  comicDramaMaterialGeneration,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -200,3 +201,4 @@ import { comicDramaV1Features } from "./0095-comic-drama-v1-features.js";
 import { assignmentSchedules } from "./0096-assignment-schedules.js";
 import { comicDramaV1Remediation } from "./0097-comic-drama-v1-remediation.js";
 import { comicVideoCredits } from "./0098-comic-video-credits.js";
+import { comicDramaMaterialGeneration } from "./0099-comic-drama-material-generation.js";

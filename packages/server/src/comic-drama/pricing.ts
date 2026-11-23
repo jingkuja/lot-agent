@@ -33,7 +33,7 @@ export function quoteComicCatalogPrice(
     return null;
   }
   const amountMicros = Math.round(entry.unitPrice * 1_000_000);
-  const maxUnits = kind === "video" ? 150 : 10;
+  const maxUnits = kind === "video" ? 10 * (comicVideoProfile(modelId)?.shotMaxSeconds ?? 15) : 10;
   if (!Number.isSafeInteger(amountMicros) || amountMicros < 0 || amountMicros > Math.floor(Number.MAX_SAFE_INTEGER / maxUnits)) {
     return null;
   }

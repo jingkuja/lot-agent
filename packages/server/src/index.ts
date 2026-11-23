@@ -28,7 +28,7 @@ import { knowledgeQueueConfig } from "./knowledge/ingestion/config.js";
 import { KnowledgeRepository } from "./knowledge/repository.js";
 import { LocalKnowledgeStorage } from "./knowledge/private-storage.js";
 import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./knowledge/routes.js";
-import { TwinVoices } from "./digital-twin/voices.js";
+import { loadTwinVoiceConfig, TwinVoices } from "./digital-twin/voices.js";
 import { PgTwinVoiceStore } from "./digital-twin/voice-store.js";
 import "./load-env.js";
 import { serve } from "@hono/node-server";
@@ -68,7 +68,9 @@ import { createDigitalEmployeeRoutes } from "./digital-employee/routes.js";
 import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
-import { COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicVideoProfile } from "@lot-agent/core/comic-drama";
+import {
+  COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicImageTier, comicVideoModel, comicVideoOptions, selectComicImageModel,
+} from "@lot-agent/core/comic-drama";
 import { PgComicDramaRepository } from "./comic-drama/repository.js";
 import { PgComicDictionary } from "./comic-drama/dictionary.js";
 import { PgComicLibrary } from "./comic-drama/library-repository.js";
@@ -82,14 +84,15 @@ import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
 import { PgComicRenders } from "./comic-drama/render-repository.js";
 import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
 import { ComicDirector, createComicDirectorExtension } from "./comic-drama/director-agent.js";
-import { createComicDirectorLlmResolver } from "./comic-drama/director-model.js";
+import { createComicDirectorLlmResolver, createComicDirectorModelPolicy } from "./comic-drama/director-model.js";
+import { ComicLibraryError } from "./comic-drama/library-db.js";
 import { PgComicDirector } from "./comic-drama/director-repository.js";
 import { createComicDirectorRoutes } from "./comic-drama/director-routes.js";
 import { PgComicSettings } from "./comic-drama/settings-repository.js";
 import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
-import { comicQuoteCurrency, quoteComicCatalogPrice } from "./comic-drama/pricing.js";
+import { quoteComicCatalogPrice } from "./comic-drama/pricing.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -280,13 +283,13 @@ async function main() {
   const comicDramaEnabled = rollout.enabled;
   const comicSettings = new PgComicSettings(service.db.pool);
   const directorRepo = new PgComicDirector(service.db.pool);
+  const comicDirectorModels = createComicDirectorModelPolicy();
   const directorExtension = createComicDirectorExtension(directorRepo, createComicDirectorLlmResolver({
     getUserApiKey: (owner, managed) => service.db.getUserApiKey(owner, managed),
     managedKeysEnabled: service.managedKeysEnabled,
     listLlmModels: async (owner, key) => (await service.getUserModelCatalog(owner, key))?.llm.map(model => model.id) ?? [],
     llm: (model, key) => service.providerFactory.llm(model, key),
-    settings: comicSettings,
-  }), comicDramaEnabled);
+  }, comicDirectorModels), comicDramaEnabled);
   registerAgentExtension(directorExtension);
   service.agentRegistry.register(comicDirectorDefinition);
   app.route("/api/public/product", createProductRoutes(async c => {
@@ -454,42 +457,28 @@ async function main() {
       `${COMIC_DRAMA_API_ROOT}/settings/styles/:styleKey/reference/upload`,
     ], uploadRateLimit);
     const library = new PgComicLibrary(service.db.pool);
-    const resolveImageModel = async (owner: string, requested?: string, db?: Parameters<PgComicSettings["getPreferences"]>[1]) => {
-      if (requested) return requested;
-      const pref = (await comicSettings.getPreferences(owner, db).catch(() => null))?.defaultImageModel;
-      return pref || process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2";
+    const comicModelCatalog = async (owner: string, signal?: AbortSignal) => {
+      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+      const catalog = key ? await service.getUserModelCatalog(owner, key, signal) : null;
+      return { key, catalog };
     };
-    const series = new PgComicDramaRepository(service.db.pool, async (owner, videoModel, db) => {
-      const currency = comicQuoteCurrency();
-      const imageModel = await resolveImageModel(owner, undefined, db);
-      const imageQuote = quoteComicCatalogPrice(service.modelCatalog, "image", imageModel);
-      const videoQuote = videoModel ? quoteComicCatalogPrice(service.modelCatalog, "video", videoModel) : null;
-      return {
-        imageMicros: imageQuote?.amountMicros ?? null,
-        videoPerSecMicros: videoQuote?.amountMicros ?? null,
-        currency: videoQuote?.currency ?? imageQuote?.currency ?? currency,
-      };
-    });
+    const series = new PgComicDramaRepository(service.db.pool);
     const quoteComicImagePrice = async (owner: string, modelId?: string) => {
-      const chosen = await resolveImageModel(owner, modelId);
-      const price = quoteComicCatalogPrice(service.modelCatalog, "image", chosen);
-      if (!price) return null;
-      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-      if (!key) return null;
-      const catalog = await service.getUserModelCatalog(owner, key);
-      return catalog?.image.some(item => item.id === chosen) ? price : null;
+      const [{ catalog }, prefs] = await Promise.all([comicModelCatalog(owner), comicSettings.getPreferences(owner)]);
+      const chosen = selectComicImageModel(catalog?.image ?? [], prefs.defaultImageModel);
+      return chosen && (!modelId || chosen === modelId) ? quoteComicCatalogPrice(service.modelCatalog, "image", chosen) : null;
     };
-    const quoteComicVideoPrice = async (owner: string, modelId: string) => {
-      const price = quoteComicCatalogPrice(service.modelCatalog, "video", modelId);
-      if (!price) return null;
-      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-      if (!key) return null;
-      const catalog = await service.getUserModelCatalog(owner, key);
-      return catalog?.video.some(item => item.id === modelId) ? price : null;
+    const canSelectComicVideo = async (owner: string, model: string) => {
+      if (!comicVideoModel(model)) return false;
+      const { catalog } = await comicModelCatalog(owner);
+      return catalog?.video.some(item => item.id === model) === true;
     };
+    const quoteComicVideoPrice = async (owner: string, modelId: string) => await canSelectComicVideo(owner, modelId)
+      ? quoteComicCatalogPrice(service.modelCatalog, "video", modelId) : null;
     const edits = new PgComicEdits(service.db.pool);
+    const speechModel = loadTwinVoiceConfig().targetModel;
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
-      presetModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || undefined,
+      presetModel: speechModel,
       ownerSpeech: async owner => {
         const apiKey = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
         return apiKey ? new OpenAISpeechProvider({ apiKey, headers: gatewayModelHeaders(),
@@ -550,15 +539,19 @@ async function main() {
       parser,
       directorToolsDeps,
     ));
-    app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia, comicSettings));
-    app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, async (owner, model) => {
-      if (!comicVideoProfile(model)) return false;
-      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-      const catalog = await service.getUserModelCatalog(owner, key);
-      return catalog?.video.some(item => item.id === model) === true;
-    }, async owner => {
-      const pref = (await comicSettings.getPreferences(owner).catch(() => null))?.defaultVideoModel;
-      return pref || process.env.MARKETING_VIDEO_MODEL?.trim() || null;
+    app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(service.db.pool), comicMedia, comicSettings,
+      async (owner, { defaultImageModel, defaultVideoModel }) => {
+        if (!defaultImageModel && !defaultVideoModel) return;
+        const { catalog } = await comicModelCatalog(owner);
+        if ((defaultImageModel && (!comicImageTier(defaultImageModel) || !catalog?.image.some(item => item.id === defaultImageModel)))
+          || (defaultVideoModel && (!comicVideoModel(defaultVideoModel) || !catalog?.video.some(item => item.id === defaultVideoModel)))) {
+          throw new ComicLibraryError("MODEL_UNAVAILABLE", 400);
+        }
+      }));
+    app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, canSelectComicVideo, async owner => {
+      const [prefs, { catalog }] = await Promise.all([comicSettings.getPreferences(owner), comicModelCatalog(owner)]);
+      const options = comicVideoOptions(catalog?.video ?? [], prefs.defaultVideoModel);
+      return (options.find(item => item.id === prefs.defaultVideoModel) ?? options[0])?.id ?? null;
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
@@ -576,16 +569,15 @@ async function main() {
         quotePrice: quoteComicImagePrice,
         quoteVideoPrice: quoteComicVideoPrice,
         budgetPricing: async (owner, includeText, signal) => {
-          const [key, prefs] = await Promise.all([
-            service.db.getUserApiKey(owner, service.managedKeysEnabled), comicSettings.getPreferences(owner),
+          const [{ key, catalog }, prefs] = await Promise.all([
+            comicModelCatalog(owner, signal).catch(() => ({ key: null, catalog: null })), comicSettings.getPreferences(owner),
           ]);
-          const models = key && includeText ? await service.getUserModelCatalog(owner, key, signal).catch(() => null) : null;
           signal.throwIfAborted();
-          const textModel = models?.llm.find(model => model.id === prefs.defaultTextModel)?.id ?? models?.llm[0]?.id ?? null;
+          const textModel = includeText ? comicDirectorModels(owner, catalog?.llm.map(model => model.id) ?? [])?.current() ?? null : null;
           let videoCatalog: ReturnType<typeof service.tokenhub.listModels> | undefined;
           return {
-            imageModel: prefs.defaultImageModel || process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2", textModel,
-            speechModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || null,
+            imageModel: selectComicImageModel(catalog?.image ?? [], prefs.defaultImageModel), textModel, speechModel,
+            videoModels: catalog?.video.filter(model => comicVideoModel(model.id)).map(model => model.id) ?? [],
             predict: (usage, deadline) => {
               if (!key) return Promise.reject(new Error("MODEL_AUTH_REQUIRED"));
               return predictModelCost({

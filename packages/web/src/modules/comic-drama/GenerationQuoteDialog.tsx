@@ -11,7 +11,9 @@ const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"],
   CAST_REFERENCE_MISSING: "缺少锁定的角色参考图",
   REFERENCE_LIMIT: "参考图数量超出模型限制",
   PROMPT_TOO_LONG: "分镜内容过长",
-  DURATION_UNSUPPORTED: "视频时长须为 4 至 15 整秒",
+  PROMPT_REFERENCE_UNBOUND: "提示词引用了本次生成未绑定的素材",
+  REFERENCE_MODE_CONFLICT: "首帧模式只发送已确认的首帧，其他素材可用于直接参考生成。",
+  DURATION_UNSUPPORTED: "分镜时长超出模型限制",
   KEYFRAME_NOT_CONFIRMED: "请先确认当前分镜的首帧",
   MODEL_UNAVAILABLE: "请先在剧集设置中选择支持的视频模型",
   ALREADY_COMPLETE: "已有采用版，需显式选择生成新版",
@@ -102,8 +104,8 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted 
         <strong className="comic-quote-amount">{format(item.amountMicros)}</strong>
       </li>)}
       {quote.skipped.map(item => <li key={item.clipId}>
-        <div><strong>{label(item.clipId)}</strong><small>{item.referenceLimit ?
-          t("最多使用 {0} 张参考图", [item.referenceLimit]) : t(reasons[item.reason] ?? "暂不能生成")}</small>
+        <div><strong>{label(item.clipId)}</strong><small>{item.referenceLimit ? t("最多使用 {0} 张参考图", [item.referenceLimit])
+          : item.durationLimit ? t("视频时长须为 4 至 {0} 整秒", [item.durationLimit]) : t(reasons[item.reason] ?? "暂不能生成")}</small>
         {!!item.invalidReferences?.length && <small>
           {item.invalidReferences.map(ref => `${ref.name ?? ref.materialId.slice(0, 8)} (${t(
             ref.reason === "ARCHIVED" ? "已归档" : ref.reason === "OUTDATED_VERSION" ? "已有新版"

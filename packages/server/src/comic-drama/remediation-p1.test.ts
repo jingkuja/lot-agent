@@ -189,7 +189,7 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
     const detail: ComicDramaDetail = {
       series: {
         id: seriesId, parentId: null, title: "测试集", logline: "", seriesGroup: null, episodeNo: 1,
-        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "grok-imagine-video-1.5", revision: 4, archivedAt: null,
+        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 4, archivedAt: null,
       },
       clips: [clipWithArchivedProp, clipWithValidScene],
       script: null,
@@ -226,7 +226,7 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
           return {
             confirmationId: uuid(999), expiresAt: new Date(Date.now() + 60_000).toISOString(),
             items: inputs.map(input => ({
-              clipId: "clipId" in input ? input.clipId : input.characterId,
+              clipId: "clipId" in input ? input.clipId : "characterId" in input ? input.characterId : input.materialId,
               modelId: price!.modelId, unit: "image", quantity: 1, amountMicros: price!.amountMicros,
               referenceVersions: input.references.map(ref => ({ mediaId: ref.mediaId, version: ref.version })),
             })),
@@ -698,7 +698,7 @@ describe("P1 #7: concurrent episode opens on a small PG pool without nested conn
       if (sql.includes("FROM lot_comic_drama.cd_series ")) {
         return { rows: [{
           id: String(params[1]), parentId: null, title: "并发测试集", logline: "", seriesGroup: null, episodeNo: 1,
-          styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "grok-imagine-video-1.5", revision: 1, archivedAt: null,
+          styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
         }], rowCount: 1 };
       }
       if (sql.includes("FROM lot_comic_drama.cd_clips WHERE series_id=")) {

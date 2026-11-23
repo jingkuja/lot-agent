@@ -1,5 +1,5 @@
 import {
-  COMIC_IMAGE_SIZES, comicVideoProfile,
+  COMIC_IMAGE_SIZES, comicVideoDurationSupported, comicVideoModel, comicVideoProfile,
   type ComicDramaDetail, type ComicEpisodeBudget, type ComicEpisodeBudgetInput, type ComicEpisodeBudgetLine,
   type ComicGenerationMode, type ComicGenerationPreviewRequest, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
@@ -8,6 +8,7 @@ import { comicVideoEstimateUsage } from "./credit-check.js";
 
 export type EpisodeBudgetPricing = {
   imageModel: string | null; textModel: string | null; speechModel: string | null;
+  videoModels?: readonly string[];
   predict: (usage: ModelEstimateRequest, signal: AbortSignal) => Promise<{ estimatedPoints: number; pricingScheme: string }>;
 };
 type Plan = Omit<ComicEpisodeBudgetLine, "estimatedPoints"> & { usage?: ModelEstimateRequest; calls?: number };
@@ -18,6 +19,7 @@ export async function estimateComicEpisode(
 ): Promise<ComicEpisodeBudget> {
   const { series, clips } = detail;
   const { imageModel, textModel, speechModel } = pricing;
+  const videoModel = series.videoModel && (!pricing.videoModels || pricing.videoModels.includes(series.videoModel)) ? series.videoModel : null;
   const videoMode = budget.videoMode ?? "from_keyframe";
   const redo = new Set(budget.redoVideos);
   const pendingFrames = clips.filter(c => !c.progress?.keyframeApproved && (c.progress?.videoState !== "ready" || redo.has(c.id)));
@@ -26,18 +28,23 @@ export async function estimateComicEpisode(
 
   async function addClips(kind: "keyframe" | "video", mode: ComicGenerationMode, selected: typeof clips, modelId: string | null, futureFrame = false) {
     if (!selected.length) return;
-    const { inputs } = modelId ? await resolve({ expectedSeriesRevision: series.revision, mode, targets: selected.map(clip => ({
+    const strictProfile = futureFrame ? comicVideoModel(modelId)?.profile : undefined;
+    const { inputs } = modelId && !strictProfile ? await resolve({ expectedSeriesRevision: series.revision, mode, targets: selected.map(clip => ({
       clipId: clip.id, expectedRevision: clip.revision, replaceAdopted: redo.has(clip.id),
     })) }, modelId) : { inputs: [] };
     const resolved = new Map(inputs.flatMap(input => "clipId" in input ? [[input.clipId, input] as const] : []));
     for (const clip of selected) {
       const input = resolved.get(clip.id);
       let usage: ModelEstimateRequest | undefined;
-      if (input && kind === "video") {
-        const video = comicVideoEstimateUsage(input);
-        const count = (video.video?.input_image_count ?? 0) + Number(futureFrame);
-        if (count <= (comicVideoProfile(input.modelId)?.referenceImages.total ?? 0) && video.video) {
-          usage = { ...video, video: { ...video.video, input_image_count: count } };
+      if (strictProfile && modelId) {
+        const { durationMs, shots } = clip.draft;
+        if (comicVideoDurationSupported(durationMs, strictProfile) && shots.length && shots.every(shot => shot.description.trim())) {
+          usage = comicVideoEstimateUsage({ modelId, resolution: strictProfile.resolution, durationMs, aspectRatio: series.aspectRatio }, 1);
+        }
+      } else if (input && kind === "video") {
+        const count = input.references.length + Number(!!input.firstFrame) + Number(futureFrame);
+        if (count <= (comicVideoProfile(input.modelId)?.referenceImages.total ?? 0)) {
+          usage = comicVideoEstimateUsage(input, count);
         }
       } else if (input) {
         usage = { model: input.modelId, image: { size: COMIC_IMAGE_SIZES[input.aspectRatio], count: 1, reference_count: input.references.length } };
@@ -48,9 +55,9 @@ export async function estimateComicEpisode(
 
   if (videoMode === "from_keyframe") {
     await addClips("keyframe", "keyframe", pendingFrames, imageModel);
-    await addClips("video", "from_keyframe", pendingVideos.filter(c => c.progress?.keyframeApproved), series.videoModel);
-    await addClips("video", "references", pendingVideos.filter(c => !c.progress?.keyframeApproved), series.videoModel, true);
-  } else await addClips("video", "references", pendingVideos, series.videoModel);
+    await addClips("video", "from_keyframe", pendingVideos.filter(c => c.progress?.keyframeApproved), videoModel);
+    await addClips("video", "references", pendingVideos.filter(c => !c.progress?.keyframeApproved), videoModel, true);
+  } else await addClips("video", "references", pendingVideos, videoModel);
   for (const [kind, quantity, size] of [
     ["character", budget.characterImages ?? 0, COMIC_IMAGE_SIZES["1:1"]],
     ["material", budget.materialImages ?? 0, COMIC_IMAGE_SIZES[series.aspectRatio]],

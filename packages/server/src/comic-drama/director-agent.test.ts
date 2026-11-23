@@ -142,7 +142,7 @@ describe("comic director §8.5 tools and default text model resolver", () => {
   const detail: ComicDramaDetail = {
     series: {
       id: seriesId, parentId: null, title: "雨夜便利店", logline: "雨夜重逢", seriesGroup: "雨夜", episodeNo: 1,
-      styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "kling-video-v3-omni", revision: 3, archivedAt: null,
+      styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 3, archivedAt: null,
     },
     script: { version: 1, content: "林夏走进雨夜便利店。" },
     cast: [{
@@ -235,28 +235,32 @@ describe("comic director §8.5 tools and default text model resolver", () => {
     expect(reorder).toHaveBeenCalledWith(ownerId, seriesId, { expectedRevision: 3, clipIds: [clipB, clipA] });
   });
 
-  it("follows user saved text preference and platform ordered default LLM catalog instead of deepseek-first", async () => {
+  it("selects authorized copy models in order and changes only the account whose model failed", async () => {
     const chosen: string[] = [];
     const resolver = createComicDirectorLlmResolver({
       getUserApiKey: async () => "user-key",
       managedKeysEnabled: true,
-      listLlmModels: async () => ["kimi-k3.1-pro", "deepseek-v4.1-flash", "claude-sonnet-5-5"],
+      listLlmModels: async () => ["deepseek-v4.1-flash", "claude-sonnet-5-5", "kimi-k3", "kimi-k3.1-pro"],
       llm: (modelId) => { chosen.push(modelId); return { chat: async function* () {} }; },
-      settings: { getPreferences: async () => ({ defaultTextModel: null }) },
     });
     const first = await resolver(ownerId);
     expect(first.usedModelId).toBe("kimi-k3.1-pro");
+    first.failed?.();
+    const fallback = await resolver(ownerId);
+    expect(fallback.usedModelId).toBe("kimi-k3");
+    fallback.failed?.();
+    expect((await resolver(ownerId)).usedModelId).toBe("deepseek-v4.1-flash");
+    expect((await resolver("other")).usedModelId).toBe("kimi-k3.1-pro");
+    expect(chosen).toEqual(["kimi-k3.1-pro", "kimi-k3", "deepseek-v4.1-flash", "kimi-k3.1-pro"]);
 
-    const prefResolver = createComicDirectorLlmResolver({
+    const limited = createComicDirectorLlmResolver({
       getUserApiKey: async () => "user-key",
       managedKeysEnabled: true,
-      listLlmModels: async () => ["kimi-k3.1-pro", "deepseek-v4.1-flash", "claude-sonnet-5-5"],
-      llm: (modelId) => { chosen.push(modelId); return { chat: async function* () {} }; },
-      settings: { getPreferences: async () => ({ defaultTextModel: "claude-sonnet-5-5" }) },
+      listLlmModels: async owner => owner === ownerId ? ["deepseek-v4.1-flash"] : ["claude-sonnet-5-5"],
+      llm: () => ({ chat: async function* () {} }),
     });
-    const second = await prefResolver(ownerId);
-    expect(second.usedModelId).toBe("claude-sonnet-5-5");
-    expect(chosen).toEqual(["kimi-k3.1-pro", "claude-sonnet-5-5"]);
+    expect((await limited(ownerId)).usedModelId).toBe("deepseek-v4.1-flash");
+    await expect(limited("other")).rejects.toThrow("COMIC_DIRECTOR_LLM_UNAVAILABLE");
   });
 
   it("P1 #2: rejects stale concurrent director writes with REVISION_CONFLICT while allowing consecutive same-turn writes", async () => {

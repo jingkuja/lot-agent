@@ -8,7 +8,10 @@ import { withComicGenerationLock } from "./generation-worker.js";
 import { COMIC_VIDEO_MAX_BYTES, type ComicMediaLibrary } from "./media-library.js";
 import { PgComicVideo, type ComicVideoWork } from "./video-repository.js";
 
-const sizes = { "9:16": "720x1280", "16:9": "1280x720", "1:1": "720x720" };
+const sizes = {
+  "720p": { "9:16": "720x1280", "16:9": "1280x720", "1:1": "720x720" },
+  "768P": { "9:16": "768x1360", "16:9": "1360x768", "1:1": "768x768" },
+};
 type Job = { id: string; userId: string };
 type Dependencies = {
   pool: Pool;
@@ -31,9 +34,10 @@ async function prepareRequest(media: ComicMediaLibrary, owner: string, { input }
     Promise.all(input.references.map(({ mediaId }) => media.videoReference(owner, mediaId))),
     input.firstFrame ? media.videoReference(owner, input.firstFrame.mediaId) : undefined,
   ]);
+  const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
   return {
     model: input.modelId, prompt: input.prompt, durationSec: input.durationMs / 1000,
-    size: sizes[input.aspectRatio], ratio: input.aspectRatio, resolution: COMIC_VIDEO_RESOLUTION, quality: COMIC_VIDEO_RESOLUTION, generate_audio: false,
+    size: sizes[resolution][input.aspectRatio], ratio: input.aspectRatio, resolution, quality: resolution, generate_audio: false,
     ...(refs.length ? { input_reference: refs } : {}), ...(first ? { first_frame: first } : {}),
   };
 }

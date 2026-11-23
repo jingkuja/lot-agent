@@ -5,12 +5,13 @@ import type { LocalKnowledgeStorage } from "../knowledge/private-storage.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import { inspectMedia } from "../marketing-video/media.js";
 import { gatewayModelHeaders } from "../tokenhub/model-access.js";
+import { DEFAULT_TTS_MODEL } from "../models/media-defaults.js";
 
 export function loadTwinVoiceConfig() {
   return {
     baseUrl: process.env.QWEN_VOICE_BASE_URL?.trim() || "https://maas.qianwenaiapi.com/api/v1",
     apiKey: process.env.QWEN_VOICE_API_KEY?.trim() || "",
-    targetModel: process.env.QWEN_VOICE_TARGET_MODEL?.trim() || "qwen-audio-3.0-tts-plus",
+    targetModel: process.env.QWEN_VOICE_TARGET_MODEL?.trim() || DEFAULT_TTS_MODEL,
   };
 }
 /** Age after which an unconfirmed create that the vendor never listed may be enrolled again. */

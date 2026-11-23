@@ -1,12 +1,12 @@
 import type {
   ComicCharacterGenerateRequest, ComicCharacterUpload, ComicGenerationPreviewRequest, ComicGenerationQuote, ComicImageRequest, ComicImageTake,
   ComicKeyframeHistory, ComicVideoHistory, ComicVideoTake, ComicVideoReceipt, ComicFrameSaveRequest,
-  ComicEpisodeBudget, ComicEpisodeBudgetInput, ComicVideoCreditPause,
+  ComicEpisodeBudget, ComicEpisodeBudgetInput, ComicVideoCreditPause, ComicMaterialGenerateRequest,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
 const root = "/comic-drama";
-export type GenerationScope = { resource: "series" | "characters"; id: string };
+export type GenerationScope = { resource: "series" | "characters" | "materials"; id: string };
 const post = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(root + path, { method: "POST", body: JSON.stringify(body), signal });
 const series = (id: string, clipId: string) => `/series/${id}/clips/${clipId}`;
 function uploadImage<T>(path: string, file: File, signal: AbortSignal) {
@@ -22,6 +22,8 @@ export const comicGenerationApi = {
     post<{ ok: true }>(`/video-takes/${takeId}/resume-credits`, override ? { continueDespiteLowCredits: true } : {}),
   preview: (scope: GenerationScope, input: ComicCharacterUpload | ComicCharacterGenerateRequest | ComicGenerationPreviewRequest, signal?: AbortSignal) =>
     post<ComicGenerationQuote>(`/${scope.resource}/${scope.id}/generation-preview`, input, signal),
+  materialPreview: (id: string, input: ComicMaterialGenerateRequest, signal?: AbortSignal) =>
+    post<ComicGenerationQuote>(`/materials/${id}/generation-preview`, input, signal),
   confirm: (scope: GenerationScope, confirmationId: string) =>
     post<ComicImageRequest>(`/${scope.resource}/${scope.id}/generate`, { confirmationId }),
   status: (id: string, signal?: AbortSignal) => request<ComicImageRequest>(root + `/generation-requests/${id}`, { signal }),

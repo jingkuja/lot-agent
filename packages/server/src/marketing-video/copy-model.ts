@@ -16,7 +16,8 @@ export function copyModelFault(error: unknown) {
 export class CopyModelSwitch {
   private level = 0;
   private until = 0;
-  constructor(readonly models: readonly string[], private readonly holdMs: number, private readonly now = Date.now) {}
+  constructor(readonly models: readonly string[], private readonly holdMs: number, private readonly now = Date.now,
+    private readonly scope = "marketing-copy") {}
 
   current() { return this.models[this.now() < this.until ? this.level : 0]!; }
 
@@ -25,10 +26,12 @@ export class CopyModelSwitch {
     const level = this.models.indexOf(model);
     if (model !== this.current() || level === this.models.length - 1) return;
     this.level = level + 1; this.until = this.now() + this.holdMs;
-    console.warn("[marketing-copy] copy model failed, switching", { failed: model, next: this.models[this.level], minutes: this.holdMs / 60_000 });
+    console.warn(`[${this.scope}] copy model failed, switching`, { failed: model, next: this.models[this.level], minutes: this.holdMs / 60_000 });
   }
 
   reset() { this.level = 0; this.until = 0; }
 }
 
-export const marketingCopyModel = new CopyModelSwitch([MARKETING_COPY_MODEL, MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL], 30 * 60_000);
+export const COPY_MODEL_ORDER = [MARKETING_COPY_MODEL, MARKETING_COPY_FALLBACK_MODEL, MARKETING_COPY_LAST_RESORT_MODEL] as const;
+export const COPY_MODEL_HOLD_MS = 30 * 60_000;
+export const marketingCopyModel = new CopyModelSwitch(COPY_MODEL_ORDER, COPY_MODEL_HOLD_MS);

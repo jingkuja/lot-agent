@@ -28,6 +28,7 @@ import { runDigitalPresenter } from "../digital-presenter/run.js";
 import { COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
 import { runComicRender } from "../comic-drama/render-worker.js";
 import { createComicDirectorExtension } from "../comic-drama/director-agent.js";
+import { createComicDirectorLlmResolver, createComicDirectorModelPolicy } from "../comic-drama/director-model.js";
 import { PgComicDirector } from "../comic-drama/director-repository.js";
 import { KlingVoicePreparation } from "../generation/kling-voices.js";
 import { resolveImageReferenceUrl, resolveMaterialReference } from "../generation/private-materials.js";
@@ -311,7 +312,14 @@ async function main() {
     llm: (modelId, apiKey) => providerFactory.llm(modelId, apiKey),
   });
   registerAgentExtension(createDigitalEmployeeExtension({ resolveModel: resolveOwnerLlm }));
-  registerAgentExtension(createComicDirectorExtension(new PgComicDirector(db.pool), resolveOwnerLlm, process.env.COMIC_DRAMA_FACTORY === "1"));
+  const comicDirectorModels = createComicDirectorModelPolicy();
+  const resolveComicDirectorLlm = createComicDirectorLlmResolver({
+    getUserApiKey: (userId, managed) => db.getUserApiKey(userId, managed),
+    managedKeysEnabled,
+    listLlmModels: async (_userId, apiKey) => (await tokenhub.listModels(apiKey)).llm,
+    llm: (modelId, apiKey) => providerFactory.llm(modelId, apiKey),
+  }, comicDirectorModels);
+  registerAgentExtension(createComicDirectorExtension(new PgComicDirector(db.pool), resolveComicDirectorLlm, process.env.COMIC_DRAMA_FACTORY === "1"));
   registerDigitalEmployeeWorkerJobs({
     queue, db, adviceLlm: { resolveLlm: resolveOwnerLlm, recordUsage: (input) => meter.record(input), english: internationalModelsEnabled() },
     checkQuota: (userId, estimatedCost) => meter.checkQuota(userId, estimatedCost),

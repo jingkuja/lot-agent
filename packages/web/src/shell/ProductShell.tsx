@@ -119,7 +119,7 @@ export function ProductShell({ user, onLogout }: ProductShellProps) {
       {comicDramaEnabled && <div className={isComicDrama ? "product-shell-view" : "product-shell-view is-hidden"} aria-hidden={!isComicDrama || undefined}>
         <ComicDramaWorkspace key={user.id} user={user} pathname={pathname} active={isComicDrama} navigate={navigate} replacePath={replacePath}
           onLogout={onLogout} onOpenAssistant={() => navigate("/assistant")} onOpenDigitalEmployee={handleOpenDigitalEmployee}
-          models={modelCatalog.video} imageModels={modelCatalog.image} llmModels={modelCatalog.llm} />
+          models={modelCatalog.video} imageModels={modelCatalog.image} />
       </div>}
       {llmNoticeTitle && <LlmModelRequiredModal title={llmNoticeTitle} onClose={() => setLlmNoticeTitle(null)} />}
     </>

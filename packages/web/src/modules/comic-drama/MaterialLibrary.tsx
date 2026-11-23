@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { comicMaterialKinds, type ComicMaterial, type ComicMaterialKind } from "@lot-agent/core/comic-drama";
+import { comicMaterialKinds, type ComicGenerationQuote, type ComicMaterial, type ComicMaterialKind } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
 import { ChoiceSelect, comicListWords, LibraryDialog, libraryError, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
+import { comicGenerationApi } from "./generation-api.js";
+import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 
 export const comicMaterialLabels = { scene: "场景", prop: "道具", sound: "音效", music: "背景音乐", other: "其他" } as const;
 const images = "image/jpeg,image/png,image/webp";
@@ -14,6 +16,8 @@ const options = {
   music: { accept: audio, hint: "MP3 或 WAV，最多 30 MB / 5 分钟" },
   other: { accept: images + "," + audio, hint: "图片最多 20 MB，音频最多 30 MB / 5 分钟" },
 };
+type GeneratedMaterial = ComicMaterial & { kind: "scene" | "prop" };
+const isGeneratedMaterial = (material: ComicMaterial): material is GeneratedMaterial => material.kind === "scene" || material.kind === "prop";
 
 export function MaterialLibrary() {
   const { locale, t } = useI18n();
@@ -26,6 +30,8 @@ export function MaterialLibrary() {
   const [uploading, setUploading] = useState<"new" | ComicMaterial | null>(null);
   const [editing, setEditing] = useState<ComicMaterial | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState<GeneratedMaterial | null>(null);
+  const [quote, setQuote] = useState<{ quote: ComicGenerationQuote; materialId: string } | null>(null);
   const [error, setError] = useState("");
   const choices = useComicChoices(kind);
   const reload = () => setRefresh(i => i + 1);
@@ -71,6 +77,7 @@ export function MaterialLibrary() {
             <button type="button" onClick={() => void comicLibraryApi.unarchiveMaterial(material.id)
               .then(reload).catch(reason => setError(libraryError(reason)))}>{t("取消归档")}</button>
           )}
+          {!material.archived && isGeneratedMaterial(material) && <button type="button" onClick={() => setGenerating(material)}>{t("生成图片")}</button>}
           <button type="button" onClick={() => {
             if (window.confirm(t("彻底删除此素材？已被剪辑或画风参考使用的素材无法删除。"))) void comicLibraryApi.deleteMaterial(material.id)
               .then(reload).catch(reason => setError(libraryError(reason)));
@@ -98,7 +105,31 @@ export function MaterialLibrary() {
         reload();
       }} />}
     {versionId && <MediaVersions list={versions} close={() => setVersionId(null)} />}
+    {generating && <MaterialGenerateDialog material={generating} close={() => setGenerating(null)}
+      quoted={next => setQuote({ quote: next, materialId: generating.id })} />}
+    {quote && <GenerationQuoteDialog quote={quote.quote} label={() => t("素材图片")} close={() => setQuote(null)}
+      confirm={confirmationId => comicGenerationApi.confirm({ resource: "materials", id: quote.materialId }, confirmationId)} submitted={() => {
+        setQuote(null);
+        reload();
+      }} />}
   </>;
+}
+
+function MaterialGenerateDialog({ material, close, quoted }: {
+  material: ComicMaterial & { kind: "scene" | "prop" }; close: () => void; quoted: (quote: ComicGenerationQuote) => void;
+}) {
+  const { t } = useI18n();
+  return <LibraryDialog title={t("生成素材图片")} submitLabel={t("预览费用")} close={close} save={async form => {
+    const quote = await comicGenerationApi.materialPreview(material.id, {
+      materialId: material.id, kind: material.kind as "scene" | "prop",
+      prompt: String(form.get("prompt") ?? "").trim(),
+    });
+    quoted(quote);
+  }}>
+    <p className="comic-generation-note">{t("将使用设置中的默认图片档位，并把当前素材名称和描述发送给模型。")}</p>
+    <label>{t("画面描述")}<textarea name="prompt" required minLength={1} maxLength={4000} rows={6}
+      placeholder={t("描述场景、背景或道具的构图、光线和细节")} /></label>
+  </LibraryDialog>;
 }
 
 function MaterialUpload({ initialKind, material, close, done }: {

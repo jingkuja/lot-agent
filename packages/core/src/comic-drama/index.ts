@@ -259,6 +259,7 @@ export interface ComicDramaRepository {
 export * from "./library.js";
 export * from "./cast.js";
 export * from "./generation.js";
+export * from "./models.js";
 export * from "./timeline.js";
 export * from "./edit.js";
 export * from "./director.js";

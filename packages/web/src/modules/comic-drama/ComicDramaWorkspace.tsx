@@ -50,7 +50,6 @@ type Props = {
   onLogout: () => void;
   models: readonly ComicDramaModel[];
   imageModels?: readonly ComicDramaModel[];
-  llmModels?: readonly ComicDramaModel[];
 };
 
 const steps = [
@@ -84,7 +83,7 @@ function formatCurrencyList(entries: readonly ComicCurrencyAmount[]): string {
 
 export function ComicDramaWorkspace({
   user, pathname, active, navigate, replacePath, onOpenAssistant, onOpenDigitalEmployee, onLogout,
-  models, imageModels = [], llmModels = [],
+  models, imageModels = [],
 }: Props) {
   const { t, locale } = useI18n();
   const styles = useComicChoices("style");
@@ -452,7 +451,7 @@ export function ComicDramaWorkspace({
         : library === "/characters" ? <CharacterLibrary characterId={characterId}
           open={id => navigate(COMIC_DRAMA_ROOT + "/characters" + (id ? "/" + id : ""))} />
         : library === "/materials" ? <MaterialLibrary />
-        : library === "/settings" ? <ComicSettingsPage videoModels={models} imageModels={imageModels} llmModels={llmModels} />
+        : library === "/settings" ? <ComicSettingsPage videoModels={models} imageModels={imageModels} />
         : renderHistory ? <ComicRenderPanel />
         : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
           autoOpenDialogue={pendingAutoDialogueEditId === editId}

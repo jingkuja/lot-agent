@@ -30,6 +30,7 @@ export const comicDirectorApi = {
 
 const errors: Record<string, string> = {
   COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
+  COMIC_DIRECTOR_LLM_UNAVAILABLE: "当前账号没有可用的导演文字模型",
   QUOTE_STALE: "素材或分镜已更新，请重新询价",
   DIRECTOR_FILE_TOO_LARGE: "剧本文件最大为 2 MB",
   DIRECTOR_FILE_TYPE: "请选择 TXT 或 DOCX 剧本文件",

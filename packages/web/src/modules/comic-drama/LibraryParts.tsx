@@ -19,6 +19,7 @@ const errors: Record<string, string> = {
   FRAME_UNAVAILABLE: "无法读取此时间点的画面",
   OUTFIT_IN_USE: "该造型套装正在剧集选角中使用，无法删除",
   MATERIAL_IN_USE: "该素材正在剪辑工程或画风参考中使用，无法删除",
+  MODEL_UNAVAILABLE: "所选模型不可用，请重新选择",
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
 };
 export function libraryError(error: unknown) {

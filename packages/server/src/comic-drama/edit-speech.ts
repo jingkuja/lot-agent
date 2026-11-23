@@ -6,6 +6,7 @@ import {
   type ComicAutoDialogueItemOutcome, type ComicAutoDialoguePlan, type ComicAutoDialoguePlanLine, type ComicAutoDialogueResult,
   type ComicEditAutoDialogue, type ComicEditAutoDialogueOverride, type ComicEditAutoDialoguePreview, type ComicSpeechLines,
   type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
+  type ComicSpeechPresetId, type ComicSpeechPresetMeta,
 } from "@lot-agent/core/comic-drama";
 import { readComicDictionary } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
@@ -13,6 +14,18 @@ import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
+import { DEFAULT_TTS_MODEL } from "../models/media-defaults.js";
+
+// Keep the stored preset IDs valid across the switch to Qwen system voices.
+const qwenVoiceIds: Record<ComicSpeechPresetId, string> = { alloy: "longanlingxin", nova: "longanlingxin", onyx: "longanlufeng" };
+const qwenPresets: readonly ComicSpeechPresetMeta[] = [
+  { id: "nova", gender: "female", age: "young_adult", tone: "balanced",
+    labels: { zh: "龙安灵心 · 温暖女声", en: "Lingxin · Warm Female Voice", id: "Lingxin · Suara Wanita Hangat" },
+    summary: { zh: "温暖自然，支持普通话与英语", en: "Warm and natural, supports Mandarin and English", id: "Hangat dan alami, mendukung Mandarin dan Inggris" } },
+  { id: "onyx", gender: "male", age: "young_adult", tone: "bright",
+    labels: { zh: "龙安鲁风 · 明亮男声", en: "Lufeng · Bright Male Voice", id: "Lufeng · Suara Pria Cerah" },
+    summary: { zh: "明亮开朗，支持普通话与英语", en: "Bright and upbeat, supports Mandarin and English", id: "Cerah dan ceria, mendukung Mandarin dan Inggris" } },
+];
 
 type CloneVoice = { targetModel: string; voiceId: string };
 export type ComicSpeechDeps = {
@@ -37,6 +50,11 @@ export class ComicEditSpeech {
   constructor(private readonly pool: Pool, private readonly edits: PgComicEdits, private readonly media: ComicMediaLibrary,
     private readonly deps: ComicSpeechDeps) {}
 
+  private presets() {
+    const presetCatalog = !this.deps.presetModel ? [] : this.deps.presetModel === DEFAULT_TTS_MODEL ? qwenPresets : COMIC_SPEECH_PRESET_CATALOG;
+    return { presetCatalog, presets: presetCatalog.map(preset => preset.id) };
+  }
+
   private async binding(owner: string, id: string) {
     const { rows: [row] } = await this.pool.query<BindingRow>(`SELECT binding,voice_version AS version,clone_fingerprint AS fingerprint
       FROM ${cd}.cd_character_voice WHERE owner_id=$1 AND character_id=$2`, [owner, id]);
@@ -53,8 +71,7 @@ export class ComicEditSpeech {
     const [current, clones] = await Promise.all([this.binding(owner, id), this.deps.clones?.list(owner) ?? []]);
     return {
       binding: current?.binding ?? { kind: "none" },
-      presets: this.deps.presetModel ? comicSpeechPresets : [],
-      presetCatalog: this.deps.presetModel ? COMIC_SPEECH_PRESET_CATALOG : [],
+      ...this.presets(),
       clonesEnabled: !!this.deps.clones,
       clones,
     };
@@ -82,8 +99,7 @@ export class ComicEditSpeech {
   }
 
   private async linesForClip(owner: string, clipId: string | null): Promise<ComicSpeechLines> {
-    const presets = this.deps.presetModel ? comicSpeechPresets : [];
-    const presetCatalog = this.deps.presetModel ? COMIC_SPEECH_PRESET_CATALOG : [];
+    const { presets, presetCatalog } = this.presets();
     if (!clipId) return { clipRevision: null, lines: [], characters: [], presets, presetCatalog };
     const { rows: [source] } = await this.pool.query<{ revision: number; draft: unknown; characters: ComicSpeechLines["characters"] }>(
       `SELECT c.revision,c.draft,coalesce((SELECT jsonb_agg(jsonb_build_object('id',x.character_id,'name',x.snapshot->>'name',
@@ -114,7 +130,9 @@ export class ComicEditSpeech {
       return { voice, version: binding.version, clone: true };
     }
     if (selected?.kind === "preset" && this.deps.presetModel) {
-      return { voice: { targetModel: this.deps.presetModel, voiceId: selected.preset }, version: binding?.version ?? null, clone: false };
+      const targetModel = this.deps.presetModel;
+      const voiceId = targetModel === DEFAULT_TTS_MODEL ? qwenVoiceIds[selected.preset] : selected.preset;
+      return { voice: { targetModel, voiceId }, version: binding?.version ?? null, clone: false };
     }
     throw unavailable();
   }

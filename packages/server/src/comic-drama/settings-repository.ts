@@ -17,23 +17,23 @@ export class PgComicSettings {
     const { rows } = await db.query<{ preferences: unknown }>(
       `SELECT preferences FROM ${cd}.cd_user_state WHERE owner_id=$1`, [owner],
     );
+    // `.strip()` deliberately ignores preferences written by older versions,
+    // including the removed user-selectable director text model.
     const parsed = comicUserPreferencesSchema.safeParse(rows[0]?.preferences ?? {});
-    return parsed.success ? parsed.data : {};
+    if (!parsed.success) return {};
+    const { defaultImageModel, defaultVideoModel } = parsed.data;
+    return { defaultImageModel, defaultVideoModel };
   }
 
   async updatePreferences(owner: string, patch: ComicUserPreferences): Promise<ComicUserPreferences> {
-    const current = await this.getPreferences(owner);
-    const next: ComicUserPreferences = {
-      defaultVideoModel: patch.defaultVideoModel !== undefined ? patch.defaultVideoModel : current.defaultVideoModel ?? null,
-      defaultImageModel: patch.defaultImageModel !== undefined ? patch.defaultImageModel : current.defaultImageModel ?? null,
-      defaultTextModel: patch.defaultTextModel !== undefined ? patch.defaultTextModel : current.defaultTextModel ?? null,
-    };
-    await this.pool.query(
-      `INSERT INTO ${cd}.cd_user_state(owner_id, preferences) VALUES($1, $2)
-       ON CONFLICT (owner_id) DO UPDATE SET preferences = excluded.preferences`,
-      [owner, next],
+    const { defaultImageModel, defaultVideoModel } = patch;
+    const { rows: [row] } = await this.pool.query<{ preferences: ComicUserPreferences }>(
+      `INSERT INTO ${cd}.cd_user_state AS s(owner_id, preferences) VALUES($1, $2)
+       ON CONFLICT (owner_id) DO UPDATE SET preferences = (s.preferences - 'defaultTextModel') || excluded.preferences
+       RETURNING preferences`,
+      [owner, { defaultImageModel, defaultVideoModel }],
     );
-    return next;
+    return row.preferences;
   }
 
   async listStylePresets(owner: string): Promise<ComicStylePreset[]> {

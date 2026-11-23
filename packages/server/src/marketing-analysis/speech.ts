@@ -8,8 +8,9 @@ import { AnalysisError } from "./errors.js";
 import { readAnalysisFile } from "./private-files.js";
 import type { MediaRunner } from "./sandbox.js";
 import { gatewayModelHeaders } from "../tokenhub/model-access.js";
+import { DEFAULT_ASR_MODEL } from "../models/media-defaults.js";
 
-export const ASR_MODEL = "qwen-audio-3.1-asr-flash";
+export const ASR_MODEL = DEFAULT_ASR_MODEL;
 const maxAudioBytes = 180 * 16000 * 2 + 4096;
 
 /** Decode only a private, signature-checked container in the existing networkless sandbox. */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { comicVideoProfile, type ComicUserPreferences, type ComicUserSettings } from "@lot-agent/core/comic-drama";
+import { comicImageOptions, comicVideoOptions, selectComicImageModel, type ComicUserPreferences, type ComicUserSettings } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { DictionarySettings } from "./DictionarySettings.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -11,13 +11,11 @@ const images = "image/jpeg,image/png,image/webp";
 export function ComicSettingsPage({
   videoModels,
   imageModels = [],
-  llmModels = [],
 }: {
   videoModels: readonly ComicDramaModel[];
   imageModels?: readonly ComicDramaModel[];
-  llmModels?: readonly ComicDramaModel[];
 }) {
-  const { t, locale, modelName } = useI18n();
+  const { t, locale } = useI18n();
   const [tab, setTab] = useState<"styles" | "models" | "dictionary">("styles");
   const [settings, setSettings] = useState<ComicUserSettings | null>(null);
   const [error, setError] = useState("");
@@ -25,7 +23,6 @@ export function ComicSettingsPage({
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const styles = useComicChoices("style", refresh);
-  const eligibleVideos = videoModels.filter(model => comicVideoProfile(model.id));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -37,6 +34,10 @@ export function ComicSettingsPage({
   }, [refresh]);
 
   const [prefs, setPrefs] = useState<ComicUserPreferences>({});
+  const eligibleVideos = comicVideoOptions(videoModels, prefs.defaultVideoModel);
+  const eligibleImages = comicImageOptions(imageModels);
+  const selectedVideo = eligibleVideos.find(model => model.id === prefs.defaultVideoModel)?.id ?? "";
+  const selectedImage = selectComicImageModel(imageModels, prefs.defaultImageModel);
   useEffect(() => {
     if (settings) setPrefs(settings.preferences);
   }, [settings]);
@@ -45,9 +46,8 @@ export function ComicSettingsPage({
     setBusy(true); setError(""); setNotice("");
     try {
       const next = await comicLibraryApi.updateSettings({
-        defaultVideoModel: prefs.defaultVideoModel || null,
-        defaultImageModel: prefs.defaultImageModel || null,
-        defaultTextModel: prefs.defaultTextModel || null,
+        defaultVideoModel: selectedVideo || null,
+        ...(selectedImage ? { defaultImageModel: selectedImage } : {}),
       });
       setPrefs(next);
       setSettings(cur => cur ? { ...cur, preferences: next } : cur);
@@ -108,7 +108,7 @@ export function ComicSettingsPage({
             <h2>{t("画风预设与参考图")}</h2>
             <button type="button" onClick={() => setTab("dictionary")}>{t("管理画风字典")}</button>
           </header>
-          <p className="comic-generation-note">{t("为画风绑定参考图后，该画风剧集生成首帧和视频时会自动带入参考图。")}</p>
+          <p className="comic-generation-note">{t("画风参考图会用于生成首帧和直接参考生成视频。")}</p>
           <div className="comic-library-grid">
             {styles.filter(entry => !entry.inactive).map(entry => {
               const bound = settings?.stylePresets.find(item => item.styleKey === entry.key);
@@ -142,28 +142,23 @@ export function ComicSettingsPage({
       {tab === "models" && (
         <section className="comic-edit-card">
           <header><h2>{t("默认模型设置")}</h2></header>
-          <p className="comic-generation-note">{t("新建剧集、生成首帧及使用导演助手时优先采用以下默认模型；留空则沿用平台默认策略。")}</p>
+          <p className="comic-generation-note">{t("视频默认模型用于新建剧集，图片档位用于角色造型和分镜首帧。导演文字模型由系统自动选择。")}</p>
           <fieldset className="comic-clip-fields" disabled={busy || !settings}>
             <div className="comic-fields">
               <label>
                 {t("默认视频模型")}
-                <select value={prefs.defaultVideoModel ?? ""} onChange={event => setPrefs(cur => ({ ...cur, defaultVideoModel: event.target.value || null }))}>
+                <select value={selectedVideo} disabled={!eligibleVideos.length}
+                  onChange={event => setPrefs(cur => ({ ...cur, defaultVideoModel: event.target.value || null }))}>
                   <option value="">{t("沿用系统默认")}</option>
-                  {eligibleVideos.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
+                  {eligibleVideos.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}
                 </select>
               </label>
               <label>
                 {t("默认图片模型")}
-                <select value={prefs.defaultImageModel ?? ""} onChange={event => setPrefs(cur => ({ ...cur, defaultImageModel: event.target.value || null }))}>
-                  <option value="">{t("沿用系统默认")}</option>
-                  {imageModels.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
-                </select>
-              </label>
-              <label>
-                {t("默认导演文字模型")}
-                <select value={prefs.defaultTextModel ?? ""} onChange={event => setPrefs(cur => ({ ...cur, defaultTextModel: event.target.value || null }))}>
-                  <option value="">{t("沿用用户默认文字模型")}</option>
-                  {llmModels.map(model => <option key={model.id} value={model.id}>{modelName(model.name ?? model.id)}</option>)}
+                <select value={selectedImage ?? ""} disabled={!eligibleImages.length}
+                  onChange={event => setPrefs(cur => ({ ...cur, defaultImageModel: event.target.value || null }))}>
+                  {!eligibleImages.length && <option value="">{t("当前账号没有可用的漫剧图片模型")}</option>}
+                  {eligibleImages.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}
                 </select>
               </label>
             </div>

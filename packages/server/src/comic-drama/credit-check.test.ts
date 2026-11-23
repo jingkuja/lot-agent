@@ -5,7 +5,7 @@ import { createComicVideoCreditCheck } from "./credit-check.js";
 const image = { mediaId: "media", version: 1, mime: "image/png", width: 720, height: 1280, sizeBytes: 100 } as const;
 const input: ComicFrozenGenerationInput = {
   schemaVersion: 1, promptVersion: 1,
-  seriesId: "series", seriesRevision: 1, clipId: "clip", clipRevision: 1, mode: "from_keyframe", modelId: "grok-imagine-video-1.5",
+  seriesId: "series", seriesRevision: 1, clipId: "clip", clipRevision: 1, mode: "from_keyframe", modelId: "doubao-seedance-2-5",
   aspectRatio: "9:16", durationMs: 8000, styleKey: "webtoon", firstFrame: { ...image, takeId: null },
   references: [{ ...image, kind: "scene", label: "Scene" }, { ...image, kind: "prop", label: "Prop" }], prompt: "Do not send this to pricing",
 };
@@ -51,6 +51,17 @@ describe("comic video preflight", () => {
     expect(await check("owner", input, signal)).toEqual({ reason: "insufficient", availablePoints: 0, requiredPoints: 100 });
     gateway.estimateModelCost.mockResolvedValueOnce({ ...quote, estimatedPoints: 0 });
     expect(await check("owner", input, signal)).toBeNull();
+  });
+
+  it("quotes the frozen H3 resolution and only the approved first frame", async () => {
+    const { quote, gateway, check } = setup();
+    const model = "minimax-video-h3";
+    gateway.estimateModelCost.mockResolvedValueOnce({ ...quote, model });
+    await expect(check("owner", { ...input, modelId: model, resolution: "768P", references: [] }, new AbortController().signal)).resolves.toBeNull();
+    expect(gateway.estimateModelCost).toHaveBeenCalledWith("managed-key", {
+      model, video: { resolution: "768P", seconds: 8, has_video_input: false, input_image_count: 1 },
+      request_parameters: { resolution: "768P", generate_audio: false, ratio: "9:16" },
+    }, expect.any(AbortSignal));
   });
 
   it("lets TokenHub check wallet funding when fallback is enabled, even with zero managed credits", async () => {

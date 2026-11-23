@@ -36,6 +36,14 @@ export async function insertComicCharacterVersion(
   return rows[0].version;
 }
 
+export async function insertComicMaterialVersion(db: ComicQuery, owner: string, id: string, mediaId: string) {
+  const { rows } = await db.query<{ version: number }>(`INSERT INTO ${tables}.cd_material_versions(owner_id,material_id,version,media_id)
+    SELECT $1,$2,coalesce(max(version),0)+1,$3 FROM ${tables}.cd_material_versions WHERE owner_id=$1 AND material_id=$2 RETURNING version`,
+  [owner, id, mediaId]);
+  await db.query(`UPDATE ${tables}.cd_materials SET updated_at=clock_timestamp() WHERE owner_id=$1 AND id=$2`, [owner, id]);
+  return rows[0].version;
+}
+
 function page<T>(rows: T[]): ComicLibraryPage<T> {
   return { entries: rows.slice(0, pageSize), more: rows.length > pageSize };
 }

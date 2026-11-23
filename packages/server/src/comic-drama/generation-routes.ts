@@ -4,9 +4,12 @@ import { bodyLimit } from "hono/body-limit";
 import type { Pool } from "pg";
 import { MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import {
-  buildComicGenerationInput, comicCharacterGenerateSchema, comicDramaIdSchema, comicDramaRevisionSchema, comicGenerationConfirmSchema,
-  comicEpisodeBudgetSchema, comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicKeyframeSelectSchema, comicTakeReleaseSchema, comicVideoProfile,
+  buildComicGenerationInput, comicCharacterGenerateSchema, comicDramaIdSchema, comicDramaRevisionSchema,
+  comicGenerationConfirmSchema, comicMaterialGenerateSchema,
+  comicEpisodeBudgetSchema, comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicKeyframeSelectSchema, comicTakeReleaseSchema,
+  comicVideoModel, comicVideoProfile,
   type ComicCharacterGenerateRequest, type ComicCharacterUpload, type ComicDramaDetail, type ComicGenerationPreviewRequest, type ComicGenerationImage,
+  type ComicMaterialGenerateRequest,
   type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicSkippedInvalidReference, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK } from "../jobs/task-queues.js";
@@ -73,8 +76,13 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       ]),
     ]);
     const isVideo = body.mode !== "keyframe";
+    const strictFirstFrame = body.mode === "from_keyframe" && !!comicVideoModel(detail.series.videoModel);
     const explicitRefs = body.visualReferences ?? [];
-    const persistedSpecs = clips.flatMap(clip => [
+    if (strictFirstFrame && explicitRefs.length) {
+      return { inputs: [], skipped: clips.map(clip => ({ clipId: clip.id, reason: "REFERENCE_MODE_CONFLICT" as const })),
+        replaceAdopted: [], visualReferences: [] };
+    }
+    const persistedSpecs = strictFirstFrame ? [] : clips.flatMap(clip => [
       ...(clip.draft.sceneRef ? [{ kind: "scene" as const, materialId: clip.draft.sceneRef.materialId, mediaId: clip.draft.sceneRef.mediaId }] : []),
       ...(clip.draft.propRefs ?? []).map(ref => ({ kind: "prop" as const, materialId: ref.materialId, mediaId: ref.mediaId })),
     ]);
@@ -85,7 +93,7 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       isVideo ? video.frames(owner, detail.series.id, clips.map(clip => clip.id)) : null,
       video.references(owner, explicitRefs),
       video.inspectReferences(owner, uniquePersisted),
-      explicitRefs.some(ref => ref.kind === "style") ? Promise.resolve(null) : settings.getStylePreset(owner, detail.series.styleKey),
+      strictFirstFrame || explicitRefs.some(ref => ref.kind === "style") ? null : settings.getStylePreset(owner, detail.series.styleKey),
     ]);
     const styleDescription = styles.find(entry => entry.key === detail.series.styleKey)?.labels.en;
     const styleRef: (ComicGenerationReference & { kind: "style" }) | null = stylePreset
@@ -110,7 +118,7 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       if (versions?.adopted && !replaceAdopted.includes(clip.id)) { skipped.push({ clipId: clip.id, reason: "ALREADY_COMPLETE" }); continue; }
       const clipRefs: Array<ComicGenerationReference & { kind: "style" | "scene" | "prop" }> = [...explicitVisualRefs];
       const seenMedia = new Set(clipRefs.map(ref => ref.mediaId));
-      const clipPersisted: Array<{ role: "scene" | "prop"; materialId: string; mediaId: string; name?: string }> = [
+      const clipPersisted: Array<{ role: "scene" | "prop"; materialId: string; mediaId: string; name?: string }> = strictFirstFrame ? [] : [
         ...(clip.draft.sceneRef ? [{ role: "scene" as const, ...clip.draft.sceneRef }] : []),
         ...(clip.draft.propRefs ?? []).map(ref => ({ role: "prop" as const, ...ref })),
       ];
@@ -147,8 +155,10 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
         styleDescription, mode: body.mode, firstFrame: versions?.frame ?? undefined, visualReferences: clipRefs });
       if (!built.ok) {
         const reason = built.issues[0].code;
-        const referenceLimit = reason === "REFERENCE_LIMIT" ? comicVideoProfile(model)?.referenceImages.total : undefined;
-        skipped.push({ clipId: clip.id, reason, ...(referenceLimit ? { referenceLimit } : {}) });
+        const profile = comicVideoProfile(model);
+        const referenceLimit = reason === "REFERENCE_LIMIT" ? profile?.referenceImages.total : undefined;
+        const durationLimit = reason === "DURATION_UNSUPPORTED" ? profile?.shotMaxSeconds : undefined;
+        skipped.push({ clipId: clip.id, reason, ...(referenceLimit ? { referenceLimit } : {}), ...(durationLimit ? { durationLimit } : {}) });
       } else if (!isVideo && built.input.references.length > MAX_IMAGE_EDIT_REFERENCES) {
         skipped.push({ clipId: clip.id, reason: "REFERENCE_LIMIT", referenceLimit: MAX_IMAGE_EDIT_REFERENCES });
       }
@@ -285,6 +295,44 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     return repo.quote(owner, scope, stamp, price, [input], []);
   }
 
+  async function previewMaterial(owner: string, scope: ComicGenerationScope, req: ComicMaterialGenerateRequest) {
+    if (req.materialId !== scope.id) throw new ComicLibraryError("INVALID_INPUT", 400);
+    const material = await library.materialInput(owner, scope.id);
+    if (material.kind !== req.kind) throw new ComicLibraryError("INVALID_INPUT", 400);
+    const price = await quotePrice(owner);
+    const stylePreset = req.styleKey ? await settings.getStylePreset(owner, req.styleKey) : null;
+    const references: ComicGenerationImage[] = [];
+    const seen = new Set<string>();
+    const pushMedia = (item: { id: string; mime: string; sizeBytes: number; width: number | null; height: number | null }) => {
+      if (seen.has(item.id) || references.length >= MAX_IMAGE_EDIT_REFERENCES) return;
+      if ((item.mime === "image/jpeg" || item.mime === "image/png" || item.mime === "image/webp") && item.width && item.height) {
+        seen.add(item.id);
+        references.push({ mediaId: item.id, mime: item.mime, sizeBytes: item.sizeBytes, width: item.width, height: item.height, version: 1 });
+      }
+    };
+    if (stylePreset) pushMedia(stylePreset.media);
+    for (const mediaId of req.referenceMediaIds ?? []) {
+      const media = await library.media(owner, mediaId);
+      if (!media) throw new ComicLibraryError("INVALID_REFERENCE", 400);
+      pushMedia(media);
+    }
+    const prompt = [
+      `Create an original comic ${req.kind} image named ${material.name}.`,
+      material.tags.length ? `Tags: ${material.tags.join(", ")}.` : "",
+      `Description: ${req.prompt}`,
+      ...(stylePreset ? ["Follow the supplied style reference."] : []),
+      ...(references.length ? ["Use the supplied references for composition and visual consistency."] : []),
+      "Do not include text or watermarks.",
+    ].filter(Boolean).join("\n");
+    const { rows } = await pool.query<{ stamp: string }>(
+      `SELECT updated_at::text AS stamp FROM lot_comic_drama.cd_materials WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL`,
+      [owner, scope.id],
+    );
+    if (!rows[0]) libraryMissing();
+    return repo.quote(owner, scope, rows[0].stamp, price, [{ schemaVersion: 1, promptVersion: 1, materialId: scope.id,
+      target: { kind: "material", materialId: scope.id }, modelId: price?.modelId ?? "unpriced", aspectRatio: "1:1", references, prompt }], []);
+  }
+
   app.post("/series/:id/director/generation-preview", limit, async c => {
     const owner = c.get("userId"), id = pathId(c.req.param("id"));
     const body = comicGenerationPreviewSchema.safeParse(await c.req.json().catch(() => null));
@@ -294,8 +342,8 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     await director.recordQuote(owner, id, quote);
     return c.json(quote);
   });
-  for (const resource of ["series", "characters"] as const) {
-    const kind = resource === "series" ? "series" : "character";
+  for (const resource of ["series", "characters", "materials"] as const) {
+    const kind = resource === "series" ? "series" : resource === "characters" ? "character" : "material";
     app.post(`/${resource}/:id/generation-preview`, limit, async c => {
       const owner = c.get("userId");
       const scope: ComicGenerationScope = { kind, id: pathId(c.req.param("id")) };
@@ -305,8 +353,12 @@ export function createComicGenerationRoutes(deps: Dependencies) {
         const body = comicGenerationPreviewSchema.safeParse(raw);
         return body.success ? c.json(await previewSeries(owner, scope, body.data)) : c.json({ code: "INVALID_INPUT" }, 400);
       }
-      const body = comicCharacterGenerateSchema.safeParse(raw);
-      return body.success ? c.json(await previewCharacter(owner, scope, body.data)) : c.json({ code: "INVALID_INPUT" }, 400);
+      if (kind === "character") {
+        const body = comicCharacterGenerateSchema.safeParse(raw);
+        return body.success ? c.json(await previewCharacter(owner, scope, body.data)) : c.json({ code: "INVALID_INPUT" }, 400);
+      }
+      const body = comicMaterialGenerateSchema.safeParse(raw);
+      return body.success ? c.json(await previewMaterial(owner, scope, body.data)) : c.json({ code: "INVALID_INPUT" }, 400);
     });
     app.post(`/${resource}/:id/generate`, limit, async c => {
       const owner = c.get("userId");

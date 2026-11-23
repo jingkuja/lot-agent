@@ -5,14 +5,17 @@ import { predictModelCost } from "../billing/model-estimate.js";
 import type { StoredUser } from "../db/database.js";
 import type { ModelEstimateRequest, TokenhubClient } from "../tokenhub/client.js";
 
-export function comicVideoEstimateUsage(input: ComicFrozenGenerationInput): ModelEstimateRequest {
+export function comicVideoEstimateUsage(input: Pick<ComicFrozenGenerationInput, "modelId" | "resolution" | "durationMs" | "aspectRatio">,
+  imageCount: number,
+): ModelEstimateRequest {
+  const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
   return {
     model: input.modelId,
     video: {
-      resolution: COMIC_VIDEO_RESOLUTION, seconds: input.durationMs / 1000, has_video_input: false,
-      input_image_count: input.references.length + Number(!!input.firstFrame),
+      resolution, seconds: input.durationMs / 1000, has_video_input: false,
+      input_image_count: imageCount,
     },
-    request_parameters: { resolution: COMIC_VIDEO_RESOLUTION, generate_audio: false, ratio: input.aspectRatio },
+    request_parameters: { resolution, generate_audio: false, ratio: input.aspectRatio },
   };
 }
 
@@ -40,7 +43,8 @@ export function createComicVideoCreditCheck(db: CreditDb, tokenhub: CreditGatewa
       deadline.throwIfAborted();
       if (allowBalanceFallback === true) return null;
       if (allowBalanceFallback !== false || !Number.isFinite(amount)) return { reason: "unavailable" };
-      const { estimatedPoints: requiredPoints } = await predictModelCost(tokenhub, key, comicVideoEstimateUsage(input), deadline);
+      const usage = comicVideoEstimateUsage(input, input.references.length + Number(!!input.firstFrame));
+      const { estimatedPoints: requiredPoints } = await predictModelCost(tokenhub, key, usage, deadline);
       deadline.throwIfAborted();
       if (!Number.isFinite(requiredPoints) || requiredPoints < 0) return { reason: "unavailable" };
       // Shift the decimal without introducing a multiplication artifact at an equal balance (e.g. 0.29 yuan = 29 credits).

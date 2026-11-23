@@ -8,8 +8,8 @@ const baseCatalog: ModelCatalogConfig = {
   pricing: {
     "gpt-image-2": { inputPrice: 0, outputPrice: 0, unitPrice: 0.04 },
     "free-image": { inputPrice: 0, outputPrice: 0, unitPrice: 0 },
-    "kling-video-v3-omni": { inputPrice: 0, outputPrice: 0, unitPrice: 0.5 },
-    "grok-imagine-video-1.5": { inputPrice: 0, outputPrice: 0, unitPrice: 0 },
+    "minimax-video-h3": { inputPrice: 0, outputPrice: 0, unitPrice: 0.5 },
+    "doubao-seedance-2-5": { inputPrice: 0, outputPrice: 0, unitPrice: 0 },
   },
   defaultPricing: {
     image: { inputPrice: 0, outputPrice: 0, unitPrice: 0.04 },
@@ -23,13 +23,13 @@ describe("comic-drama pricing and catalog lookup", () => {
     expect(lookupPricing(emptyCatalog, "gpt-image-2", "image", { fallbackToDefault: true })).toBeNull();
     expect(resolvePricing(emptyCatalog, "gpt-image-2", "image").unitPrice).toBe(0);
     expect(quoteComicCatalogPrice(emptyCatalog, "image", "gpt-image-2", {})).toBeNull();
-    expect(quoteComicCatalogPrice(emptyCatalog, "video", "kling-video-v3-omni", {})).toBeNull();
+    expect(quoteComicCatalogPrice(emptyCatalog, "video", "minimax-video-h3", {})).toBeNull();
 
     expect(quoteComicCatalogPrice(baseCatalog, "image", "free-image", {})).toEqual({
       modelId: "free-image", amountMicros: 0, unit: "image", currency: "CNY",
     });
-    expect(quoteComicCatalogPrice(baseCatalog, "video", "grok-imagine-video-1.5", {})).toEqual({
-      modelId: "grok-imagine-video-1.5", amountMicros: 0, unit: "second", currency: "CNY",
+    expect(quoteComicCatalogPrice(baseCatalog, "video", "doubao-seedance-2-5", {})).toEqual({
+      modelId: "doubao-seedance-2-5", amountMicros: 0, unit: "second", currency: "CNY",
     });
   });
 
@@ -38,8 +38,8 @@ describe("comic-drama pricing and catalog lookup", () => {
     expect(quoteComicCatalogPrice(fallbackCatalog, "image", "qwen-image-2.0", {})).toEqual({
       modelId: "qwen-image-2.0", amountMicros: 40_000, unit: "image", currency: "CNY",
     });
-    expect(quoteComicCatalogPrice(fallbackCatalog, "video", "grok-imagine-video-1.5", {})).toEqual({
-      modelId: "grok-imagine-video-1.5", amountMicros: 500_000, unit: "second", currency: "CNY",
+    expect(quoteComicCatalogPrice(fallbackCatalog, "video", "doubao-seedance-2-5", {})).toEqual({
+      modelId: "doubao-seedance-2-5", amountMicros: 500_000, unit: "second", currency: "CNY",
     });
   });
 
@@ -58,6 +58,6 @@ describe("comic-drama pricing and catalog lookup", () => {
     expect(comicQuoteCurrency({ globle: "1" })).toBe("USD");
     expect(comicQuoteCurrency({ globle: "1", COMIC_DRAMA_QUOTE_CURRENCY: "CNY" })).toBe("CNY");
     expect(comicQuoteCurrency({ COMIC_DRAMA_QUOTE_CURRENCY: "USD" })).toBe("USD");
-    expect(quoteComicCatalogPrice(baseCatalog, "video", "kling-video-v3-omni", { globle: "1" })?.currency).toBe("USD");
+    expect(quoteComicCatalogPrice(baseCatalog, "video", "minimax-video-h3", { globle: "1" })?.currency).toBe("USD");
   });
 });

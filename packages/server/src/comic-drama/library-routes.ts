@@ -4,7 +4,7 @@ import {
   comicCharacterInput, comicCharacterUpload, comicDictionaryCreate, comicDictionaryDomain, comicDictionaryOrder, comicDictionaryUpdate,
   comicDramaIdSchema, comicLibrarySearch, comicMaterialInput, comicMaterialSearch, comicMaterialUpdate, comicOutfitInput, comicOutfitOrder,
   comicSaveMediaAsMaterial, comicStyleReferenceBindSchema, comicUserPreferencesSchema,
-  type ComicDictionaryRepository, type ComicLibraryRepository,
+  type ComicDictionaryRepository, type ComicLibraryRepository, type ComicUserPreferences,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
 import type { ComicMediaLibrary } from "./media-library.js";
@@ -14,6 +14,7 @@ type Variables = { userId: string };
 
 export function createComicLibraryRoutes(
   repo: ComicLibraryRepository, dictionary: ComicDictionaryRepository, files: ComicMediaLibrary, settings?: PgComicSettings,
+  validateModels?: (owner: string, patch: ComicUserPreferences) => Promise<void>,
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const limitJson = bodyLimit({ maxSize: 64 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
@@ -163,7 +164,9 @@ export function createComicLibraryRoutes(
     app.put("/settings", async c => {
       const data = comicUserPreferencesSchema.safeParse(await c.req.json().catch(() => null));
       if (!data.success) return c.json({ code: "INVALID_INPUT" }, 400);
-      return c.json(await settings.updatePreferences(c.get("userId"), data.data));
+      const owner = c.get("userId");
+      await validateModels?.(owner, data.data);
+      return c.json(await settings.updatePreferences(owner, data.data));
     });
     app.put("/settings/styles/:styleKey/reference", async c => {
       const data = comicStyleReferenceBindSchema.safeParse(await c.req.json().catch(() => null));

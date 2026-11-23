@@ -7,8 +7,8 @@ type Reference = NonNullable<ComicGenerationPreviewRequest["visualReferences"]>[
 export type ChosenVideoReference = Reference & { name: string; version: number };
 const labels = { style: "画风", scene: "场景", prop: "道具" } as const;
 
-export function ComicVideoReferences({ references, change }: {
-  references: ChosenVideoReference[]; change: (items: ChosenVideoReference[]) => void;
+export function ComicVideoReferences({ references, change, limit }: {
+  references: ChosenVideoReference[]; change: (items: ChosenVideoReference[]) => void; limit: number;
 }) {
   const { t } = useI18n();
   const selectId = useId();
@@ -38,7 +38,7 @@ export function ComicVideoReferences({ references, change }: {
       <label>{t("搜索名称或标签")}<input value={query} maxLength={120}
         onChange={event => { setEntries(null); setQuery(event.target.value); }} /></label>
       <label htmlFor={selectId}>{t("添加参考图")}</label>
-      <select id={selectId} value="" disabled={references.length >= 10 || !Array.isArray(entries)} onChange={event => {
+      <select id={selectId} value="" disabled={references.length >= limit || !Array.isArray(entries)} onChange={event => {
         const item = Array.isArray(entries) ? entries.find(item => item.id === event.target.value) : undefined;
         if (item) change([...references, { kind, materialId: item.id, mediaId: item.media.id, name: item.name, version: item.version }]);
       }}>

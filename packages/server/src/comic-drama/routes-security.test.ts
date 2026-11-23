@@ -50,10 +50,10 @@ describe("comic-drama route security checks", () => {
 
     const goodCreate = await app.request("/series", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Good", styleKey: "webtoon", aspectRatio: "9:16", videoModel: "kling-video-v3-omni" }),
+      body: JSON.stringify({ title: "Good", styleKey: "webtoon", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5" }),
     });
     expect(goodCreate.status).toBe(201);
-    expect(canSelectModel).toHaveBeenCalledWith(ownerId, "kling-video-v3-omni");
+    expect(canSelectModel).toHaveBeenCalledWith(ownerId, "doubao-seedance-2-5");
 
     const badUpdate = await app.request(`/series/${seriesId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -124,7 +124,7 @@ describe("comic-drama route security checks", () => {
   });
 
   it("falls back to default video model on POST /series and supports summary, script history, clip insertion, and audition routes", async () => {
-    const detail = makeSeries("grok-imagine-video-1.5");
+    const detail = makeSeries("doubao-seedance-2-5");
     const addClip = vi.fn(async () => ({ seriesRevision: 2, clips: [], script: null, cast: [] }));
     const repo = {
       create: vi.fn(async (_owner, fields) => makeSeries(fields.videoModel)),
@@ -142,7 +142,7 @@ describe("comic-drama route security checks", () => {
     const audition = vi.fn(async () => ({ mediaId: takeId, durationMs: 1800, cached: false }));
     const app = new Hono<{ Variables: { userId: string } }>();
     app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
-    app.route("/", createComicDramaRoutes(repo, async (_u, m) => m === "grok-imagine-video-1.5", async () => "grok-imagine-video-1.5"));
+    app.route("/", createComicDramaRoutes(repo, async (_u, m) => m === "doubao-seedance-2-5", async () => "doubao-seedance-2-5"));
     app.route("/", createComicEditRoutes({} as PgComicEdits, { audition } as unknown as ComicEditSpeech));
 
     const created = await app.request("/series", {
@@ -150,7 +150,7 @@ describe("comic-drama route security checks", () => {
       body: JSON.stringify({ title: "Fallback", styleKey: "webtoon", aspectRatio: "9:16", videoModel: null }),
     });
     expect(created.status).toBe(201);
-    expect((await created.json() as ComicDramaDetail).series.videoModel).toBe("grok-imagine-video-1.5");
+    expect((await created.json() as ComicDramaDetail).series.videoModel).toBe("doubao-seedance-2-5");
 
     const plainCurrent = await app.request("/series/current");
     expect(await plainCurrent.json()).toEqual({ seriesId });
