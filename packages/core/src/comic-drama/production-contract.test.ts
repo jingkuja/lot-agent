@@ -4,6 +4,7 @@ import {
   comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions, comicRenderIssue, comicSpeechReleaseSchema,
   comicTimelineSchema, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline,
   comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, matchComicCharacters, planClipSfxPlacements, selectComicImageModel,
+  selectComicVideoModel,
   type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
@@ -53,6 +54,11 @@ describe("comic generation contracts", () => {
     const videos = catalog("grok-imagine-video-1.5", "doubao-seedance-2-5-flash-261115", "doubao-seedance-2-0-fast-260128",
       "minimax-video-h3-max", "minimax-video-h3", "doubao-seedance-2-0-260128", "doubao-seedance-2-5");
     expect(comicVideoOptions(videos).map(model => model.id)).toEqual(["doubao-seedance-2-5", "doubao-seedance-2-0-260128", "minimax-video-h3"]);
+    expect(comicVideoOptions(videos)[0]?.label).toBe("Seedance 2.5");
+    expect(selectComicVideoModel(videos)).toBe("doubao-seedance-2-0-260128");
+    expect(selectComicVideoModel(videos, "minimax-video-h3")).toBe("minimax-video-h3");
+    expect(selectComicVideoModel(videos, "grok-imagine-video-1.5")).toBe("doubao-seedance-2-0-260128");
+    expect(selectComicVideoModel(catalog("doubao-seedance-2-5"))).toBe("doubao-seedance-2-5");
     expect(comicVideoProfile("MiniMax-H3")?.promptMaxChars).toBe(7000);
     expect(comicVideoProfile("kling-video-v3-omni")).toBeUndefined();
     expect(comicUserPreferencesSchema.parse({ defaultImageModel: "gpt-image-2.5-flare", defaultTextModel: "legacy" })).toEqual({

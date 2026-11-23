@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { comicVideoOptions, type ComicDramaListing, type ComicDramaSeries, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
+import { comicVideoOptions, selectComicVideoModel, type ComicDramaListing, type ComicDramaSeries, type ComicDramaSeriesInput } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
+import { comicLibraryApi } from "./library-api.js";
 import { ChoiceSelect } from "./LibraryParts.js";
 
 export type ComicDramaModel = { id: string; name?: string };
@@ -23,7 +24,9 @@ export function SeriesDialog({ series, models, close, save, error }: {
   const [episodeNo, setEpisodeNo] = useState(series?.episodeNo ? String(series.episodeNo) : "");
   const [styleKey, setStyleKey] = useState(series?.styleKey ?? "thick_painting");
   const [aspectRatio, setAspectRatio] = useState<ComicDramaSeriesInput["aspectRatio"]>(series?.aspectRatio ?? "9:16");
-  const [videoModel, setVideoModel] = useState(series?.videoModel ?? "");
+  const [videoModel, setVideoModel] = useState(series?.videoModel ?? selectComicVideoModel(models) ?? "");
+  const [preferredVideo, setPreferredVideo] = useState<string | null>(null);
+  const videoTouched = useRef(false);
   const available = comicVideoOptions(models, videoModel);
 
   useEffect(() => { dialog.current?.showModal(); }, []);
@@ -33,8 +36,19 @@ export function SeriesDialog({ series, models, close, save, error }: {
     void comicDramaApi.list(new URLSearchParams({ archived: "false" }), controller.signal).then(data => {
       if (!controller.signal.aborted) setRecent(data.entries);
     }).catch(() => {});
+    void comicLibraryApi.settings(controller.signal).then(data => {
+      if (!controller.signal.aborted) setPreferredVideo(data.preferences.defaultVideoModel ?? null);
+    }).catch(() => {});
     return () => controller.abort();
   }, [series]);
+  // New episodes start on the default from settings, else Seedance 2.0, until the user picks a model.
+  useEffect(() => {
+    if (!series && !videoTouched.current) setVideoModel(selectComicVideoModel(models, preferredVideo) ?? "");
+  }, [series, models, preferredVideo]);
+  const chooseVideoModel = (id: string) => {
+    videoTouched.current = true;
+    setVideoModel(id);
+  };
 
   const chooseSource = (id: string) => {
     setSourceId(id);
@@ -44,7 +58,8 @@ export function SeriesDialog({ series, models, close, save, error }: {
     setEpisodeNo(String((chosen.episodeNo ?? 1) + 1));
     if (inherit) setStyleKey(chosen.styleKey);
     setAspectRatio(chosen.aspectRatio);
-    setVideoModel(comicVideoOptions(models, chosen.videoModel).find(model => model.id === chosen.videoModel)?.id ?? "");
+    const inherited = comicVideoOptions(models, chosen.videoModel).find(model => model.id === chosen.videoModel)?.id;
+    chooseVideoModel(inherited ?? selectComicVideoModel(models, preferredVideo) ?? "");
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -99,8 +114,9 @@ export function SeriesDialog({ series, models, close, save, error }: {
             <option>9:16</option><option>16:9</option><option>1:1</option>
           </select></label>
         </div>
-        <label>{t("视频模型")}<select name="videoModel" value={videoModel} onChange={event => setVideoModel(event.target.value)}>
-          <option value="">{t(series ? "稍后选择" : "沿用默认视频模型")}</option>
+        <label>{t("视频模型")}<select name="videoModel" value={videoModel} onChange={event => chooseVideoModel(event.target.value)}>
+          {(series ? !series.videoModel : !available.length) &&
+            <option value="">{t(series ? "稍后选择" : "沿用默认视频模型")}</option>}
           {series?.videoModel && !available.some(model => model.id === series.videoModel) &&
             <option value={series.videoModel}>{series.videoModel}</option>}
           {available.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}

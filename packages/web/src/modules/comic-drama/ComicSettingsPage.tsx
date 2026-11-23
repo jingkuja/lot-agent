@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { comicImageOptions, comicVideoOptions, selectComicImageModel, type ComicUserPreferences, type ComicUserSettings } from "@lot-agent/core/comic-drama";
+import {
+  comicImageOptions, comicVideoOptions, selectComicImageModel, selectComicVideoModel, type ComicUserPreferences, type ComicUserSettings,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { DictionarySettings } from "./DictionarySettings.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -36,7 +38,7 @@ export function ComicSettingsPage({
   const [prefs, setPrefs] = useState<ComicUserPreferences>({});
   const eligibleVideos = comicVideoOptions(videoModels, prefs.defaultVideoModel);
   const eligibleImages = comicImageOptions(imageModels);
-  const selectedVideo = eligibleVideos.find(model => model.id === prefs.defaultVideoModel)?.id ?? "";
+  const selectedVideo = selectComicVideoModel(videoModels, prefs.defaultVideoModel) ?? "";
   const selectedImage = selectComicImageModel(imageModels, prefs.defaultImageModel);
   useEffect(() => {
     if (settings) setPrefs(settings.preferences);
@@ -149,7 +151,7 @@ export function ComicSettingsPage({
                 {t("默认视频模型")}
                 <select value={selectedVideo} disabled={!eligibleVideos.length}
                   onChange={event => setPrefs(cur => ({ ...cur, defaultVideoModel: event.target.value || null }))}>
-                  <option value="">{t("沿用系统默认")}</option>
+                  {!eligibleVideos.length && <option value="">{t("沿用系统默认")}</option>}
                   {eligibleVideos.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}
                 </select>
               </label>

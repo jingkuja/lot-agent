@@ -40,7 +40,7 @@ const seedanceImage: ReferenceImage = {
 const seedance = { referenceImage: seedanceImage, imagePromptTag: { prefix: "@Image", suffix: "", firstNumber: 1 }, resolution: "720p" } as const;
 const videoModels = [
   {
-    ids: ["doubao-seedance-2-5", "doubao-seedance-2.5", "doubao-seedance-2-5-260628"], label: "Seedance 2.5 标准版",
+    ids: ["doubao-seedance-2-5", "doubao-seedance-2.5", "doubao-seedance-2-5-260628"], label: "Seedance 2.5",
     profile: { ...seedance, shotMaxSeconds: 30, referenceImages: { total: 30 } },
   },
   {
@@ -67,6 +67,12 @@ export function comicVideoOptions<T extends { id: string }>(models: readonly T[]
     const model = matches.find(item => item.id === preferred) ?? matches[0];
     return model ? [{ ...model, label: definition.label }] : [];
   });
+}
+
+/** Video model of a new episode: the preferred one if the account can use it, else Seedance 2.0, else the first listed. */
+export function selectComicVideoModel(models: readonly { id: string }[], preferred?: string | null) {
+  const options = comicVideoOptions(models, preferred);
+  return (options.find(model => model.id === preferred) ?? options.find(model => model.label === "Seedance 2.0") ?? options[0])?.id ?? null;
 }
 
 export function comicVideoProfile(modelId: string | null): ComicVideoProfile | undefined {

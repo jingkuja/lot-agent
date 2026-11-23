@@ -146,7 +146,6 @@ export const messages: Record<string, { en: string; id: string }> = {
     en: "First-frame mode sends the approved first frame only. Use reference mode to include other assets.",
     id: "Mode bingkai pertama hanya mengirim bingkai yang disetujui. Gunakan mode referensi untuk menyertakan aset lain.",
   },
-  "Seedance 2.5 标准版": { en: "Seedance 2.5 Standard", id: "Seedance 2.5 Standar" },
   "无限制出图": { en: "Unrestricted", id: "Tanpa Batas" },
   "当前账号没有可用的漫剧图片模型": { en: "No comic drama image models are available for this account", id: "Akun ini tidak memiliki model gambar komik" },
   "当前账号没有可用的导演文字模型": { en: "No director text model is available for this account", id: "Akun ini tidak memiliki model teks sutradara" },

@@ -69,7 +69,7 @@ import { VirtualPaymentService } from "./payments/service.js";
 import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import {
-  COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicImageTier, comicVideoModel, comicVideoOptions, selectComicImageModel,
+  COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicImageTier, comicVideoModel, selectComicImageModel, selectComicVideoModel,
 } from "@lot-agent/core/comic-drama";
 import { PgComicDramaRepository } from "./comic-drama/repository.js";
 import { PgComicDictionary } from "./comic-drama/dictionary.js";
@@ -550,8 +550,7 @@ async function main() {
       }));
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, canSelectComicVideo, async owner => {
       const [prefs, { catalog }] = await Promise.all([comicSettings.getPreferences(owner), comicModelCatalog(owner)]);
-      const options = comicVideoOptions(catalog?.video ?? [], prefs.defaultVideoModel);
-      return (options.find(item => item.id === prefs.defaultVideoModel) ?? options[0])?.id ?? null;
+      return selectComicVideoModel(catalog?.video ?? [], prefs.defaultVideoModel);
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
