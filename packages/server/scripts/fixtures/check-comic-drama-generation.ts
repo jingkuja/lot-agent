@@ -76,6 +76,10 @@ export async function mountComicGenerationFixture(deps: {
     quotePrice: async owner => owner === deps.owner ? { modelId: "fixture-image", amountMicros: state.price } : null,
     quoteVideoPrice: async (owner, modelId) => owner === deps.owner && [w6Grok, w6Kling].includes(modelId) ?
       { modelId, amountMicros: 500_000, unit: "second" } : null,
+    budgetPricing: async () => ({
+      imageModel: "fixture-image", textModel: null, speechModel: null,
+      predict: async usage => ({ estimatedPoints: usage.video ? 25 * (usage.video.seconds ?? 0) : 20, pricingScheme: "fixture" }),
+    }),
     queue: {
       publishNewTask: async (id, type) => {
         counts.publications++;

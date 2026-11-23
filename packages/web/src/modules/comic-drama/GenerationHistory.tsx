@@ -15,7 +15,7 @@ export function ComicTakeStatus({ take }: { take: ComicImageTake }) {
   const label = take.error === "REAL_PERSON_REJECTED" ? "模型拒绝了真人参考图"
     : take.error === "VIDEO_GATEWAY_FAILED" ? "网关返回错误，可查看回执"
     : take.error === "VIDEO_DOWNLOAD_REQUIRED" ? "视频已生成，待下载"
-    : video && take.state === "ready" ? "视频已入库"
+    : take.creditCheck ? "等待积分检查" : video && take.state === "ready" ? "视频已入库"
     : take.state === "running" && take.cancelRequested ? "正在停止处理" : labels[take.state];
   return <span className="comic-take-status" data-state={take.state}>
     {t(label)}{video && take.state === "running" && !take.cancelRequested ? ` · ${take.progress}%` : ""}

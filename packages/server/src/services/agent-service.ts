@@ -551,7 +551,8 @@ export class AgentService {
    */
   async getUserModelCatalog(
     userId: string,
-    apiKey: string | null
+    apiKey: string | null,
+    signal?: AbortSignal,
   ): Promise<ReturnType<typeof enrichCatalog> | null> {
     const credentialFingerprint = apiKey
       ? createHash("sha256").update(apiKey).digest("hex").slice(0, 16)
@@ -581,7 +582,9 @@ export class AgentService {
       }
       return null;
     }
-    const enriched = enrichCatalog(this.modelCatalog, await this.tokenhub.listModels(apiKey));
+    signal?.throwIfAborted();
+    const raw = signal ? await this.tokenhub.listModels(apiKey, signal) : await this.tokenhub.listModels(apiKey);
+    const enriched = enrichCatalog(this.modelCatalog, raw);
     await this.redis.set(cacheKey, JSON.stringify(enriched), "EX", MODEL_CATALOG_TTL_SEC);
     return enriched;
   }

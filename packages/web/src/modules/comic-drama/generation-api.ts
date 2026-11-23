@@ -1,6 +1,7 @@
 import type {
   ComicCharacterGenerateRequest, ComicCharacterUpload, ComicGenerationPreviewRequest, ComicGenerationQuote, ComicImageRequest, ComicImageTake,
   ComicKeyframeHistory, ComicVideoHistory, ComicVideoTake, ComicVideoReceipt, ComicFrameSaveRequest,
+  ComicEpisodeBudget, ComicEpisodeBudgetInput, ComicVideoCreditPause,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -14,6 +15,11 @@ function uploadImage<T>(path: string, file: File, signal: AbortSignal) {
   return request<T>(root + path, { method: "POST", headers: { "Content-Type": contentType || "application/octet-stream" }, body: file, signal });
 }
 export const comicGenerationApi = {
+  episodeBudget: (id: string, body: ComicEpisodeBudgetInput, signal?: AbortSignal) =>
+    post<ComicEpisodeBudget>(`/series/${id}/episode-budget`, body, signal),
+  creditPauses: (id: string, signal?: AbortSignal) => request<ComicVideoCreditPause[]>(root + `/series/${id}/video-credit-pauses`, { signal }),
+  resumeCredits: (takeId: string, override: boolean) =>
+    post<{ ok: true }>(`/video-takes/${takeId}/resume-credits`, override ? { continueDespiteLowCredits: true } : {}),
   preview: (scope: GenerationScope, input: ComicCharacterUpload | ComicCharacterGenerateRequest | ComicGenerationPreviewRequest, signal?: AbortSignal) =>
     post<ComicGenerationQuote>(`/${scope.resource}/${scope.id}/generation-preview`, input, signal),
   confirm: (scope: GenerationScope, confirmationId: string) =>

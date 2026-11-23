@@ -55,6 +55,7 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAgentRoutes } from "./routes/agents.js";
 import { createTaskRoutes } from "./routes/tasks.js";
 import { createModelRoutes } from "./routes/models.js";
+import { predictModelCost } from "./billing/model-estimate.js";
 import { createAssetRoutes } from "./routes/assets.js";
 import { createUploadRoutes } from "./routes/uploads.js";
 import { createUsageRoutes, summarizeBalance } from "./routes/usage.js";
@@ -562,7 +563,8 @@ async function main() {
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
         `${COMIC_DRAMA_API_ROOT}/series/:id/generate`, `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`,
-        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/frame`,
+        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/frame`, `${COMIC_DRAMA_API_ROOT}/video-takes/:id/resume-credits`,
+        `${COMIC_DRAMA_API_ROOT}/series/:id/episode-budget`,
       ], generationRateLimit);
       const repo = new PgComicGeneration(service.db.pool);
       const pruneQuotes = () => void repo.pruneExpiredQuotes().catch(() => console.warn("[comic-drama] quote cleanup unavailable"));
@@ -573,6 +575,26 @@ async function main() {
         accepting: rollout.accepting,
         quotePrice: quoteComicImagePrice,
         quoteVideoPrice: quoteComicVideoPrice,
+        budgetPricing: async (owner, includeText, signal) => {
+          const [key, prefs] = await Promise.all([
+            service.db.getUserApiKey(owner, service.managedKeysEnabled), comicSettings.getPreferences(owner),
+          ]);
+          const models = key && includeText ? await service.getUserModelCatalog(owner, key, signal).catch(() => null) : null;
+          signal.throwIfAborted();
+          const textModel = models?.llm.find(model => model.id === prefs.defaultTextModel)?.id ?? models?.llm[0]?.id ?? null;
+          let videoCatalog: ReturnType<typeof service.tokenhub.listModels> | undefined;
+          return {
+            imageModel: prefs.defaultImageModel || process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2", textModel,
+            speechModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || null,
+            predict: (usage, deadline) => {
+              if (!key) return Promise.reject(new Error("MODEL_AUTH_REQUIRED"));
+              return predictModelCost({
+                listModels: () => videoCatalog ??= service.tokenhub.listModels(key, deadline),
+                estimateModelCost: service.tokenhub.estimateModelCost.bind(service.tokenhub),
+              }, key, usage, deadline);
+            },
+          };
+        },
       }));
     }
   }

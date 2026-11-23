@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { estimateVideoTokenPoints } from "../billing/video-points-estimate.js";
+import { predictModelCost } from "../billing/model-estimate.js";
 import type { AgentService } from "../services/agent-service.js";
 import { TokenhubClientError, type ModelEstimateRequest } from "../tokenhub/client.js";
 
@@ -43,19 +43,8 @@ export function createModelRoutes(service: AgentService): Hono<{ Variables: Vari
 
     try {
       const { model, input_tokens, output_tokens, cached_input_tokens, image, video, request_parameters } = body;
-      if (video != null) {
-        const catalog = await service.tokenhub.listModels(apiKey, c.req.raw.signal);
-        if (catalog.video_token_models?.includes(model)) {
-          const estimatedPoints = estimateVideoTokenPoints(model, video.resolution, video.seconds);
-          if (image != null) return c.json({ error: "Use one media estimate per request", code: "invalid_estimate_usage" }, 400);
-          if (estimatedPoints == null) {
-            return c.json({ error: "Video estimate requires a resolution and positive duration in seconds", code: "invalid_estimate_usage" }, 400);
-          }
-          return c.json({ model, pricingScheme: "video_token", estimatedPoints, estimatedQuota: null });
-        }
-      }
       const estimate = { model, input_tokens, output_tokens, cached_input_tokens, image, video, request_parameters };
-      return c.json(await service.tokenhub.estimateModelCost(apiKey, estimate, c.req.raw.signal));
+      return c.json(await predictModelCost(service.tokenhub, apiKey, estimate, c.req.raw.signal));
     } catch (err) {
       const status = err instanceof TokenhubClientError ? err.status : undefined;
       switch (status) {

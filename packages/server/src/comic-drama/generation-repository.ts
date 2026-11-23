@@ -40,10 +40,15 @@ const incomplete = "t.status IN ('pending','running','recoverable')";
 const canResumeImageReceipt = "(receipt.state IN ('submitted','completed') OR receipt.state IS NULL)";
 const canResumeReceipt = `CASE WHEN t.video_version IS NOT NULL THEN coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','accepted','output')
   ELSE ${canResumeImageReceipt} END`;
+export const comicBatchCreditPaused = `EXISTS (SELECT 1 FROM ${namespace}.cd_takes paused
+  WHERE paused.owner_id=t.owner_id AND paused.request_id=t.request_id AND paused.credit_check IS NOT NULL)`;
+export const comicVideoCanRunDuringCreditPause = `coalesce(t.submit_state,'unsubmitted') IN ('accepted','output')`;
 export const takeColumns = `t.id,t.target_id AS "targetId",t.request_id AS "requestId",t.media_id AS "mediaId",
   t.input->'target' AS "characterTarget",
   t.input->>'mode' AS mode, t.progress, t.cancel_requested_at IS NOT NULL AS "cancelRequested",
-  (${incomplete} AND NOT (${active}) AND (${canResumeReceipt})) AS "canRecover",
+  (${incomplete} AND NOT (${active}) AND (${canResumeReceipt})
+    AND (${comicVideoCanRunDuringCreditPause} OR NOT ${comicBatchCreditPaused})) AS "canRecover",
+  t.credit_check AS "creditCheck",
   (t.input->>'clipRevision')::int AS "clipRevision",t.created_at AS "createdAt",
   CASE WHEN ${incomplete} AND NOT (${active}) THEN
     CASE WHEN ${canResumeReceipt} THEN 'recoverable' WHEN receipt.state='failed' THEN 'failed' ELSE 'unknown' END

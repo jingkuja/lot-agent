@@ -5,12 +5,13 @@ import type { Pool } from "pg";
 import { MAX_IMAGE_EDIT_REFERENCES } from "@lot-agent/core";
 import {
   buildComicGenerationInput, comicCharacterGenerateSchema, comicDramaIdSchema, comicDramaRevisionSchema, comicGenerationConfirmSchema,
-  comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicKeyframeSelectSchema, comicTakeReleaseSchema, comicVideoProfile,
-  type ComicCharacterGenerateRequest, type ComicCharacterUpload, type ComicGenerationPreviewRequest, type ComicGenerationImage,
+  comicEpisodeBudgetSchema, comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicKeyframeSelectSchema, comicTakeReleaseSchema, comicVideoProfile,
+  type ComicCharacterGenerateRequest, type ComicCharacterUpload, type ComicDramaDetail, type ComicGenerationPreviewRequest, type ComicGenerationImage,
   type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicSkippedInvalidReference, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK } from "../jobs/task-queues.js";
 import { assertComicDramaCompliance } from "./compliance.js";
+import { estimateComicEpisode, type EpisodeBudgetPricing } from "./episode-budget.js";
 import { readComicDictionary } from "./dictionary.js";
 import { type ComicGenerationScope, type ComicPrice, type FrozenVisualReference, PgComicGeneration } from "./generation-repository.js";
 import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction } from "./library-db.js";
@@ -46,19 +47,15 @@ type Dependencies = {
   quoteVideoPrice?: (owner: string, model: string) => Promise<ComicPrice | null>;
   queue: GenerationQueue;
   accepting?: () => void;
+  budgetPricing?: (owner: string, includeText: boolean, signal: AbortSignal) => Promise<EpisodeBudgetPricing>;
 };
 
-export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
-  const repo = deps.repo ?? new PgComicGeneration(deps.pool);
+function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
   const video = deps.video ?? new PgComicVideo(deps.pool);
   const settings = deps.settings ?? new PgComicSettings(deps.pool);
   const readStyles = deps.readStyleDictionary ?? ((owner: string) => readComicDictionary(deps.pool, owner, "style"));
 
-  return async function previewSeries(
-    owner: string, scope: ComicGenerationScope, body: ComicGenerationPreviewRequest,
-  ): Promise<ComicGenerationQuote> {
-    const detail = await deps.series.get(owner, scope.id);
-    if (detail.series.archivedAt) libraryMissing();
+  return async (owner: string, detail: ComicDramaDetail, body: ComicGenerationPreviewRequest, modelId: Promise<string>) => {
     if (detail.series.revision !== body.expectedSeriesRevision) throw new ComicLibraryError("QUOTE_STALE", 409);
     const clips = body.targets.map(target => {
       const clip = detail.clips.find(clip => clip.id === target.clipId);
@@ -76,17 +73,16 @@ export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
       ]),
     ]);
     const isVideo = body.mode !== "keyframe";
-    const videoModel = detail.series.videoModel;
     const explicitRefs = body.visualReferences ?? [];
     const persistedSpecs = clips.flatMap(clip => [
       ...(clip.draft.sceneRef ? [{ kind: "scene" as const, materialId: clip.draft.sceneRef.materialId, mediaId: clip.draft.sceneRef.mediaId }] : []),
       ...(clip.draft.propRefs ?? []).map(ref => ({ kind: "prop" as const, materialId: ref.materialId, mediaId: ref.mediaId })),
     ]);
     const uniquePersisted = [...new Map(persistedSpecs.map(ref => [visualReferenceKey(ref), ref])).values()];
-    const [price, styles, frames, explicitVisualRefs, persistedInspection, stylePreset] = await Promise.all([
-      isVideo ? videoModel && deps.quoteVideoPrice ? deps.quoteVideoPrice(owner, videoModel) : null : deps.quotePrice(owner),
+    const [model, styles, frames, explicitVisualRefs, persistedInspection, stylePreset] = await Promise.all([
+      modelId,
       readStyles(owner),
-      isVideo ? video.frames(owner, scope.id, clips.map(clip => clip.id)) : null,
+      isVideo ? video.frames(owner, detail.series.id, clips.map(clip => clip.id)) : null,
       video.references(owner, explicitRefs),
       video.inspectReferences(owner, uniquePersisted),
       explicitRefs.some(ref => ref.kind === "style") ? Promise.resolve(null) : settings.getStylePreset(owner, detail.series.styleKey),
@@ -147,11 +143,11 @@ export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
       }
       if (styleRef && !seenMedia.has(styleRef.mediaId)) clipRefs.push(styleRef);
       const built = buildComicGenerationInput({ series: detail.series, clip, cast: detail.cast,
-        modelId: isVideo ? videoModel ?? "" : price?.modelId ?? "unpriced",
+        modelId: model,
         styleDescription, mode: body.mode, firstFrame: versions?.frame ?? undefined, visualReferences: clipRefs });
       if (!built.ok) {
         const reason = built.issues[0].code;
-        const referenceLimit = reason === "REFERENCE_LIMIT" ? comicVideoProfile(videoModel)?.referenceImages.total : undefined;
+        const referenceLimit = reason === "REFERENCE_LIMIT" ? comicVideoProfile(model)?.referenceImages.total : undefined;
         skipped.push({ clipId: clip.id, reason, ...(referenceLimit ? { referenceLimit } : {}) });
       } else if (!isVideo && built.input.references.length > MAX_IMAGE_EDIT_REFERENCES) {
         skipped.push({ clipId: clip.id, reason: "REFERENCE_LIMIT", referenceLimit: MAX_IMAGE_EDIT_REFERENCES });
@@ -164,10 +160,26 @@ export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
         inputs.push(built.input);
       }
     }
+    return { inputs, skipped, replaceAdopted, visualReferences: [...frozenVisualMap.values()] };
+  };
+}
+
+export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
+  const repo = deps.repo ?? new PgComicGeneration(deps.pool);
+  const resolve = createSeriesInputResolver(deps);
+  return async (owner: string, scope: ComicGenerationScope, body: ComicGenerationPreviewRequest): Promise<ComicGenerationQuote> => {
+    const detail = await deps.series.get(owner, scope.id);
+    if (detail.series.archivedAt) libraryMissing();
+    const isVideo = body.mode !== "keyframe";
+    const videoModel = detail.series.videoModel;
+    const getPrice = isVideo ? videoModel && deps.quoteVideoPrice ? deps.quoteVideoPrice(owner, videoModel) : Promise.resolve(null) : deps.quotePrice(owner);
+    const [price, { inputs, skipped, replaceAdopted, visualReferences }] = await Promise.all([
+      getPrice, resolve(owner, detail, body, getPrice.then(price => isVideo ? videoModel ?? "" : price?.modelId ?? "unpriced")),
+    ]);
     if (price && isVideo && inputs.some(input => input.references.length || ("firstFrame" in input && input.firstFrame))) {
       deps.media.assertVideoReferenceOrigin();
     }
-    return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted, [...frozenVisualMap.values()]);
+    return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted, visualReferences);
   };
 }
 
@@ -178,6 +190,7 @@ export function createComicGenerationRoutes(deps: Dependencies) {
   const settings = new PgComicSettings(pool);
   const director = new PgComicDirector(pool, series);
   const previewSeries = createComicSeriesPreviewer({ ...deps, repo, video, settings });
+  const resolveSeriesInputs = createSeriesInputResolver({ ...deps, video, settings });
   const app = new Hono<{ Variables: { userId: string } }>();
   const limit = bodyLimit({ maxSize: 16 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
   app.onError((error, c) => {
@@ -195,6 +208,21 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     if (!result.success) libraryMissing();
     return result.data;
   };
+  if (deps.budgetPricing) {
+    const budgetPricing = deps.budgetPricing;
+    app.post("/series/:id/episode-budget", limit, async c => {
+      const body = comicEpisodeBudgetSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
+      const owner = c.get("userId");
+      const detail = await series.get(owner, pathId(c.req.param("id")));
+      if (detail.series.revision !== body.data.expectedRevision) throw new ComicLibraryError("QUOTE_STALE", 409);
+      const signal = c.req.raw.signal;
+      const pricing = await budgetPricing(owner, !!body.data.text, signal);
+      c.header("Cache-Control", "private, no-store");
+      return c.json(await estimateComicEpisode(detail, body.data, pricing,
+        (preview, model) => resolveSeriesInputs(owner, detail, preview, Promise.resolve(model)), signal));
+    });
+  }
   async function previewCharacter(owner: string, scope: ComicGenerationScope, req: ComicCharacterGenerateRequest) {
     const target: ComicCharacterUpload = req.kind === "slot"
       ? { kind: "slot", key: req.key, outfitId: req.outfitId }
@@ -357,6 +385,6 @@ export function createComicGenerationRoutes(deps: Dependencies) {
     const { taskId: _taskId, slot: _slot, ...updated } = await repo.imageTake(owner, take.id);
     return c.json(updated);
   });
-  app.route("/", createComicVideoRoutes({ repo: video, media, queue, library }));
+  app.route("/", createComicVideoRoutes({ repo: video, media, queue, library, accepting: deps.accepting }));
   return app;
 }

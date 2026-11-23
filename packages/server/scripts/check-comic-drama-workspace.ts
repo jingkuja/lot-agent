@@ -409,6 +409,14 @@ try {
           await open.click();
           await page.waitForURL("**/series/" + videoEpisode);
           await page.getByRole("button", { name: "用已确认首帧", exact: true }).waitFor();
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          await page.getByRole("button", { name: "整集费用预估", exact: true }).click();
+          const budget = page.getByRole("dialog", { name: "整集费用预估" });
+          await budget.getByText("可估积分小计", { exact: true }).waitFor();
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          await budget.getByRole("button", { name: "关闭", exact: true }).click();
+          await page.setViewportSize({ width: 1440, height: 900 });
           await page.getByLabel("为已采用的分镜生成新版").check();
           const beforeVideo = generation.video.submitted.length;
           const previewVideo = page.getByRole("button", { name: "预览视频费用", exact: true });
@@ -418,7 +426,16 @@ try {
           await fee.getByRole("button", { name: "取消", exact: true }).click();
           assert.equal(generation.video.submitted.length, beforeVideo);
           await previewVideo.click();
+          generation.video.creditBalances.set("W6 ready", 80);
           await fee.getByRole("button", { name: "确认费用并生成", exact: true }).click();
+          const creditWarning = page.getByRole("region", { name: "视频积分检查" });
+          await creditWarning.getByText("当前可用 80 积分，预计需要 100 积分").waitFor();
+          assert.equal(generation.video.submitted.length, beforeVideo);
+          await creditWarning.getByRole("button", { name: "去充值", exact: true }).click();
+          const topup = page.getByRole("dialog", { name: "积分充值" });
+          await topup.getByRole("button", { name: "关闭", exact: true }).click();
+          generation.video.creditBalances.set("W6 ready", 100);
+          await creditWarning.getByRole("button", { name: "重新检查积分", exact: true }).click();
           const newest = page.locator(".comic-video-card").filter({ hasText: "版本 2" });
           await newest.getByText("视频已入库", { exact: true }).waitFor();
           await newest.getByRole("button", { name: "采用此版本", exact: true }).click();
@@ -455,6 +472,7 @@ try {
           await page.goto(deepLink);
           await page.setViewportSize({ width: 1440, height: 900 });
           console.log("PASS W6 Web: adopted filter, reopen clip, video quote cancel, regeneration, playback, adoption and frame save");
+          console.log("PASS budget and credit Web: narrow dark budget, low balance notice, recharge entry and recheck");
           console.log("PASS W7 Web: workspace and history selection, exact-version reload, and narrow editing preview");
         }
 

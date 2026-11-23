@@ -54,6 +54,7 @@ import { PgComicLibrary } from "../comic-drama/library-repository.js";
 import { ComicMediaLibrary } from "../comic-drama/media-library.js";
 import { runComicImageGeneration } from "../comic-drama/generation-worker.js";
 import { runComicVideoGeneration } from "../comic-drama/video-worker.js";
+import { createComicVideoCreditCheck } from "../comic-drama/credit-check.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Worker file is at {src,dist}/workers/index.js → repo root is 4 levels up
@@ -170,7 +171,8 @@ async function main() {
   const tokenhub = new TokenhubClient(
     process.env.TOKENHUB_BASE_URL ?? "https://tokenhub.todoucloud.com/api/agent-market",
     undefined,
-    process.env.NEW_API_AGENT_KEY ?? ""
+    process.env.NEW_API_AGENT_KEY ?? "",
+    process.env.NEW_API_INTERNAL_BASE_URL,
   );
   const managedKeysEnabled = process.env.DEBUG !== "1" || process.env.NEW_API_MANAGED_KEYS === "1";
 
@@ -360,6 +362,7 @@ async function main() {
   }, job, ctl.signal));
   queue.process(COMIC_VIDEO_TASK, (job, ctl) => runComicVideoGeneration({
     pool: db.pool, media: comicMedia,
+    checkCredits: createComicVideoCreditCheck(db, tokenhub, managedKeysEnabled),
     provider: async (owner, model) => {
       const apiKey = await db.getUserApiKey(owner, managedKeysEnabled);
       if (!apiKey) throw new Error("MODEL_AUTH_REQUIRED");

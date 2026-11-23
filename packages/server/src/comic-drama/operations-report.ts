@@ -92,7 +92,7 @@ export const COMIC_RECONCILE_SQL = `SELECT r.id AS request_id,t.id AS take_id,r.
   END AS error_category,
   left(regexp_replace(coalesce(t.gateway_request_id,i.gateway_request_id,''),'[^A-Za-z0-9_:.@-]','','g'),150) AS gateway_request_id
   FROM ${takes}
-    AND (t.status IN ('unknown','recoverable','released')
+    AND t.credit_check IS NULL AND (t.status IN ('unknown','recoverable','released')
       OR t.submit_state='unknown'
       OR t.error='VIDEO_GATEWAY_FAILED'
       OR t.gateway_http_status>=500)

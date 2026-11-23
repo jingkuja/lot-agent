@@ -1,7 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import { fetchPublicBinary, ProviderError, type VideoGenerationProvider, type VideoGenerationRequest } from "@lot-agent/core";
+import { COMIC_VIDEO_RESOLUTION } from "@lot-agent/core/comic-drama";
 import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
+import type { createComicVideoCreditCheck } from "./credit-check.js";
 import { withComicGenerationLock } from "./generation-worker.js";
 import { COMIC_VIDEO_MAX_BYTES, type ComicMediaLibrary } from "./media-library.js";
 import { PgComicVideo, type ComicVideoWork } from "./video-repository.js";
@@ -12,6 +14,7 @@ type Dependencies = {
   pool: Pool;
   media: ComicMediaLibrary;
   provider: (owner: string, model: string) => Promise<VideoGenerationProvider>;
+  checkCredits: ReturnType<typeof createComicVideoCreditCheck>;
   download?: typeof fetchPublicBinary;
   pollIntervalMs?: number;
   cancelIntervalMs?: number;
@@ -30,25 +33,37 @@ async function prepareRequest(media: ComicMediaLibrary, owner: string, { input }
   ]);
   return {
     model: input.modelId, prompt: input.prompt, durationSec: input.durationMs / 1000,
-    size: sizes[input.aspectRatio], ratio: input.aspectRatio, resolution: "720p", quality: "720p", generate_audio: false,
+    size: sizes[input.aspectRatio], ratio: input.aspectRatio, resolution: COMIC_VIDEO_RESOLUTION, quality: COMIC_VIDEO_RESOLUTION, generate_audio: false,
     ...(refs.length ? { input_reference: refs } : {}), ...(first ? { first_frame: first } : {}),
   };
 }
 
 async function submit(
-  repo: PgComicVideo, deps: Dependencies, owner: string, take: ComicVideoWork, provider: VideoGenerationProvider,
-  signal: AbortSignal, takeSignal: AbortSignal,
+  repo: PgComicVideo, deps: Dependencies, owner: string, take: ComicVideoWork, getProvider: () => Promise<VideoGenerationProvider>,
+  signal: AbortSignal, takeSignal: AbortSignal, creditOverride: boolean,
 ) {
   deps.media.assertAvailable();
   const request = await prepareRequest(deps.media, owner, take);
+  takeSignal.throwIfAborted();
+  const check = await deps.checkCredits(owner, take.input, takeSignal);
+  takeSignal.throwIfAborted();
+  if (check && (check.reason !== "insufficient" || !creditOverride)) {
+    return await repo.pauseForCredits(owner, take.id, check) ? { paused: true } as const : undefined;
+  }
+  const provider = await getProvider();
   takeSignal.throwIfAborted();
   if (!await repo.claim(owner, take.id)) return;
   // A take cancel after this claim stops local work once the provider response is recorded.
   let created;
   try { created = await provider.create(request, { signal }); }
   catch (error) {
-    const rejected = definiteRejection(error) || gatewayFailure(error);
     const detail = error instanceof ProviderError ? error : null;
+    // TokenHub returns this code from video admission or pre-consumption before it calls the vendor.
+    if (detail?.code === "HTTP_ERROR" && detail.phase === "create"
+      && detail.httpStatus === 403 && detail.vendorCode === "insufficient_user_quota") {
+      return await repo.pauseAfterGatewayCreditRejection(owner, take.id, detail.gatewayRequestId) ? { paused: true } as const : undefined;
+    }
+    const rejected = definiteRejection(error) || gatewayFailure(error);
     const code = rejected ? gatewayFailure(error) ? "VIDEO_GATEWAY_FAILED" : detail?.code === "REAL_PERSON_REJECTED"
       ? "REAL_PERSON_REJECTED" : "VIDEO_GENERATION_REJECTED" : "VIDEO_SUBMISSION_UNKNOWN";
     await repo.submissionFailed(owner, take.id, rejected, code, detail?.gatewayRequestId, detail?.httpStatus);
@@ -60,7 +75,7 @@ async function submit(
     return;
   }
   await repo.accepted(owner, take.id, created.taskId, trace);
-  return created.taskId;
+  return { vendorId: created.taskId };
 }
 
 async function takeWork(deps: Dependencies, repo: PgComicVideo, owner: string, take: ComicVideoWork, signal: AbortSignal) {
@@ -101,7 +116,10 @@ async function takeWork(deps: Dependencies, repo: PgComicVideo, owner: string, t
   try {
     await observe();
     takeSignal.throwIfAborted();
-    const vendor = checkpoint.vendorId ?? await submit(repo, deps, owner, take, await getProvider(), signal, takeSignal);
+    const submission = checkpoint.state === "unsubmitted"
+      ? await submit(repo, deps, owner, take, getProvider, signal, takeSignal, checkpoint.creditOverride) : undefined;
+    if (submission && "paused" in submission) return "credit-paused";
+    const vendor = checkpoint.vendorId ?? submission?.vendorId;
     if (!vendor) return;
     const url = checkpoint.outputUrl ?? await lookup(vendor);
     if (!url) return;
@@ -136,7 +154,7 @@ export async function runComicVideoGeneration(deps: Dependencies, job: Job, sign
     const takes = await repo.work(job.userId, job.id);
     for (const take of takes) {
       signal.throwIfAborted();
-      await takeWork(deps, repo, job.userId, take, signal);
+      if (await takeWork(deps, repo, job.userId, take, signal) === "credit-paused") break;
     }
     return { takeCount: takes.length };
   });

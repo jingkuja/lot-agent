@@ -3,7 +3,7 @@ import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, marketingReferenceImag
 import { comicCastAsset, type ComicSeriesCast } from "./cast.js";
 import { comicCharacterUpload, comicMaterialInput, comicSystemDictionary } from "./library.js";
 import type { ComicCharacterUpload } from "./library.js";
-import type { ComicDramaClip, ComicDramaSeries } from "./index.js";
+import type { ComicDramaClip, ComicDramaSeries, ComicEpisodeCostSummary } from "./index.js";
 
 const id = z.string().uuid().transform(value => value.toLowerCase());
 const revision = z.number().int().min(1).max(2_147_483_647);
@@ -103,6 +103,32 @@ export const comicVideoAdoptSchema = z.object({
   expectedSelectionRevision: revision,
 }).strict();
 export const comicTakeReleaseSchema = z.object({ acknowledgePossibleCharge: z.literal(true) }).strict();
+export const comicVideoCreditResumeSchema = z.object({ continueDespiteLowCredits: z.literal(true).optional() }).strict();
+export type ComicVideoCreditCheck =
+  | { reason: "insufficient"; availablePoints: number; requiredPoints: number }
+  | { reason: "gateway-insufficient" }
+  | { reason: "unavailable" };
+export type ComicVideoCreditPause = { takeId: string; clipId: string; canResume: boolean; check: ComicVideoCreditCheck };
+export const COMIC_VIDEO_RESOLUTION = "720p";
+export const COMIC_IMAGE_SIZES = { "9:16": "864x1536", "16:9": "1536x864", "1:1": "1024x1024" } as const;
+const plannedCount = z.number().int().min(0).max(60).optional();
+export const comicEpisodeBudgetSchema = z.object({
+  expectedRevision: revision,
+  videoMode: z.enum(["from_keyframe", "references"]).default("from_keyframe"),
+  redoVideos: z.array(id).max(60).optional(),
+  characterImages: plannedCount, materialImages: plannedCount, speechLines: plannedCount,
+  text: z.object({ inputTokens: z.number().int().min(0).max(1_000_000), outputTokens: z.number().int().min(0).max(100_000) }).strict().optional(),
+}).strict();
+export type ComicEpisodeBudgetInput = z.input<typeof comicEpisodeBudgetSchema>;
+export type ComicEpisodeBudgetLine = {
+  kind: "keyframe" | "video" | "character" | "material" | "text" | "speech";
+  modelId: string | null; clipId?: string; quantity: number; inputTokens?: number; outputTokens?: number;
+  estimatedPoints: number | null;
+};
+export type ComicEpisodeBudget = {
+  revision: number; items: ComicEpisodeBudgetLine[]; knownPoints: number; unverifiedCount: number;
+  costs?: Omit<ComicEpisodeCostSummary, "remainingEstimate">;
+};
 export const comicFrameSaveSchema = z.object({
   timeMs: z.number().int().min(0).max(60_000),
   destination: z.discriminatedUnion("kind", [
@@ -132,6 +158,7 @@ export type ComicTake = {
   progress: number;
   cancelRequested: boolean;
   canRecover: boolean;
+  creditCheck?: ComicVideoCreditCheck | null;
 };
 export type ComicGenerationRequest = {
   id: string; taskId: string; kind: "image" | "video"; active: boolean; takes: ComicTake[];

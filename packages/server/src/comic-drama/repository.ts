@@ -10,6 +10,7 @@ import {
 
 import { editSeriesCast, readSeriesCast, requireClipCast } from "./cast-store.js";
 import { readComicDictionary, requireComicChoice } from "./dictionary.js";
+import { comicBatchCreditPaused } from "./generation-repository.js";
 import type { ComicQuery } from "./library-db.js";
 import { comicQuoteCurrency } from "./pricing.js";
 
@@ -363,9 +364,10 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     let completedCount = 0;
     const { rows: [genRow] } = await client.query<{ generating: number }>(
       `SELECT count(DISTINCT t.target_id)::int AS generating
-       FROM lot_comic_drama.cd_takes t
-       JOIN lot_comic_drama.cd_generation_requests r ON (r.owner_id, r.id) = (t.owner_id, t.request_id)
-       WHERE r.owner_id=$1 AND r.series_id=$2 AND t.status IN ('pending', 'running')`,
+        FROM lot_comic_drama.cd_takes t
+        JOIN lot_comic_drama.cd_generation_requests r ON (r.owner_id, r.id) = (t.owner_id, t.request_id)
+        JOIN tasks job ON job.id=r.task_id AND job.user_id=r.owner_id::text
+        WHERE r.owner_id=$1 AND r.series_id=$2 AND t.status IN ('pending', 'running') AND job.status IN ('pending','running')`,
       [owner, seriesId],
     );
     const asState = (value: string | null): ComicClipProgress["keyframeState"] => {
@@ -421,7 +423,8 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       `SELECT (r.frozen->'price'->>'amountMicros')::double precision AS "amountMicros",
          r.frozen->'price'->>'unit' AS unit,
          (t.input->>'durationMs')::int AS "durationMs",
-         CASE WHEN t.status IN ('pending','running','recoverable') AND coalesce(job.status,'failed') NOT IN ('pending','running') THEN
+          CASE WHEN t.submit_state IS NULL AND t.status IN ('pending','running','recoverable') AND ${comicBatchCreditPaused} THEN 'pending'
+            WHEN t.status IN ('pending','running','recoverable') AND coalesce(job.status,'failed') NOT IN ('pending','running') THEN
            CASE WHEN (CASE WHEN t.video_version IS NOT NULL
              THEN coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','accepted','output')
              ELSE (receipt.state IN ('submitted','completed') OR receipt.state IS NULL) END)

@@ -1,10 +1,13 @@
 import type { Pool } from "pg";
 import {
   comicDramaIdSchema, comicVideoTakeInput, type ComicFrozenGenerationInput, type ComicGenerationPreviewRequest, type ComicGenerationReference,
-  type ComicTakeState, type ComicVideoHistory, type ComicVideoReceipt, type ComicVideoTake, type StoredComicMedia,
+  type ComicTakeState, type ComicVideoCreditCheck, type ComicVideoCreditPause, type ComicVideoHistory, type ComicVideoReceipt,
+  type ComicVideoTake, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_VIDEO_TASK } from "../jobs/task-queues.js";
-import { comicJobLockKey, joinTakes, PgComicGeneration, takeColumns } from "./generation-repository.js";
+import {
+  comicBatchCreditPaused, comicJobLockKey, comicVideoCanRunDuringCreditPause, joinTakes, PgComicGeneration, takeColumns,
+} from "./generation-repository.js";
 import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
 
@@ -22,7 +25,7 @@ const joinVideos = `${joinTakes} JOIN ${tables}.cd_series s ON (s.owner_id,s.id)
 const receiptColumns = `coalesce(t.submit_state,'unsubmitted') AS state, t.vendor_id AS "vendorId",
   t.gateway_request_id AS "gatewayRequestId",t.gateway_http_status AS "httpStatus"`;
 
-type VideoCheckpoint = ComicVideoReceipt & { outputUrl: string | null };
+type VideoCheckpoint = ComicVideoReceipt & { outputUrl: string | null; creditOverride: boolean };
 export type ComicVideoWork = { id: string; input: ComicFrozenGenerationInput };
 export type ResolvedVisualReference = ComicGenerationReference & {
   kind: "style" | "scene" | "prop";
@@ -231,7 +234,8 @@ export class PgComicVideo {
       const parent = await db.query("SELECT 1 FROM tasks WHERE id=$1 AND user_id=$2 AND type=$3 FOR UPDATE", [taskId, owner, COMIC_VIDEO_TASK]);
       if (!parent.rowCount) libraryMissing();
       const { rowCount } = await db.query(`UPDATE ${tables}.cd_takes t SET cancel_requested_at=coalesce(t.cancel_requested_at,now()),
-        status=CASE WHEN t.submit_state IS NULL THEN 'cancelled' ELSE t.status END FROM ${tables}.cd_generation_requests r
+        status=CASE WHEN t.submit_state IS NULL THEN 'cancelled' ELSE t.status END,credit_check=NULL,credit_override=false
+        FROM ${tables}.cd_generation_requests r
         WHERE (t.owner_id,t.request_id)=(r.owner_id,r.id) AND r.task_id=$3 AND t.owner_id=$1 AND t.id=$2 AND t.video_version IS NOT NULL
         AND t.status IN ('pending','running','recoverable','cancelled') AND coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','submitting','accepted','output')`,
       [owner, id, taskId]);
@@ -263,25 +267,72 @@ export class PgComicVideo {
   async prepareResume(owner: string, id: string, taskId: string) {
     return libraryTransaction(this.pool, async db => {
       if (!await this.tryTaskLock(db, taskId)) return false;
-      const changed = await db.query(`UPDATE tasks SET status='pending',attempts=0,stage=NULL,error=NULL,error_code=NULL,updated_at=now()
-        WHERE id=$1 AND user_id=$2 AND type=$3 AND status IN ('failed','cancelled','succeeded') RETURNING id`, [taskId, owner, COMIC_VIDEO_TASK]);
+      const changed = await db.query(`UPDATE tasks SET status='pending',attempts=0,stage=NULL,error=NULL,error_code=NULL,updated_at=now(),
+        input=jsonb_set(input,'{recoveryTakeId}',to_jsonb($4::text))
+        WHERE id=$1 AND user_id=$2 AND type=$3 AND status IN ('failed','cancelled','succeeded')`, [taskId, owner, COMIC_VIDEO_TASK, id]);
       if (!changed.rowCount) return false;
       const queued = await db.query(`UPDATE ${tables}.cd_takes t SET status='pending',cancel_requested_at=NULL,error=NULL
         FROM ${tables}.cd_generation_requests r WHERE (t.owner_id,t.request_id)=(r.owner_id,r.id) AND r.task_id=$1
         AND t.owner_id=$2 AND t.id=$3 AND t.video_version IS NOT NULL AND t.status IN ('pending','running','recoverable')
-        AND coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','accepted','output')`, [taskId, owner, id]);
+        AND coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','accepted','output')
+        AND (${comicVideoCanRunDuringCreditPause} OR NOT ${comicBatchCreditPaused})`, [taskId, owner, id]);
       if (!queued.rowCount) throw new ComicLibraryError("RECOVERY_UNAVAILABLE", 409);
+      // A credit resume still needs the pending siblings of a paused take.
       await db.query(`UPDATE ${tables}.cd_takes t SET
         status=CASE WHEN t.submit_state IN ('unknown','submitting') THEN 'unknown' ELSE 'recoverable' END
         FROM ${tables}.cd_generation_requests r WHERE (t.owner_id,t.request_id)=(r.owner_id,r.id) AND r.task_id=$1
-        AND t.owner_id=$2 AND t.id<>$3 AND t.status IN ('pending','running')`, [taskId, owner, id]);
+        AND t.owner_id=$2 AND t.id<>$3 AND t.status IN ('pending','running') AND NOT ${comicBatchCreditPaused}`, [taskId, owner, id]);
+      return true;
+    });
+  }
+
+  async creditPauses(owner: string, seriesId: string): Promise<ComicVideoCreditPause[]> {
+    const { rows } = await this.pool.query<ComicVideoCreditPause>(`SELECT t.id AS "takeId",t.target_id AS "clipId",t.credit_check AS "check",
+      job.status IN ('succeeded','failed','cancelled') AS "canResume" ${joinTakes}
+      WHERE t.owner_id=$1 AND r.series_id=$2 AND t.credit_check IS NOT NULL
+      AND job.type=$3 ORDER BY t.created_at,t.slot`, [owner, seriesId, COMIC_VIDEO_TASK]);
+    return rows;
+  }
+
+  async pauseForCredits(owner: string, id: string, check: ComicVideoCreditCheck) {
+    const { rowCount } = await this.pool.query(`UPDATE ${tables}.cd_takes SET status='recoverable',credit_check=$3,credit_override=false
+      WHERE owner_id=$1 AND id=$2 AND video_version IS NOT NULL AND status='running' AND submit_state IS NULL
+        AND cancel_requested_at IS NULL`, [owner, id, check]);
+    return !!rowCount;
+  }
+
+  async pauseAfterGatewayCreditRejection(owner: string, id: string, trace?: string) {
+    const { rows } = await this.pool.query<{ paused: boolean }>(`UPDATE ${tables}.cd_takes
+      SET status=CASE WHEN cancel_requested_at IS NULL THEN 'recoverable' ELSE 'cancelled' END,
+        credit_check=CASE WHEN cancel_requested_at IS NULL THEN $3::jsonb END,credit_override=false,
+        submit_state=NULL,progress=0,gateway_request_id=$4,gateway_http_status=403
+      WHERE owner_id=$1 AND id=$2 AND video_version IS NOT NULL AND status='running' AND submit_state='submitting'
+      RETURNING credit_check IS NOT NULL AS paused`, [owner, id, { reason: "gateway-insufficient" }, trace ?? null]);
+    return rows[0]?.paused ?? false;
+  }
+
+  async resumeCredits(owner: string, id: string, taskId: string, override: boolean) {
+    return libraryTransaction(this.pool, async db => {
+      if (!await this.tryTaskLock(db, taskId)) return false;
+      const task = await db.query(`UPDATE tasks SET status='pending',attempts=0,stage=NULL,error=NULL,error_code=NULL,updated_at=now(),
+        input=input-'recoveryTakeId'
+        WHERE id=$1 AND user_id=$2 AND type=$3 AND status IN ('failed','cancelled','succeeded')`, [taskId, owner, COMIC_VIDEO_TASK]);
+      if (!task.rowCount) return false;
+      const resumed = await db.query(`UPDATE ${tables}.cd_takes t SET status='pending',credit_check=NULL,credit_override=$4,error=NULL
+        FROM ${tables}.cd_generation_requests r WHERE (r.owner_id,r.id)=(t.owner_id,t.request_id) AND r.task_id=$1
+        AND t.owner_id=$2 AND t.id=$3 AND t.status='recoverable' AND t.video_version IS NOT NULL AND t.submit_state IS NULL
+        AND t.cancel_requested_at IS NULL AND t.credit_check IS NOT NULL AND (NOT $4 OR t.credit_check->>'reason'='insufficient')`,
+      [taskId, owner, id, override]);
+      if (!resumed.rowCount) throw new ComicLibraryError("RECOVERY_UNAVAILABLE", 409);
       return true;
     });
   }
 
   async work(owner: string, taskId: string): Promise<ComicVideoWork[]> {
     const { rows } = await this.pool.query<{ id: string; input: unknown }>(`SELECT t.id,t.input ${joinTakes}
-      WHERE t.owner_id=$1 AND job.id=$2 AND job.type=$3 AND job.status='running' AND t.status IN ('pending','running') ORDER BY t.slot`,
+      WHERE t.owner_id=$1 AND job.id=$2 AND job.type=$3 AND job.status='running' AND t.status IN ('pending','running')
+      AND (job.input->>'recoveryTakeId' IS NULL OR job.input->>'recoveryTakeId'=t.id::text)
+      AND (${comicVideoCanRunDuringCreditPause} OR NOT ${comicBatchCreditPaused}) ORDER BY t.slot`,
     [owner, taskId, COMIC_VIDEO_TASK]);
     return rows.map(({ id, input }) => ({ id, input: comicVideoTakeInput.parse(input) }));
   }
@@ -289,12 +340,14 @@ export class PgComicVideo {
   async start(owner: string, id: string) {
     const { rows } = await this.pool.query<VideoCheckpoint>(`UPDATE ${tables}.cd_takes t SET status='running'
       WHERE t.owner_id=$1 AND t.id=$2 AND t.video_version IS NOT NULL AND t.status IN ('pending','running')
-      RETURNING ${receiptColumns},t.output_url AS "outputUrl"`, [owner, id]);
+      RETURNING ${receiptColumns},t.output_url AS "outputUrl",t.credit_override AS "creditOverride"`, [owner, id]);
     return rows[0];
   }
 
   async claim(owner: string, id: string) {
-    const { rowCount } = await this.pool.query(`UPDATE ${tables}.cd_takes t SET submit_state='submitting',progress=1 FROM ${tables}.cd_generation_requests r
+    const { rowCount } = await this.pool.query(`UPDATE ${tables}.cd_takes t SET submit_state='submitting',progress=1,credit_override=false,
+      gateway_request_id=NULL,gateway_http_status=NULL
+      FROM ${tables}.cd_generation_requests r
       JOIN tasks job ON job.id=r.task_id AND job.user_id=r.owner_id::text WHERE (t.owner_id,t.request_id)=(r.owner_id,r.id)
       AND t.owner_id=$1 AND t.id=$2 AND t.status='running' AND t.video_version IS NOT NULL AND t.cancel_requested_at IS NULL
       AND t.submit_state IS NULL AND job.status='running'`, [owner, id]);

@@ -9,6 +9,7 @@ import { OpenaiVideoAdapter, ProviderError, type VideoGenerationProvider } from 
 import {
   COMIC_DRAMA_API_ROOT, type ComicDramaClip, type ComicDramaContent, type ComicDramaDetail, type ComicGenerationMode,
   type ComicGenerationQuote, type ComicGenerationRequest, type ComicVideoHistory, type ComicVideoReceipt, type ComicVideoTake,
+  type ComicEpisodeBudget, type ComicVideoCreditPause,
 } from "@lot-agent/core/comic-drama";
 import type { ComicMediaLibrary } from "../../src/comic-drama/media-library.js";
 import { runComicVideoGeneration } from "../../src/comic-drama/video-worker.js";
@@ -34,6 +35,8 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
   const polls: string[] = [];
   const downloads: string[] = [];
   const state = { disconnect: false, badDownload: false, expireDownload: false, waiting: false, releasePoll: false };
+  const creditBalances = new Map<string, number | null>();
+  const gatewayCreditBlocks = new Set<string>();
   const provider: VideoGenerationProvider = {
     async create(req) {
       const model = req.model ?? "";
@@ -52,6 +55,9 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
       assert.equal(request.size, "720x1280");
       assert.deepEqual(request.metadata, { resolution: "720p" });
       assert.equal(request.generate_audio, false);
+      if (gatewayCreditBlocks.has(scene)) {
+        throw new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 403, vendorCode: "insufficient_user_quota" });
+      }
       if (scene === "W6 reject") {
         throw new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 502, gatewayRequestId: "fixture-rejected" });
       }
@@ -81,6 +87,13 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
   queue.process(COMIC_VIDEO_TASK, (job, control) => runComicVideoGeneration({
     pool, media, pollIntervalMs: 10, cancelIntervalMs: 25,
     provider: async user => { assert.equal(user, owner); return provider; },
+    checkCredits: async (user, input) => {
+      assert.equal(user, owner);
+      const match = /^Scene: (.+)\.$/m.exec(input.prompt)?.[1] ?? "";
+      const availablePoints = creditBalances.get(match);
+      return availablePoints === null ? { reason: "unavailable" }
+        : availablePoints !== undefined && availablePoints < 100 ? { reason: "insufficient", availablePoints, requiredPoints: 100 } : null;
+    },
     download: async url => {
       downloads.push(url);
       if (state.badDownload) { state.badDownload = false; throw new Error("fixture download interrupted"); }
@@ -88,14 +101,14 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
       return { body, mime: "video/mp4" };
     },
   }, job, control.signal));
-  return { submitted, polls, downloads, state, queue };
+  return { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks };
 }
 
 type FixtureApp = Hono<{ Variables: { userId: string } }>;
 type Fixture = Awaited<ReturnType<typeof mountComicVideoFixture>>;
 
 export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fixture) {
-  const { submitted, polls, downloads, state, queue } = fixture;
+  const { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks } = fixture;
   const request = (path: string, method = "GET", data?: unknown, token = "fixture-one") => app.request(COMIC_DRAMA_API_ROOT + path, {
     method, body: data === undefined ? undefined : JSON.stringify(data),
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -302,5 +315,89 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal(submitted.filter(call => call.model === w6Kling).length, 1);
   assert.equal(submitted.filter(call => call.scene === "W6 reject").length, 1);
   console.log("PASS W6 PG/Redis/HTTP: both video contracts, mixed batch, checkpoints, release, targeted cancel/resume, adoption, Range, frame saves");
+  const scenes = ["Credits covered", "Credits low", "Credits check unavailable", "Credits need topup"];
+  const creditEp = await makeEpisode("Credit validation", w6Grok, scenes);
+  const startCount = submitted.length;
+  const budgetInput = { expectedRevision: creditEp.detail.series.revision, videoMode: "references", materialImages: 1 };
+  const budget = await json<ComicEpisodeBudget>(creditEp.path + "/episode-budget", "POST", budgetInput);
+  assert.equal(budget.knownPoints, 420);
+  assert.deepEqual(budget.items.map(item => item.kind), ["video", "video", "video", "video", "material"]);
+  assert.equal((await request(creditEp.path + "/episode-budget", "POST", budgetInput, "fixture-two")).status, 404);
+  assert.equal(submitted.length, startCount, "Budgeting does not submit videos");
+
+  creditBalances.set("Credits covered", 100);
+  creditBalances.set("Credits low", 80);
+  creditBalances.set("Credits check unavailable", null);
+  creditBalances.set("Credits need topup", 80);
+  const creditRun = await confirm(creditEp, await preview(creditEp));
+  const [, lowTake, unavailableTake, rechargeTake] = (await settled(creditRun.id)).takes;
+  const pausesPath = creditEp.path + "/video-credit-pauses";
+  const readPauses = () => json<ComicVideoCreditPause[]>(pausesPath);
+  const resumeCredits = async (id: string, override = false) => {
+    await until(() => queue.canResumePersisted(creditRun.taskId));
+    await json(`/video-takes/${id}/resume-credits`, "POST", override ? { continueDespiteLowCredits: true } : {}, 202);
+    return settled(creditRun.id);
+  };
+  assert.deepEqual((await readPauses())[0].check, { reason: "insufficient", availablePoints: 80, requiredPoints: 100 });
+  assert.equal((await json<ComicDramaDetail>(creditEp.path)).summary?.costs?.pendingReconcileCount, 0);
+  assert.equal((await receipt(lowTake.id)).state, "unsubmitted");
+  assert.equal((await receipt(unavailableTake.id)).state, "unsubmitted");
+  assert.deepEqual(await (await request(pausesPath, "GET", undefined, "fixture-two")).json(), []);
+  await until(() => queue.canResumePersisted(creditRun.taskId));
+  assert.equal((await request(`/video-takes/${lowTake.id}/resume-credits`, "POST", {}, "fixture-two")).status, 404);
+  assert.equal((await request(`/video-takes/${unavailableTake.id}/recover`, "POST", {})).status, 409);
+  await resumeCredits(lowTake.id);
+  assert.equal(submitted.length, startCount + 1, "A recheck with unchanged balance still pauses without another submission");
+  creditBalances.set("Credits low", null);
+  await resumeCredits(lowTake.id, true);
+  assert.equal(submitted.length, startCount + 1, "An override does not bypass a failed price or balance lookup");
+  creditBalances.set("Credits low", 80);
+  await resumeCredits(lowTake.id);
+  await resumeCredits(lowTake.id, true);
+  assert.deepEqual((await readPauses())[0].check, { reason: "unavailable" });
+  await until(() => queue.canResumePersisted(creditRun.taskId));
+  assert.equal((await request(`/video-takes/${unavailableTake.id}/resume-credits`, "POST", { continueDespiteLowCredits: true })).status, 409);
+  creditBalances.set("Credits check unavailable", 150);
+  await resumeCredits(unavailableTake.id);
+  assert.equal((await readPauses())[0].takeId, rechargeTake.id, "Continuing a take does not bypass credit checks on later takes");
+  assert.equal((await receipt(rechargeTake.id)).state, "unsubmitted");
+  creditBalances.set("Credits need topup", 100);
+  await until(() => queue.canResumePersisted(creditRun.taskId));
+  const responses = await Promise.all([1, 2].map(() => request(`/video-takes/${rechargeTake.id}/resume-credits`, "POST", {})));
+  assert.deepEqual(responses.map(response => response.status).sort(), [202, 409]);
+  assert.deepEqual((await settled(creditRun.id)).takes.map(take => take.state), ["ready", "ready", "ready", "ready"]);
+  assert.deepEqual(await readPauses(), []);
+  assert.deepEqual(submitted.slice(startCount).map(call => call.scene), scenes);
+  const remaining = await json<ComicEpisodeBudget>(creditEp.path + "/episode-budget", "POST", budgetInput);
+  assert.deepEqual(remaining.items.map(item => item.kind), ["material"]);
+  console.log("PASS episode budget and credit pauses: account scope, no double submit, repeat checks, recharge, single-take override");
+
+  const recoveryScenes = ["W6 interrupted", "Credits output saved", "Credits gateway rejected", "Credits queued behind rejection"];
+  const recoveryEp = await makeEpisode("Video receipt recovery during a credit pause", w6Grok, recoveryScenes);
+  const initialCalls = submitted.length;
+  state.disconnect = true;
+  state.badDownload = true;
+  gatewayCreditBlocks.add(recoveryScenes[2]);
+  const recoveryRun = await confirm(recoveryEp, await preview(recoveryEp));
+  const [acceptedTake, outputTake, pausedTake, queuedTake] = (await settled(recoveryRun.id)).takes;
+  assert.equal((await receipt(acceptedTake.id)).state, "accepted");
+  assert.equal((await receipt(outputTake.id)).state, "output");
+  assert.equal((await receipt(pausedTake.id)).state, "unsubmitted");
+  assert.deepEqual(pausedTake.creditCheck, { reason: "gateway-insufficient" });
+  assert.equal(queuedTake.canRecover, false);
+  assert.deepEqual(submitted.slice(initialCalls).map(call => call.scene), recoveryScenes.slice(0, 3));
+
+  assert.deepEqual((await resume(recoveryRun, acceptedTake.id)).takes.map(take => take.state), ["ready", "recoverable", "recoverable", "recoverable"]);
+  assert.equal((await resume(recoveryRun, outputTake.id)).takes[1].state, "ready");
+  assert.equal(submitted.length, initialCalls + 3, "Recovering receipts does not submit any new request");
+  assert.deepEqual((await json<ComicVideoCreditPause[]>(recoveryEp.path + "/video-credit-pauses"))[0].check, { reason: "gateway-insufficient" });
+  await until(() => queue.canResumePersisted(recoveryRun.taskId));
+  await json(`/video-takes/${pausedTake.id}/resume-credits`, "POST", { continueDespiteLowCredits: true }, 409);
+  gatewayCreditBlocks.delete(recoveryScenes[2]);
+  await json(`/video-takes/${pausedTake.id}/resume-credits`, "POST", {}, 202);
+  assert.deepEqual((await settled(recoveryRun.id)).takes.map(take => take.state), ["ready", "ready", "ready", "ready"]);
+  assert.deepEqual(submitted.slice(initialCalls + 3).map(call => call.scene), recoveryScenes.slice(2));
+  assert.equal((await receipt(pausedTake.id)).httpStatus, null);
+  console.log("PASS credit pause recovery: accepted and output receipts recover independently, gateway rejection stays paused until explicit recheck");
   return ep.detail.series.id;
 }

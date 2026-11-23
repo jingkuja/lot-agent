@@ -26,6 +26,8 @@ import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
 import type { DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
 import { ComicStudioLanding } from "./ComicStudioLanding.js";
+import { ComicEpisodeBudgetDialog } from "./ComicEpisodeBudgetDialog.js";
+import { ComicVideoCreditPauses } from "./ComicVideoCreditPauses.js";
 import {
   CharactersIcon, ClapperboardIcon, EpisodesIcon, ExportBoxIcon, MaterialsIcon, NewEpisodeIcon,
   ScriptIcon, SettingsIcon, SparklesIcon, StoryboardIcon, TimelineEditIcon, VideoReelIcon,
@@ -98,6 +100,7 @@ export function ComicDramaWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const [bgNotice, setBgNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"create" | "edit" | null>(null);
+  const [budgetSeriesId, setBudgetSeriesId] = useState<string | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [stage, setStage] = useState<"剧本" | "选角" | "分镜" | "生成">("分镜");
   const [openVideos, setOpenVideos] = useState(false);
@@ -506,7 +509,6 @@ export function ComicDramaWorkspace({
               {series.logline && <p>{series.logline}</p>}
               {episodeSummary && (() => {
                 const costs = episodeSummary.costs;
-                const rem = costs.remainingEstimate;
                 return <div className="comic-episode-stats" aria-label={t("本集进度与费用")}>
                   <span>{t("{0} 个分镜", [episodeSummary.clipCount])}</span>
                   <span>{t("已完成 {0}/{1}", [episodeSummary.completedCount, episodeSummary.clipCount])}</span>
@@ -520,12 +522,6 @@ export function ComicDramaWorkspace({
                   {costs.quotedUnbilled.length > 0 && (
                     <span>{t("未出账估算 {0}", [formatCurrencyList(costs.quotedUnbilled)])}</span>
                   )}
-                  <span>
-                    {rem.amountMicros !== null
-                      ? t("预估剩余 {0}", [formatMicros(rem.amountMicros, rem.currency)])
-                      : t("预估待核实")}
-                    {rem.unverifiedCount > 0 && ` (${t("含 {0} 项待核实", [rem.unverifiedCount])})`}
-                  </span>
                   {(costs.pendingReconcileCount > 0 || (costs.unbilledReadyCount > 0 && costs.quotedUnbilled.length === 0)) && (
                     <span>{t("待核对 {0} 笔", [costs.pendingReconcileCount])}</span>
                   )}
@@ -569,13 +565,20 @@ export function ComicDramaWorkspace({
                   })}>{vidLabel}</button>
                 </>;
               })()}
-              <button type="button" onClick={() => void leave(() => navigate(editorPath))}>{t("去剪辑")}</button>
+               <button type="button" onClick={() => void leave(() => navigate(editorPath))}>{t("去剪辑")}</button>
+               <button type="button" onClick={() => void leave(() => setBudgetSeriesId(series.id))}>{t("整集费用预估")}</button>
               <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑剧集")}</button>
               <button type="button" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(v => !v)}>
                 {t(drawerOpen ? "收起侧栏" : "展开助手")}
               </button>
             </div>
           </header>
+
+          <ComicVideoCreditPauses key={series.id} seriesId={series.id} label={id => {
+            const clip = detail.clips.find(clip => clip.id === id);
+            return clip ? t("分镜 {0}", [clip.ordinal]) : t("视频");
+          }} />
+          {budgetSeriesId === series.id && <ComicEpisodeBudgetDialog detail={detail} close={() => setBudgetSeriesId(null)} />}
 
           <nav className="comic-steps comic-stage-dock" aria-label={t("制作步骤")}>
             {steps.map(({ key: step, Icon }, index) => {

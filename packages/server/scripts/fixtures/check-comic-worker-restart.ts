@@ -28,6 +28,7 @@ export function startComicCrashWorker(db: DB, redis: ReturnType<typeof createRed
   const queue = new BullmqJobQueue(db, redis, jobLimits);
   queue.process(COMIC_VIDEO_TASK, (job, control) => runComicVideoGeneration({
     pool: db.pool, media: mediaFor(db, root),
+    checkCredits: async () => null,
     provider: async () => ({
       async create() {
         process.send?.("create");
@@ -94,6 +95,7 @@ export async function checkComicWorkerRestart(db: DB, redis: string, publisher: 
     const polled: string[] = [];
     replacement.process(COMIC_VIDEO_TASK, (job, control) => runComicVideoGeneration({
       pool: db.pool, media: mediaFor(db, root),
+      checkCredits: async () => assert.fail("a submitted video must not need a new credit check"),
       provider: async () => ({
         async create() { createCount++; return assert.fail("replacement must reuse the persisted vendor ID"); },
         async poll(id) {

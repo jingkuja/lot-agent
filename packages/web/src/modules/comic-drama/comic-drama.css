@@ -1588,6 +1588,42 @@
   font-weight: 750;
 }
 
+.comic-budget form,
+.comic-budget-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.comic-budget-fields {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin: 10px 0;
+}
+
+.comic-budget label.comic-budget-redo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 5px 0;
+}
+
+.comic-budget-redo input {
+  width: auto;
+}
+
+.comic-budget .comic-quote-amount {
+  text-align: end;
+  white-space: normal;
+}
+
+.comic-credit-pause {
+  border-inline-start: 3px solid var(--accent);
+  margin-block: 10px;
+}
+
+.comic-credit-pause p {
+  margin: 0 0 6px;
+}
+
 .comic-generation-modes {
   margin-bottom: 14px;
   padding: 4px;

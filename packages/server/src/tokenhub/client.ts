@@ -421,7 +421,7 @@ export class TokenhubClient {
     };
   }
 
-  async getManagedBalance(userId: number): Promise<ManagedBalanceResult> {
+  async getManagedBalance(userId: number, signal?: AbortSignal): Promise<ManagedBalanceResult> {
     const data = await this.internalRequest<{
       user_id: number;
       token_id: number;
@@ -439,7 +439,8 @@ export class TokenhubClient {
       `/agent-managed-keys/${userId}/balance?owner_app=lot-agent`,
       undefined,
       "agent:key.balance",
-      "new_api_managed_balance_failed"
+      "new_api_managed_balance_failed",
+      {}, signal,
     );
     return {
       userId: data.user_id,
@@ -703,7 +704,7 @@ export class TokenhubClient {
         },
         ...(body === undefined ? {} : { body: bodyText }),
       }),
-      errCode
+      errCode, signal,
     );
   }
 

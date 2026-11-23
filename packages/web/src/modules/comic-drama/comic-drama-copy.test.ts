@@ -69,6 +69,13 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       "全部首帧已审核完成；如需重新生成，请手动勾选分镜后再预览费用。",
       "片段原声已静音",
       "试听轨道",
+      "整集费用预估",
+      "积分消耗快尽，为避免任务执行中途中断，请充值后继续使用。",
+      "暂时无法核实视频所需积分或余额，未提交生成。",
+      "模型网关余额不足，补足额度后可重新检查积分。",
+      "当前可用 {0} 积分，预计需要 {1} 积分",
+      "重新检查积分",
+      "继续生成",
     ];
     for (const key of requiredKeys) {
       expect(messages[key]?.en).toBeTruthy();

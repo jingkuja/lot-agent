@@ -52,9 +52,9 @@ export function VideoTakeActions({ take, refresh, allowReceipt = true }: { take:
   };
   return <>
     <div className="comic-actions">
-      {(take.state === "pending" || take.state === "running") && !take.cancelRequested &&
+      {(take.state === "pending" || take.state === "running" || take.creditCheck) && !take.cancelRequested &&
         <button type="button" disabled={busy} onClick={() => void perform("cancel")}>{t("停止此项")}</button>}
-      {take.state === "recoverable" && <button type="button" disabled={busy || !take.canRecover}
+      {take.state === "recoverable" && !take.creditCheck && <button type="button" disabled={busy || !take.canRecover}
         onClick={() => void perform("recover")}>{t("恢复原任务")}</button>}
       {take.state === "unknown" && <button type="button" disabled={busy} onClick={() => void perform("release")}>{t("释放旧提交")}</button>}
       {allowReceipt && !["pending", "cancelled"].includes(take.state) &&

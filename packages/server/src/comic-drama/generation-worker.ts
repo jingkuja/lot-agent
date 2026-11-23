@@ -1,13 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import { fetchPublicBinary, type ImageGenerationProvider, type ReferenceMedia } from "@lot-agent/core";
+import { COMIC_IMAGE_SIZES } from "@lot-agent/core/comic-drama";
 import { DurableImageProvider, imageCallFingerprint, ImageResultUnknown, PgImageCallStore } from "../generation/image-receipts.js";
 import { imageInfo } from "../marketing-video/image-size.js";
 import { comicJobLockKey, PgComicGeneration } from "./generation-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 
 const maxBytes = 20 * 1024 * 1024;
-const sizes = { "9:16": "864x1536", "16:9": "1536x864", "1:1": "1024x1024" };
 type Dependencies = {
   pool: Pool;
   receiptPath: string;
@@ -80,7 +80,7 @@ async function runTakes(deps: Dependencies, job: { id: string; userId: string },
             await repo.mark(owner, take.id, "cancelled", null);
             continue;
           }
-          await provider.create({ model: input.modelId, prompt: input.prompt, n: 1, size: sizes[input.aspectRatio], media }, { signal, slot });
+          await provider.create({ model: input.modelId, prompt: input.prompt, n: 1, size: COMIC_IMAGE_SIZES[input.aspectRatio], media }, { signal, slot });
         }
         const pollSignal = AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]);
         do {

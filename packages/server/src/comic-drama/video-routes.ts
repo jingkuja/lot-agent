@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicDramaIdSchema, comicFrameSaveSchema, comicTakeReleaseSchema, comicVideoAdoptSchema, comicVideoSearchSchema,
+  comicDramaIdSchema, comicFrameSaveSchema, comicTakeReleaseSchema, comicVideoAdoptSchema, comicVideoCreditResumeSchema, comicVideoSearchSchema,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_VIDEO_TASK } from "../jobs/task-queues.js";
 import type { GenerationQueue } from "./generation-routes.js";
@@ -10,8 +10,8 @@ import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import type { PgComicVideo } from "./video-repository.js";
 
-export function createComicVideoRoutes({ repo, media, queue, library }: {
-  repo: PgComicVideo; media: ComicMediaLibrary; queue: GenerationQueue; library: PgComicLibrary;
+export function createComicVideoRoutes({ repo, media, queue, library, accepting }: {
+  repo: PgComicVideo; media: ComicMediaLibrary; queue: GenerationQueue; library: PgComicLibrary; accepting?: () => void;
 }) {
   const app = new Hono<{ Variables: { userId: string } }>();
   const limit = bodyLimit({ maxSize: 12 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
@@ -29,6 +29,26 @@ export function createComicVideoRoutes({ repo, media, queue, library }: {
   }
   app.get("/series/:id/clips/:clipId/videos", async c =>
     c.json(await repo.clip(c.get("userId"), id(c.req.param("id")), id(c.req.param("clipId")))));
+  app.get("/series/:id/video-credit-pauses", async c => {
+    c.header("Cache-Control", "private, no-store");
+    return c.json(await repo.creditPauses(c.get("userId"), id(c.req.param("id"))));
+  });
+  app.post("/video-takes/:id/resume-credits", limit, async c => {
+    const body = comicVideoCreditResumeSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const owner = c.get("userId");
+    const take = await repo.take(owner, id(c.req.param("id")));
+    accepting?.();
+    media.assertAvailable();
+    if (!take.creditCheck || !await queue.canResumePersisted(take.taskId)
+      || !await repo.resumeCredits(owner, take.id, take.taskId, body.data.continueDespiteLowCredits === true)) {
+      throw new ComicLibraryError("RECOVERY_UNAVAILABLE", 409);
+    }
+    await queue.resumePersisted(take.taskId, COMIC_VIDEO_TASK).catch(() => {
+      console.warn("[comic-drama] video credit resume pending delivery", { taskId: take.taskId });
+    });
+    return c.json({ ok: true }, 202);
+  });
   app.get("/video-takes/:id", async c => {
     c.header("Cache-Control", "private, no-store");
     const { taskId: _taskId, ...take } = await repo.take(c.get("userId"), id(c.req.param("id")));
