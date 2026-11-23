@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkComicClipIssues, COMIC_DRAMA_ROOT,
-  type ComicDirectorDecision, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDramaContent, type ComicDramaDetail,
-  type ComicDramaEpisodeSummary, type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicGenerationMode,
+  type ComicCurrencyAmount, type ComicDirectorDecision, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDramaContent,
+  type ComicDramaDetail, type ComicDramaEpisodeSummary, type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicGenerationMode,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, type User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
+import { computeComicBatchPlan } from "./batch-plan.js";
 import { SeriesDialog, type ComicDramaModel } from "./SeriesDialog.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { CastPanel } from "./CastPanel.js";
@@ -75,6 +76,10 @@ function formatMicros(micros: number, currency: "CNY" | "USD") {
   return `${symbol}${amount === 0 ? "0" : amount.toFixed(amount < 0.01 ? 4 : 2)}`;
 }
 
+function formatCurrencyList(entries: readonly ComicCurrencyAmount[]): string {
+  return entries.map(entry => formatMicros(entry.amountMicros, entry.currency)).join(" + ");
+}
+
 export function ComicDramaWorkspace({
   user, pathname, active, navigate, replacePath, onOpenAssistant, onOpenDigitalEmployee, onLogout,
   models, imageModels = [], llmModels = [],
@@ -101,6 +106,7 @@ export function ComicDramaWorkspace({
   const [latest, setLatest] = useState<ComicDramaDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [drawerTab, setDrawerTab] = useState<"detail" | "director">("director");
+  const [pendingAutoDialogueEditId, setPendingAutoDialogueEditId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const routeQueue = useRef<Promise<void>>(Promise.resolve());
@@ -446,11 +452,18 @@ export function ComicDramaWorkspace({
         : library === "/settings" ? <ComicSettingsPage videoModels={models} imageModels={imageModels} llmModels={llmModels} />
         : renderHistory ? <ComicRenderPanel />
         : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
+          autoOpenDialogue={pendingAutoDialogueEditId === editId}
+          onAutoDialogueOpened={() => setPendingAutoDialogueEditId(null)}
           exit={() => void leave(() => navigate(editorPath))} />
         : editorRoute && takeId ? <ComicEditorSource key={takeId} takeId={takeId} open={openVideo} openEdit={openEdit}
           browse={() => navigate(editorSourcesPath)} />
         : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo} choose={choose} openEdit={openEdit} />
-        : editorRoute ? <ComicEditsIndex currentSeries={activeNavSummary?.seriesId ?? series?.id} open={openEdit} browse={() => navigate(editorSourcesPath)} />
+        : editorRoute ? <ComicEditsIndex currentSeries={activeNavSummary?.seriesId ?? series?.id}
+          open={(nextId, opts) => {
+            if (opts?.openAutoDialogue) setPendingAutoDialogueEditId(nextId);
+            openEdit(nextId);
+          }}
+          browse={() => navigate(editorSourcesPath)} />
         : !series || !detail ? (
           <ComicStudioLanding
             onCreateSeries={() => showDialog("create")}
@@ -491,25 +504,33 @@ export function ComicDramaWorkspace({
                 </h1>
               )}
               {series.logline && <p>{series.logline}</p>}
-              {episodeSummary && (
-                <div className="comic-episode-stats" aria-label={t("本集进度与费用")}>
+              {episodeSummary && (() => {
+                const costs = episodeSummary.costs;
+                const rem = costs.remainingEstimate;
+                return <div className="comic-episode-stats" aria-label={t("本集进度与费用")}>
                   <span>{t("{0} 个分镜", [episodeSummary.clipCount])}</span>
                   <span>{t("已完成 {0}/{1}", [episodeSummary.completedCount, episodeSummary.clipCount])}</span>
                   {episodeSummary.generatingCount > 0 && <span>{t("生成中 {0}", [episodeSummary.generatingCount])}</span>}
                   <span>{t("总时长 {0} 秒", [+(episodeSummary.totalDurationMs / 1000).toFixed(1)])}</span>
                   <span>
-                    {t("已花费 {0}", [formatMicros(episodeSummary.spentMicros, episodeSummary.currency)])}
-                    {episodeSummary.spentUnverifiedCount > 0 && ` (${t("含 {0} 项待核实", [episodeSummary.spentUnverifiedCount])})`}
+                    {costs.settled.length > 0
+                      ? t("已花费 {0}", [formatCurrencyList(costs.settled)])
+                      : t("已花费 暂无实扣")}
                   </span>
+                  {costs.quotedUnbilled.length > 0 && (
+                    <span>{t("未出账估算 {0}", [formatCurrencyList(costs.quotedUnbilled)])}</span>
+                  )}
                   <span>
-                    {episodeSummary.estimatedMicros !== null
-                      ? t("预估剩余 {0}", [formatMicros(episodeSummary.estimatedMicros, episodeSummary.currency)])
+                    {rem.amountMicros !== null
+                      ? t("预估剩余 {0}", [formatMicros(rem.amountMicros, rem.currency)])
                       : t("预估待核实")}
-                    {episodeSummary.estimatedUnverifiedCount > 0 && episodeSummary.estimatedMicros !== null
-                      && ` (${t("含 {0} 项待核实", [episodeSummary.estimatedUnverifiedCount])})`}
+                    {rem.unverifiedCount > 0 && ` (${t("含 {0} 项待核实", [rem.unverifiedCount])})`}
                   </span>
-                </div>
-              )}
+                  {(costs.pendingReconcileCount > 0 || (costs.unbilledReadyCount > 0 && costs.quotedUnbilled.length === 0)) && (
+                    <span>{t("待核对 {0} 笔", [costs.pendingReconcileCount])}</span>
+                  )}
+                </div>;
+              })()}
             </div>
             <div className="comic-actions">
               <span className="comic-ratio">
@@ -522,12 +543,32 @@ export function ComicDramaWorkspace({
               >
                 {t(series.archivedAt ? "已归档" : editor.saving || dirty && !editor.issue ? "保存中…" : editor.issue ? "未保存" : "已保存")}
               </small>
-              <button type="button" disabled={locked || !detail.clips.length} onClick={() => void leave(() => {
-                setOpenVideos(false); setStage("生成"); setQuickAction({ mode: "keyframe", token: Date.now() });
-              })}>{t("生成全部首帧")}</button>
-              <button type="button" disabled={locked || !detail.clips.length} onClick={() => void leave(() => {
-                setOpenVideos(true); setStage("生成"); setQuickAction({ mode: "from_keyframe", token: Date.now() });
-              })}>{t("生成全部视频")}</button>
+              {(() => {
+                const kfPlan = computeComicBatchPlan(detail.clips, "keyframe");
+                const vidPlan = computeComicBatchPlan(detail.clips, "from_keyframe");
+                const kfLabel = kfPlan.allCompleted
+                  ? t("首帧已完成")
+                  : kfPlan.remainingCount > 0
+                    ? t("生成首帧（{0} + 余 {1}）", [kfPlan.batchIds.length, kfPlan.remainingCount])
+                    : kfPlan.batchIds.length > 0
+                      ? t("生成首帧（{0}）", [kfPlan.batchIds.length])
+                      : t("生成全部首帧");
+                const vidLabel = vidPlan.allCompleted
+                  ? t("视频已完成")
+                  : vidPlan.remainingCount > 0
+                    ? t("生成视频（{0} + 余 {1}）", [vidPlan.batchIds.length, vidPlan.remainingCount])
+                    : vidPlan.batchIds.length > 0
+                      ? t("生成视频（{0}）", [vidPlan.batchIds.length])
+                      : t("生成全部视频");
+                return <>
+                  <button type="button" disabled={locked || !detail.clips.length} onClick={() => void leave(() => {
+                    setOpenVideos(false); setStage("生成"); setQuickAction({ mode: "keyframe", token: Date.now() });
+                  })}>{kfLabel}</button>
+                  <button type="button" disabled={locked || !detail.clips.length} onClick={() => void leave(() => {
+                    setOpenVideos(true); setStage("生成"); setQuickAction({ mode: "from_keyframe", token: Date.now() });
+                  })}>{vidLabel}</button>
+                </>;
+              })()}
               <button type="button" onClick={() => void leave(() => navigate(editorPath))}>{t("去剪辑")}</button>
               <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑剧集")}</button>
               <button type="button" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(v => !v)}>
@@ -597,6 +638,7 @@ export function ComicDramaWorkspace({
               ) : stage === "生成" ? (
                 <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}
                   choose={choose} initialMode={openVideos ? "from_keyframe" : "keyframe"} quickAction={quickAction}
+                  onQuickActionHandled={() => setQuickAction(null)} onSeriesChanged={() => void reloadCurrent()}
                   disabled={locked || !!editor.issue} getSaved={async () => await flush() ? getDetail() : null} />
               ) : (
                 <Storyboard series={series} clips={detail.clips} cast={detail.cast} drafts={editor.clips}
@@ -716,7 +758,9 @@ function ClipInspectorDrawer({ detail, clip, goStoryboard, goGenerate }: {
               {issue.code === "SPEAKER_NOT_IN_CAST" ? t("说话人「{0}」未在出镜人物中", [issue.speaker])
                 : issue.code === "REFERENCE_LIMIT_EXCEEDED" ? t("参考图 {0}/{1} 张超限", [issue.count, issue.limit])
                   : issue.code === "DIALOGUE_TOO_LONG" ? t("台词约 {0} 秒超出镜头时长", [+(issue.estimatedMs / 1000).toFixed(1)])
-                    : t("角色「{0}」造型已更新", [issue.characterName])}
+                    : issue.code === "INVALID_MATERIAL_REFERENCE"
+                      ? t("绑定的素材「{0}」已失效", [issue.name ?? issue.materialId.slice(0, 8)])
+                      : t("角色「{0}」造型已更新", [issue.characterName])}
             </li>
           ))}</ul>
         </div>

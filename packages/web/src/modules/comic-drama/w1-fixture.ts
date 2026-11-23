@@ -17,6 +17,7 @@ const series: ComicDramaSeries = {
 const clips: ComicDramaClip[] = [{
   id: "9d589f4a-0ade-43c4-8150-72aee6458e94",
   revision: 1,
+  selectionRevision: 1,
   ordinal: 1,
   draft: {
     schemaVersion: 1,
@@ -34,6 +35,7 @@ const clips: ComicDramaClip[] = [{
 }, {
   id: "e3d6672b-9a08-4aa5-8bbf-148c89fce639",
   revision: 2,
+  selectionRevision: 1,
   ordinal: 2,
   draft: {
     schemaVersion: 1,

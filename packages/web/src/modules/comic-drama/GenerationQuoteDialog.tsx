@@ -16,6 +16,7 @@ const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"],
   MODEL_UNAVAILABLE: "请先在剧集设置中选择支持的视频模型",
   ALREADY_COMPLETE: "已有采用版，需显式选择生成新版",
   REFERENCE_UNSUPPORTED: "参考图的格式、尺寸或大小超出模型限制",
+  INVALID_MATERIAL_REFERENCE: "分镜绑定的场景或道具素材已失效，请重新选择",
 };
 const errors: Record<string, string> = {
   COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
@@ -25,9 +26,11 @@ const errors: Record<string, string> = {
   QUOTE_STALE: "素材或分镜已更新，请重新询价",
   BUSY: "已有待处理的生成任务",
   KEYFRAME_STALE_OR_UNAVAILABLE: "首帧版本已过期或暂不可用",
+  SELECTION_CONFLICT: "该分镜的采用版本已被其他窗口更新，请刷新后重试",
   RECOVERY_UNAVAILABLE: "暂不能恢复，请稍后重试",
   VIDEO_REFERENCE_ORIGIN_REQUIRED: "视频参考图的公网访问地址尚未配置",
   INVALID_REFERENCE: "参考素材不可用，请重新选择",
+  INVALID_MATERIAL_REFERENCE: "所选场景、道具或音效素材不可用，请重新选择",
   VIDEO_STALE_OR_UNAVAILABLE: "视频版本或分镜已变化，请重新读取",
   TAKE_NOT_CANCELLABLE: "此项已结束，请刷新状态",
   TAKE_NOT_RELEASABLE: "暂不能释放此项，请等待任务结束",
@@ -100,7 +103,14 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted 
       </li>)}
       {quote.skipped.map(item => <li key={item.clipId}>
         <div><strong>{label(item.clipId)}</strong><small>{item.referenceLimit ?
-          t("最多使用 {0} 张参考图", [item.referenceLimit]) : t(reasons[item.reason] ?? "暂不能生成")}</small></div>
+          t("最多使用 {0} 张参考图", [item.referenceLimit]) : t(reasons[item.reason] ?? "暂不能生成")}</small>
+        {!!item.invalidReferences?.length && <small>
+          {item.invalidReferences.map(ref => `${ref.name ?? ref.materialId.slice(0, 8)} (${t(
+            ref.reason === "ARCHIVED" ? "已归档" : ref.reason === "OUTDATED_VERSION" ? "已有新版"
+              : ref.reason === "WRONG_KIND" ? "类别不符" : "已缺失",
+          )})`).join(" · ")}
+        </small>}
+        </div>
         <span>{t("跳过")}</span>
       </li>)}
     </ul>

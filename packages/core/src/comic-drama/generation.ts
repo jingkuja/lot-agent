@@ -24,11 +24,23 @@ export type ComicQuoteLine = {
   amountMicros: number | null;
   referenceVersions?: { mediaId: string; version: number }[];
 };
+export type ComicSkippedInvalidReference = {
+  role: "scene" | "prop";
+  materialId: string;
+  mediaId: string;
+  name?: string;
+  reason: "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
+};
 export type ComicGenerationQuote = {
   confirmationId: string | null;
   expiresAt: string | null;
   items: ComicQuoteLine[];
-  skipped: { clipId: string; reason: ComicGenerationIssue["code"] | "BUSY" | "ALREADY_COMPLETE" | "PRICE_UNAVAILABLE"; referenceLimit?: number }[];
+  skipped: {
+    clipId: string;
+    reason: ComicGenerationIssue["code"] | "BUSY" | "ALREADY_COMPLETE" | "PRICE_UNAVAILABLE" | "INVALID_MATERIAL_REFERENCE";
+    referenceLimit?: number;
+    invalidReferences?: ComicSkippedInvalidReference[];
+  }[];
   totalMicros: number | null;
   currency: "CNY" | "USD";
 };
@@ -58,8 +70,16 @@ export const comicImageTakeInput = z.union([
   }).strict(),
 ]);
 export type ComicImageTakeInput = z.infer<typeof comicImageTakeInput>;
-export const comicKeyframeReviewSchema = z.object({ keyframeTakeId: id, expectedClipRevision: revision }).strict();
-export const comicKeyframeSelectSchema = z.object({ mediaId: id, expectedClipRevision: revision }).strict();
+export const comicKeyframeReviewSchema = z.object({
+  keyframeTakeId: id,
+  expectedClipRevision: revision,
+  expectedSelectionRevision: revision,
+}).strict();
+export const comicKeyframeSelectSchema = z.object({
+  mediaId: id,
+  expectedClipRevision: revision,
+  expectedSelectionRevision: revision,
+}).strict();
 const styleKeySchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 export const comicCharacterGenerateSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -77,7 +97,11 @@ export type ComicCharacterGenerateRequest = z.infer<typeof comicCharacterGenerat
 export const comicVideoTakeInput = comicFrozenGenerationSchema.refine(input => input.mode !== "keyframe");
 export const comicTakeInput = z.union([comicImageTakeInput, comicVideoTakeInput]);
 export type ComicTakeInput = z.infer<typeof comicTakeInput>;
-export const comicVideoAdoptSchema = z.object({ takeId: id, expectedClipRevision: revision }).strict();
+export const comicVideoAdoptSchema = z.object({
+  takeId: id,
+  expectedClipRevision: revision,
+  expectedSelectionRevision: revision,
+}).strict();
 export const comicTakeReleaseSchema = z.object({ acknowledgePossibleCharge: z.literal(true) }).strict();
 export const comicFrameSaveSchema = z.object({
   timeMs: z.number().int().min(0).max(60_000),
@@ -115,11 +139,17 @@ export type ComicGenerationRequest = {
 export type ComicImageTakeState = ComicTakeState;
 export type ComicImageTake = ComicTake;
 export type ComicImageRequest = ComicGenerationRequest;
-export type ComicKeyframeHistory = { approvedTakeId: string | null; approvedMediaId?: string | null; takes: ComicImageTake[] };
+export type ComicKeyframeHistory = {
+  approvedTakeId: string | null;
+  approvedMediaId?: string | null;
+  selectionRevision?: number;
+  takes: ComicImageTake[];
+};
 export type ComicVideoTake = ComicTake & {
   seriesId: string; seriesTitle: string; scene: string; ordinal: number | null; adopted: boolean;
   version: number; modelId: string; durationMs: number; completedAt: string | null;
   posterMediaId?: string | null;
+  clipSelectionRevision?: number | null;
 };
 export type ComicVideoHistory = { entries: ComicVideoTake[]; nextCursor: string | null };
 export type ComicVideoReceipt = {

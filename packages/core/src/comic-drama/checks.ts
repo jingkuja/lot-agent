@@ -35,6 +35,16 @@ export type ComicClipCheckIssue =
     characterId: string;
     characterName: string;
     reason: "library_updated" | "generated_outdated";
+  }
+  | {
+    code: "INVALID_MATERIAL_REFERENCE";
+    clipId: string;
+    clipOrdinal: number;
+    role: "scene" | "prop" | "sfx";
+    materialId: string;
+    mediaId: string;
+    name?: string;
+    reason: "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
   };
 
 /** Loose normalization for character name / alias matching across CJK & Latin punctuation. */
@@ -201,6 +211,20 @@ export function checkComicClipIssues(
         reason: "generated_outdated",
       });
     }
+  }
+
+  // 5. Scene / prop / sound material reference missing, archived, wrong kind or outdated
+  for (const invalid of clip.progress?.invalidMaterialRefs ?? []) {
+    issues.push({
+      code: "INVALID_MATERIAL_REFERENCE",
+      clipId: clip.id,
+      clipOrdinal: clip.ordinal,
+      role: invalid.role,
+      materialId: invalid.materialId,
+      mediaId: invalid.mediaId,
+      ...(invalid.name ? { name: invalid.name } : {}),
+      reason: invalid.reason,
+    });
   }
 
   return issues;

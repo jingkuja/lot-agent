@@ -5,12 +5,13 @@ import {
 } from "@lot-agent/core/comic-drama";
 import { COMIC_VIDEO_TASK } from "../jobs/task-queues.js";
 import { comicJobLockKey, joinTakes, PgComicGeneration, takeColumns } from "./generation-repository.js";
-import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
+import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
 
 const tables = "lot_comic_drama";
 const videoColumns = `${takeColumns},r.series_id AS "seriesId",s.title AS "seriesTitle",CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS ordinal,
   coalesce(c.draft->>'scene','') AS scene,coalesce(c.adopted_video_take_id=t.id,false) AS adopted,
+  c.selection_revision AS "clipSelectionRevision",
   t.video_version AS version,t.input->>'modelId' AS "modelId",
   coalesce(m.duration_ms,(t.input->>'durationMs')::int) AS "durationMs",t.completed_at AS "completedAt",
   coalesce(c.keyframe_media_id, kt.media_id) AS "posterMediaId"`;
@@ -23,6 +24,14 @@ const receiptColumns = `coalesce(t.submit_state,'unsubmitted') AS state, t.vendo
 
 type VideoCheckpoint = ComicVideoReceipt & { outputUrl: string | null };
 export type ComicVideoWork = { id: string; input: ComicFrozenGenerationInput };
+export type ResolvedVisualReference = ComicGenerationReference & {
+  kind: "style" | "scene" | "prop";
+  materialId: string;
+};
+export type VisualReferenceInvalidReason = "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
+export const visualReferenceKey = (ref: { kind: "style" | "scene" | "prop"; materialId: string; mediaId: string }) =>
+  `${ref.kind}:${ref.materialId}:${ref.mediaId}`;
+
 export class PgComicVideo {
   constructor(private readonly pool: Pool) {}
 
@@ -45,19 +54,99 @@ export class PgComicVideo {
     return new Map(rows.map(row => [row.clipId, row]));
   }
 
+  async inspectReferences(
+    owner: string,
+    refs: NonNullable<ComicGenerationPreviewRequest["visualReferences"]>,
+  ): Promise<{ resolved: Map<string, ResolvedVisualReference>; invalid: Map<string, VisualReferenceInvalidReason> }> {
+    const resolved = new Map<string, ResolvedVisualReference>();
+    const invalid = new Map<string, VisualReferenceInvalidReason>();
+    if (!refs.length) return { resolved, invalid };
+    type InspectRow = Omit<ComicGenerationReference, "kind" | "version" | "width" | "height" | "sizeBytes" | "mime" | "mediaId"> & {
+      id: string;
+      materialKind: string;
+      archived: boolean;
+      mediaId: string | null;
+      mime: string | null;
+      width: number | null;
+      height: number | null;
+      sizeBytes: number | null;
+      version: number | null;
+      latestVersion: number | null;
+    };
+    const materialIds = [...new Set(refs.map(item => item.materialId))];
+    const { rows } = await this.pool.query<InspectRow>(
+      `SELECT m.id, m.kind AS "materialKind", m.name AS label, (m.archived_at IS NOT NULL) AS archived,
+         f.id AS "mediaId", f.mime, f.width, f.height, f.size_bytes AS "sizeBytes", v.version,
+         max(v.version) OVER (PARTITION BY m.id) AS "latestVersion"
+       FROM ${tables}.cd_materials m
+       LEFT JOIN ${tables}.cd_material_versions v ON (m.owner_id, m.id) = (v.owner_id, v.material_id)
+       LEFT JOIN ${tables}.cd_media f ON (v.owner_id, v.media_id) = (f.owner_id, f.id)
+       WHERE m.owner_id=$1 AND m.id=ANY($2::uuid[])
+       ORDER BY v.version DESC NULLS LAST`,
+      [owner, materialIds],
+    );
+    const byMaterial = new Map<string, InspectRow[]>();
+    for (const row of rows) {
+      const list = byMaterial.get(row.id) ?? [];
+      list.push(row);
+      byMaterial.set(row.id, list);
+    }
+    for (const ref of refs) {
+      const key = visualReferenceKey(ref);
+      if (resolved.has(key) || invalid.has(key)) continue;
+      const matRows = byMaterial.get(ref.materialId);
+      if (!matRows?.length) {
+        invalid.set(key, "MISSING");
+        continue;
+      }
+      const head = matRows[0]!;
+      if (head.archived) {
+        invalid.set(key, "ARCHIVED");
+        continue;
+      }
+      const expectedKind = ref.kind === "style" ? "other" : ref.kind;
+      if (head.materialKind !== expectedKind) {
+        invalid.set(key, "WRONG_KIND");
+        continue;
+      }
+      const match = matRows.find(item => item.mediaId === ref.mediaId);
+      if (!match || !match.mediaId || !match.mime?.startsWith("image/") || !match.width || !match.height
+        || !match.sizeBytes || !match.version) {
+        invalid.set(key, "MISSING");
+        continue;
+      }
+      if (match.latestVersion !== null && match.version !== match.latestVersion) {
+        invalid.set(key, "OUTDATED_VERSION");
+        continue;
+      }
+      if (match.mime !== "image/jpeg" && match.mime !== "image/png" && match.mime !== "image/webp") {
+        invalid.set(key, "MISSING");
+        continue;
+      }
+      resolved.set(key, {
+        mediaId: match.mediaId,
+        version: Number(match.version),
+        mime: match.mime,
+        sizeBytes: Number(match.sizeBytes),
+        width: Number(match.width),
+        height: Number(match.height),
+        label: match.label,
+        kind: ref.kind,
+        materialId: match.id,
+      });
+    }
+    return { resolved, invalid };
+  }
+
   async references(owner: string, refs: NonNullable<ComicGenerationPreviewRequest["visualReferences"]>):
-  Promise<(ComicGenerationReference & { kind: "style" | "scene" | "prop"; materialId: string })[]> {
+  Promise<ResolvedVisualReference[]> {
     if (!refs.length) return [];
-    const { rows } = await this.pool.query<Omit<ComicGenerationReference, "kind"> & { id: string; materialKind: string }>(`SELECT
-      m.id,m.kind AS "materialKind",m.name AS label,f.id AS "mediaId",f.mime,f.width,f.height,f.size_bytes AS "sizeBytes",v.version
-      FROM ${tables}.cd_materials m JOIN ${tables}.cd_material_versions v ON (m.owner_id,m.id)=(v.owner_id,v.material_id)
-      JOIN ${tables}.cd_media f ON (v.owner_id,v.media_id)=(f.owner_id,f.id)
-      WHERE m.owner_id=$1 AND m.archived_at IS NULL AND f.id=ANY($2::uuid[]) AND f.mime LIKE 'image/%'`, [owner, refs.map(item => item.mediaId)]);
+    const { resolved, invalid } = await this.inspectReferences(owner, refs);
+    if (invalid.size > 0) throw new ComicLibraryError("INVALID_REFERENCE", 400);
     return refs.map(ref => {
-      const row = rows.find(item => item.id === ref.materialId && item.mediaId === ref.mediaId);
-      if (!row || row.materialKind !== (ref.kind === "style" ? "other" : ref.kind)) throw new ComicLibraryError("INVALID_REFERENCE", 400);
-      const { id: materialId, materialKind: _kind, ...asset } = row;
-      return { ...asset, kind: ref.kind, materialId };
+      const item = resolved.get(visualReferenceKey(ref));
+      if (!item) throw new ComicLibraryError("INVALID_REFERENCE", 400);
+      return item;
     });
   }
 
@@ -97,14 +186,31 @@ export class PgComicVideo {
     };
   }
 
-  async adopt(owner: string, seriesId: string, clipId: string, takeId: string, revision: number) {
-    await libraryTransaction(this.pool, async db => {
+  async adopt(
+    owner: string, seriesId: string, clipId: string, takeId: string, revision: number, expectedSelectionRevision: number,
+  ): Promise<{ selectionRevision: number }> {
+    return libraryTransaction(this.pool, async db => {
       await new PgComicGeneration(this.pool).lockSeries(db, owner, seriesId);
-      const { rowCount } = await db.query(`UPDATE ${tables}.cd_clips c SET adopted_video_take_id=t.id
+      const { rows: [clip] } = await db.query<{ revision: number; selectionRevision: number }>(
+        `SELECT revision, selection_revision AS "selectionRevision"
+         FROM ${tables}.cd_clips WHERE series_id=$1 AND id=$2 FOR UPDATE`,
+        [seriesId, clipId],
+      );
+      if (!clip || Number(clip.revision) !== revision) {
+        throw new ComicLibraryError("VIDEO_STALE_OR_UNAVAILABLE", 409);
+      }
+      if (Number(clip.selectionRevision) !== expectedSelectionRevision) {
+        throw new ComicSelectionConflictError(Number(clip.selectionRevision));
+      }
+      const { rows } = await db.query<{ selectionRevision: number }>(`UPDATE ${tables}.cd_clips c
+        SET adopted_video_take_id=t.id, selection_revision=c.selection_revision+1
         FROM ${tables}.cd_takes t JOIN ${tables}.cd_generation_requests r ON (r.owner_id,r.id)=(t.owner_id,t.request_id)
         WHERE r.owner_id=$1 AND r.series_id=$2 AND c.series_id=$2 AND c.id=$3 AND t.target_id=c.id AND t.id=$4
-        AND t.status='ready' AND t.video_version IS NOT NULL AND c.revision=$5`, [owner, seriesId, clipId, takeId, revision]);
-      if (!rowCount) throw new ComicLibraryError("VIDEO_STALE_OR_UNAVAILABLE", 409);
+        AND t.status='ready' AND t.video_version IS NOT NULL AND c.revision=$5 AND c.selection_revision=$6
+        RETURNING c.selection_revision AS "selectionRevision"`,
+      [owner, seriesId, clipId, takeId, revision, expectedSelectionRevision]);
+      if (!rows[0]) throw new ComicLibraryError("VIDEO_STALE_OR_UNAVAILABLE", 409);
+      return { selectionRevision: Number(rows[0].selectionRevision) };
     });
   }
 

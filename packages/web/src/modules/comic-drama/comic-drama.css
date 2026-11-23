@@ -2653,3 +2653,73 @@
     padding: 18px;
   }
 }
+
+.comic-batch-banner {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--overlay-sink);
+  color: var(--text);
+}
+
+.comic-shot-sfx-list {
+  margin-top: 8px;
+}
+
+.comic-shot-sfx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comic-shot-sfx-chip select {
+  width: auto;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+}
+
+.comic-preview-tracks {
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.comic-preview-tracks button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  color: var(--text);
+}
+
+.comic-preview-cues {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+}
+
+.comic-dialogue-batch-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  max-height: 44vh;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.comic-dialogue-batch-list li {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.comic-dialogue-issue-row {
+  display: grid;
+  gap: 8px;
+}

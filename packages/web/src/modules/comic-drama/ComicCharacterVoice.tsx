@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   COMIC_SPEECH_PRESET_CATALOG, comicSpeechPresets, type ComicSpeechTake, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicEditApi, editError } from "./edit-api.js";
 import { DictionaryOptions, LibraryDialog, MediaPreview, useComicChoices } from "./LibraryParts.js";
@@ -24,6 +25,7 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
   const [emotionKey, setEmotionKey] = useState("");
   const [auditioning, setAuditioning] = useState(false);
   const [auditionError, setAuditionError] = useState("");
+  const [auditionUnknown, setAuditionUnknown] = useState(false);
   const [auditionTake, setAuditionTake] = useState<ComicSpeechTake | null>(null);
   const activeAudition = useRef<AbortController | null>(null);
 
@@ -46,8 +48,8 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
   const bound = settings?.binding.kind === "clone" ? settings.binding.itemId : "";
   const defaultSample = t("雨停之前，我们把剩下的故事说完吧。");
 
-  const runAudition = async () => {
-    if (activeAudition.current || kind === "none") return;
+  const currentAuditionPayload = (): ComicVoiceAudition | null => {
+    if (kind === "none") return null;
     let voice: ComicVoiceAudition["voice"] | null = null;
     if (kind === "preset") {
       const matched = comicSpeechPresets.find(key => key === preset);
@@ -55,19 +57,45 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
     } else if (kind === "clone" && cloneId) {
       voice = { kind: "clone", itemId: cloneId };
     }
-    if (!voice) return;
+    if (!voice) return null;
+    return { text: sampleText.trim() || defaultSample, speed, emotionKey: emotionKey || null, voice };
+  };
+
+  const runAudition = async () => {
+    if (activeAudition.current) return;
+    const payload = currentAuditionPayload();
+    if (!payload) return;
+    const controller = new AbortController();
+    activeAudition.current = controller;
+    setAuditioning(true);
+    setAuditionError("");
+    setAuditionUnknown(false);
+    try {
+      const take = await comicEditApi.auditionVoice(payload, controller.signal);
+      if (!controller.signal.aborted) setAuditionTake(take);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        setAuditionError(editError(reason));
+        setAuditionUnknown(reason instanceof ApiClientError && reason.code === "EDIT_SPEECH_UNKNOWN");
+      }
+    } finally {
+      activeAudition.current = null;
+      if (!controller.signal.aborted) setAuditioning(false);
+    }
+  };
+
+  const releaseAudition = async () => {
+    if (activeAudition.current) return;
+    const payload = currentAuditionPayload();
+    if (!payload) return;
+    if (!window.confirm(t("原配音请求可能已扣费。释放后可重新合成，新请求可能再次扣费。确认释放？"))) return;
     const controller = new AbortController();
     activeAudition.current = controller;
     setAuditioning(true);
     setAuditionError("");
     try {
-      const take = await comicEditApi.auditionVoice({
-        text: sampleText.trim() || defaultSample,
-        speed,
-        emotionKey: emotionKey || null,
-        voice,
-      }, controller.signal);
-      if (!controller.signal.aborted) setAuditionTake(take);
+      await comicEditApi.releaseAuditionVoice({ ...payload, acknowledgePossibleCharge: true }, controller.signal);
+      if (!controller.signal.aborted) setAuditionUnknown(false);
     } catch (reason) {
       if (!controller.signal.aborted) setAuditionError(editError(reason));
     } finally {
@@ -134,6 +162,11 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
             <button type="button" disabled={auditioning || (kind === "preset" ? !preset : !cloneId)} onClick={() => void runAudition()}>
               {t(auditioning ? "正在合成…" : "试听音色")}
             </button>
+            {auditionUnknown && (
+              <button type="button" disabled={auditioning} onClick={() => void releaseAudition()}>
+                {t("释放旧提交")}
+              </button>
+            )}
             {auditionTake?.cached && <small>{t("已复用缓存")}</small>}
           </div>
           {auditionError && <p className="comic-error" role="alert">{t(auditionError)}</p>}

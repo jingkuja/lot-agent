@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
-  comicDramaIdSchema, comicEditUpdateSchema, comicTimelineSchema, comicVideoItem, emptyComicTimeline,
-  type ComicEdit, type ComicEditAppendSource, type ComicEditAudioSource, type ComicEditCreate, type ComicEditList, type ComicEditListEntry,
-  type ComicEditReplace, type ComicEditSource, type ComicEditUpdate, type ComicTimeline,
+  comicDramaClipDraftSchema, comicDramaIdSchema, comicEditUpdateSchema, comicTimelineSchema, comicVideoItem, emptyComicTimeline,
+  planClipSfxPlacements, type ComicEdit, type ComicEditAppendSource, type ComicEditAudioSource, type ComicEditCreate, type ComicEditList,
+  type ComicEditListEntry, type ComicEditReplace, type ComicEditSource, type ComicEditUpdate, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
@@ -129,6 +129,52 @@ export class PgComicEdits {
     });
   }
 
+  private async initialClipSfx(
+    db: ComicQuery,
+    owner: string,
+    items: Array<{ videoItem: ComicTimeline["video"][number]; clipId: string | null }>,
+    maxItems = 1200,
+  ): Promise<ComicTimeline["sfx"]> {
+    const clipIds = [...new Set(items.map(entry => entry.clipId).filter((id): id is string => Boolean(id)))];
+    if (!clipIds.length || maxItems <= 0) return [];
+    const { rows: clipRows } = await db.query<{ id: string; draft: unknown }>(
+      `SELECT c.id, c.draft FROM ${cd}.cd_clips c
+       JOIN ${cd}.cd_series s ON s.id=c.series_id
+       WHERE s.owner_id=$1 AND s.deleted_at IS NULL AND c.id=ANY($2::uuid[])`,
+      [owner, clipIds],
+    );
+    const draftsByClip = new Map<string, ReturnType<typeof comicDramaClipDraftSchema.parse>>();
+    const mediaIds = new Set<string>();
+    for (const row of clipRows) {
+      const parsed = comicDramaClipDraftSchema.safeParse(row.draft);
+      if (!parsed.success) continue;
+      draftsByClip.set(row.id, parsed.data);
+      for (const ref of parsed.data.sfxRefs ?? []) mediaIds.add(ref.mediaId);
+      for (const shot of parsed.data.shots) {
+        for (const ref of shot.sfxRefs ?? []) mediaIds.add(ref.mediaId);
+      }
+    }
+    if (!mediaIds.size) return [];
+    const { rows: audioRows } = await db.query<{ id: string; durationMs: number }>(
+      `SELECT id, duration_ms AS "durationMs" FROM ${cd}.cd_media
+       WHERE owner_id=$1 AND id=ANY($2::uuid[]) AND mime IN ('audio/mpeg','audio/wav') AND duration_ms>0`,
+      [owner, [...mediaIds]],
+    );
+    const durations = new Map(audioRows.map(row => [row.id, Number(row.durationMs)]));
+    const sfx: ComicTimeline["sfx"] = [];
+    for (const { videoItem, clipId } of items) {
+      if (!clipId) continue;
+      const draft = draftsByClip.get(clipId);
+      if (!draft) continue;
+      const placements = planClipSfxPlacements(draft, videoItem.id, videoItem.outMs - videoItem.inMs, durations, randomUUID);
+      for (const placement of placements) {
+        if (sfx.length >= maxItems) return sfx;
+        sfx.push(placement);
+      }
+    }
+    return sfx;
+  }
+
   create(owner: string, fields: ComicEditCreate) {
     return libraryTransaction(this.pool, async db => {
       let aspect = fields.aspectRatio;
@@ -155,7 +201,9 @@ export class PgComicEdits {
         aspect ??= exact.aspectRatio;
       }
       const timeline = emptyComicTimeline(aspect ?? "9:16");
-      timeline.video = initial.map(source => comicVideoItem(randomUUID(), source));
+      const paired = initial.map(source => ({ videoItem: comicVideoItem(randomUUID(), source), clipId: source.clipId }));
+      timeline.video = paired.map(entry => entry.videoItem);
+      timeline.sfx = await this.initialClipSfx(db, owner, paired);
       const { rows: [row] } = await db.query<EditRow>(`INSERT INTO ${cd}.cd_edits(owner_id,series_id,title,timeline)
         VALUES($1,$2,$3,$4) RETURNING ${columns},timeline`, [owner, seriesId, fields.title, timeline]);
       const refs = await this.refs(db, owner, row.id, timeline);
@@ -187,9 +235,13 @@ export class PgComicEdits {
       if (row.timeline.video.length >= 200) throw new ComicLibraryError("EDIT_SOURCE_LIMIT", 400);
       const [exact] = await this.sources(db, owner, [fields.takeId]);
       if (!exact) throw new ComicLibraryError("EDIT_SOURCE_UNAVAILABLE", 404);
+      const videoItem = comicVideoItem(randomUUID(), exact);
+      const existingOverlays = row.timeline.voice.length + row.timeline.sfx.length + row.timeline.music.length + row.timeline.subtitles.length;
+      const appendedSfx = await this.initialClipSfx(db, owner, [{ videoItem, clipId: exact.clipId }], Math.max(0, 1200 - existingOverlays));
       const timeline: ComicTimeline = {
         ...row.timeline,
-        video: [...row.timeline.video, comicVideoItem(randomUUID(), exact)],
+        video: [...row.timeline.video, videoItem],
+        sfx: [...row.timeline.sfx, ...appendedSfx],
       };
       return this.save(db, owner, row, row.title, timeline);
     });

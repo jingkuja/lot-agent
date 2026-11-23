@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG, comicDirectorChatInputSchema,
   comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicRenderIssue, comicSpeechReleaseSchema,
-  comicTimelineSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline, matchComicCharacters,
+  comicTimelineSchema, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline,
+  matchComicCharacters, planClipSfxPlacements,
   type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
@@ -25,7 +26,7 @@ function image(n: number) {
 }
 const cast: ComicSeriesCast[] = [{ snapshot, archived: false, hasUpdates: true }];
 const clip: ComicDramaClip = {
-  id: uuid(6), ordinal: 1, revision: 7,
+  id: uuid(6), ordinal: 1, revision: 7, selectionRevision: 1,
   draft: {
     schemaVersion: 1, durationMs: 8000, scene: "柜台", lines: [],
     shots: [{ id: uuid(7), description: "Lin enters the shop.", framingKey: "wide", movementKey: "fixed", durationShare: 100 }],
@@ -173,7 +174,7 @@ describe("comic timeline contract", () => {
 describe("comic v1 quality checks, refs, presets and schemas", () => {
   it("detects all 4 product-spec §4.2/§5.3 clip issues", () => {
     const denseClip: ComicDramaClip = {
-      id: uuid(70), ordinal: 2, revision: 1,
+      id: uuid(70), ordinal: 2, revision: 1, selectionRevision: 1,
       draft: comicDramaClipDraftSchema.parse({
         schemaVersion: 1, durationMs: 4000, scene: "便利店门口",
         shots: [{ id: uuid(71), framingKey: "wide", movementKey: "fixed", description: "Rainy street.", durationShare: 100 }],
@@ -214,5 +215,65 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
     expect(comicDirectorChatInputSchema.safeParse({
       message: "帮我检查全集有没有漏选角", expectedRevision: 3, language: "zh",
     }).success).toBe(true);
+    expect(comicVoiceAuditionReleaseSchema.safeParse({
+      text: "雨停之前别走。", speed: 1, emotionKey: null, voice: { kind: "preset", preset: "nova" }, acknowledgePossibleCharge: true,
+    }).success).toBe(true);
+  });
+
+  it("P1 #4 & P2 #8: surfaces invalid material refs and plans per-shot + legacy SFX placements that stay synced on reorder", () => {
+    const clipWithInvalidMat: ComicDramaClip = {
+      ...clip,
+      progress: {
+        keyframeState: "none", keyframeMediaId: null, keyframeApproved: false, keyframeStale: false,
+        videoState: "none", videoTakeCount: 0, adoptedVideoTakeId: null, adoptedVideoVersion: null,
+        adoptedVideoMediaId: null, adoptedStale: false, castSnapshotStale: false,
+        invalidMaterialRefs: [{ role: "prop", materialId: uuid(50), mediaId: uuid(51), name: "旧道具", reason: "ARCHIVED" }],
+      },
+    };
+    const issues = checkComicClipIssues(series, clipWithInvalidMat, [{ ...cast[0], hasUpdates: false }]);
+    expect(issues.some(issue => issue.code === "INVALID_MATERIAL_REFERENCE" && issue.reason === "ARCHIVED")).toBe(true);
+
+    const draft = comicDramaClipDraftSchema.parse({
+      schemaVersion: 1, durationMs: 8000, scene: "双镜头",
+      shots: [
+        {
+          id: uuid(61), framingKey: "wide", movementKey: "fixed", description: "镜头1", durationShare: 50,
+          sfxRefs: [{ materialId: uuid(71), mediaId: uuid(81), name: "门铃", position: "start" }],
+        },
+        {
+          id: uuid(62), framingKey: "close_up", movementKey: "push", description: "镜头2", durationShare: 50,
+          sfxRefs: [{ materialId: uuid(72), mediaId: uuid(82), name: "闪电", position: "end" }],
+        },
+      ],
+      lines: [],
+      sfxRefs: [{ materialId: uuid(73), mediaId: uuid(83), name: "旧雨声" }],
+    });
+    let seq = 900;
+    const videoId = uuid(600);
+    const otherVideoId = uuid(601);
+    const sfx = planClipSfxPlacements(
+      draft,
+      videoId,
+      8000,
+      new Map([[uuid(81), 1000], [uuid(82), 1200], [uuid(83), 5000]]),
+      () => uuid(++seq),
+    );
+    expect(sfx).toHaveLength(3);
+    expect(sfx.map(item => [item.mediaId, item.anchor.offsetMs, item.durationMs])).toEqual([
+      [uuid(81), 0, 1000],
+      [uuid(82), 6800, 1200],
+      [uuid(83), 0, 5000],
+    ]);
+
+    const reordered = comicTimelineSchema.parse({
+      schemaVersion: 1, aspectRatio: "9:16",
+      video: [
+        { id: otherVideoId, takeId: uuid(610), sourceDurationMs: 4000, inMs: 0, outMs: 4000, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+        { id: videoId, takeId: uuid(611), sourceDurationMs: 8000, inMs: 0, outMs: 8000, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+      ],
+      voice: [], sfx, music: [], subtitles: [],
+    });
+    const layout = layoutComicTimeline(reordered);
+    expect(layout.sfx.map(item => item.startMs)).toEqual([4000, 10800, 4000]);
   });
 });

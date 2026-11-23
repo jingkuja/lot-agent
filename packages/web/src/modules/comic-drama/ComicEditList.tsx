@@ -4,17 +4,17 @@ import { useI18n } from "../../i18n/index.js";
 import { comicEditApi, editError } from "./edit-api.js";
 import { LibraryDialog } from "./LibraryParts.js";
 
-export function NewComicEdit({ seed, open, close }: { seed?: Pick<ComicEditCreate, "seriesId" | "takeId">; open: (id: string) => void; close: () => void }) {
+export function NewComicEdit({ seed, open, close }: {
+  seed?: Pick<ComicEditCreate, "seriesId" | "takeId">;
+  open: (id: string, opts?: { openAutoDialogue?: boolean }) => void;
+  close: () => void;
+}) {
   const { t } = useI18n();
   return <LibraryDialog title={t("新建剪辑工程")} submitLabel={t("创建工程")} close={close} describeError={editError} save={async (form, signal) => {
     const title = String(form.get("title") ?? "").trim();
     const project = await comicEditApi.create({ title, ...seed }, signal);
-    if (!signal.aborted && seed?.seriesId && form.get("autoDialogue") === "on") {
-      await comicEditApi.autoDialogue(project.id, {
-        expectedRevision: project.revision, includeVoice: true, includeSubtitles: true,
-      }, signal).catch(() => {});
-    }
-    if (!signal.aborted) open(project.id);
+    const wantsAutoDialogue = Boolean(seed?.seriesId && form.get("autoDialogue") === "on");
+    if (!signal.aborted) open(project.id, wantsAutoDialogue ? { openAutoDialogue: true } : undefined);
   }}>
     <label>{t("工程名称")}<input name="title" required autoFocus maxLength={120} /></label>
     {seed?.takeId && <p>{t("工程将锁定当前预览的片源版本。")}</p>}
@@ -22,13 +22,15 @@ export function NewComicEdit({ seed, open, close }: { seed?: Pick<ComicEditCreat
       <p>{t("工程将按分镜顺序加入本集当前采用的版本。")}</p>
       <label className="comic-sequel-option">
         <input type="checkbox" name="autoDialogue" />
-        {t("同时按分镜台词批量合成配音并铺字幕轨")}
+        {t("进入工程后核对范围并批量配音与字幕")}
       </label>
     </>}
   </LibraryDialog>;
 }
 
-export function ComicEditsIndex({ open, browse, currentSeries }: { open: (id: string) => void; browse: () => void; currentSeries?: string }) {
+export function ComicEditsIndex({ open, browse, currentSeries }: {
+  open: (id: string, opts?: { openAutoDialogue?: boolean }) => void; browse: () => void; currentSeries?: string;
+}) {
   const { t, locale } = useI18n();
   const [page, setPage] = useState<Page | "error" | null>(null);
   const [cursor, setCursor] = useState<string>();

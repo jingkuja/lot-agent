@@ -136,7 +136,9 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   const { id: _id, parentId: _parent, archivedAt: _archive, revision, ...fields } = (await current()).series;
   await request(series, "PATCH", { ...fields, expectedRevision: revision, videoModel: w6Grok });
   const clip = live.clips[0], clipPath = series + "/clips/" + clip.id;
-  await request(clipPath + "/keyframe/confirm", "POST", { expectedClipRevision: clip.revision, keyframeTakeId: frame.id });
+  const approved = await request<{ ok: true; selectionRevision: number }>(clipPath + "/keyframe/confirm", "POST", {
+    expectedClipRevision: clip.revision, expectedSelectionRevision: clip.selectionRevision ?? 1, keyframeTakeId: frame.id,
+  });
   const videoQuote = await request<ComicGenerationQuote>(path + "/generation-preview", "POST", {
     expectedSeriesRevision: (await current()).series.revision, mode: "from_keyframe", targets: [{ clipId: clip.id, expectedRevision: clip.revision }],
   });
@@ -144,7 +146,9 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   const submitted = await request<ComicImageRequest>(series + "/generate", "POST", { confirmationId: videoQuote.confirmationId }, 202);
   const video = (await settled(submitted.id)).takes[0];
   assert.equal(video.state, "ready");
-  await request(clipPath + "/video/adopt", "POST", { takeId: video.id, expectedClipRevision: clip.revision });
+  await request(clipPath + "/video/adopt", "POST", {
+    takeId: video.id, expectedClipRevision: clip.revision, expectedSelectionRevision: approved.selectionRevision,
+  });
   const edit = await request<ComicEdit>("/edits", "POST", { title: "W12 整集验收", seriesId }, 201);
   const firstItem = edit.timeline.video[0], editPath = "/edits/" + edit.id;
   assert.equal(firstItem.takeId, video.id);

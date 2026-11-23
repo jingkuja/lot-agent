@@ -3,7 +3,7 @@ import {
   comicUserPreferencesSchema, type ComicMedia, type ComicStylePreset, type ComicUserPreferences, type ComicUserSettings, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { requireComicChoice } from "./dictionary.js";
-import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
+import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
 
 const cd = "lot_comic_drama";
@@ -13,8 +13,8 @@ const mediaJson = `jsonb_build_object('id',m.id,'mime',m.mime,'sizeBytes',m.size
 export class PgComicSettings {
   constructor(private readonly pool: Pool) {}
 
-  async getPreferences(owner: string): Promise<ComicUserPreferences> {
-    const { rows } = await this.pool.query<{ preferences: unknown }>(
+  async getPreferences(owner: string, db: ComicQuery = this.pool): Promise<ComicUserPreferences> {
+    const { rows } = await db.query<{ preferences: unknown }>(
       `SELECT preferences FROM ${cd}.cd_user_state WHERE owner_id=$1`, [owner],
     );
     const parsed = comicUserPreferencesSchema.safeParse(rows[0]?.preferences ?? {});

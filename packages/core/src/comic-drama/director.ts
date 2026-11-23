@@ -62,6 +62,8 @@ export type ComicDirectorChatMessage = {
   content: string;
   createdAt: string;
   toolCalls?: ComicDirectorToolCallSummary[];
+  proposalId?: string;
+  confirmationId?: string;
 };
 export type ComicDirectorChatResponse = {
   conversationId: string;

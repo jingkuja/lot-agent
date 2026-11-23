@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { classifyComicTakeReconcile, COMIC_RECONCILE_SQL, needsComicTakeReconciliation } from "./operations-report.js";
+import {
+  classifyComicSpeechReconcile, classifyComicTakeReconcile, COMIC_RECONCILE_SQL, COMIC_SPEECH_RECONCILE_SQL,
+  needsComicSpeechReconciliation, needsComicTakeReconciliation,
+} from "./operations-report.js";
 
 describe("comic-drama reconciliation report classification", () => {
   it("includes gateway 5xx failures and distinguishes them from client 4xx rejections", () => {
@@ -34,5 +37,19 @@ describe("comic-drama reconciliation report classification", () => {
     expect(COMIC_RECONCILE_SQL).toContain("error_category");
     expect(COMIC_RECONCILE_SQL).toContain("VIDEO_GATEWAY_FAILED");
     expect(COMIC_RECONCILE_SQL).toContain("t.gateway_http_status>=500");
+  });
+
+  it("P1 #5: includes speech attempts and legacy speech cache rows in reconciliation classification and SQL", () => {
+    expect(needsComicSpeechReconciliation({ status: "unknown", error: "TRANSPORT_ERROR", gateway_http_status: null })).toBe(true);
+    expect(classifyComicSpeechReconcile({ status: "unknown", error: "TRANSPORT_ERROR", gateway_http_status: null })).toBe("unknown_submission");
+    expect(needsComicSpeechReconciliation({ status: "released", error: null, gateway_http_status: null })).toBe(true);
+    expect(classifyComicSpeechReconcile({ status: "released", error: null, gateway_http_status: null })).toBe("released");
+    expect(needsComicSpeechReconciliation({ status: "failed", error: "HTTP_ERROR", gateway_http_status: 503 })).toBe(true);
+    expect(classifyComicSpeechReconcile({ status: "failed", error: "HTTP_ERROR", gateway_http_status: 503 })).toBe("gateway_5xx");
+    expect(needsComicSpeechReconciliation({ status: "submitting", error: null, gateway_http_status: null, stale_submitting: true })).toBe(true);
+    expect(needsComicSpeechReconciliation({ status: "failed", error: "HTTP_ERROR", gateway_http_status: 400 })).toBe(false);
+    expect(COMIC_SPEECH_RECONCILE_SQL).toContain("lot_comic_drama.cd_speech_attempts");
+    expect(COMIC_SPEECH_RECONCILE_SQL).toContain("lot_comic_drama.cd_speech_cache");
+    expect(COMIC_SPEECH_RECONCILE_SQL).toContain("gateway_request_id");
   });
 });

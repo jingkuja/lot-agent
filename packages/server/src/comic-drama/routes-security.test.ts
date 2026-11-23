@@ -73,7 +73,7 @@ describe("comic-drama route security checks", () => {
       ...makeSeries(null),
       script: { version: 1, content: "剧情展示血腥虐杀和肢解。" },
       clips: [{
-        id: clipId, revision: 1, ordinal: 1,
+        id: clipId, revision: 1, selectionRevision: 1, ordinal: 1,
         draft: {
           schemaVersion: 1, durationMs: 4000, scene: "测试场景",
           shots: [{ id: takeId, framingKey: "medium", movementKey: "fixed", description: "镜头描述", durationShare: 100 }],

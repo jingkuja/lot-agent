@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, type ComicClipCheckIssue, type ComicDirectorChatMessage, type ComicDirectorDecision,
   type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicDramaDetail,
+  type ComicGenerationQuote,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicDirectorApi, comicDirectorError } from "./director-api.js";
 import { DirectorGeneration, DirectorRoleChoice, type DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
+import { comicGenerationApi } from "./generation-api.js";
+import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 
 export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole, openClip, onSeriesChanged }: {
   detail: ComicDramaDetail; locked: boolean; getSaved: () => Promise<ComicDramaDetail | null>;
@@ -31,6 +34,7 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
   const busy = working !== null;
   const [refresh, setRefresh] = useState(0);
   const [selected, setSelected] = useState("");
+  const [chatQuote, setChatQuote] = useState<ComicGenerationQuote | null>(null);
   const attempt = useRef<ComicDirectorInput>(null);
   const pending = useRef<AbortController>(null);
   const reload = () => setRefresh(value => value + 1);
@@ -107,15 +111,31 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
     };
     setState(cur => cur ? { ...cur, messages: [...(cur.messages ?? []), userMsg] } : cur);
     if (!overrideMessage) setChatInput("");
-    const res = await comicDirectorApi.chat(seriesId, { message: msg, expectedRevision: savedDetail.series.revision, language }, signal);
-    if (signal.aborted) return;
-    setState(cur => ({
-      conversationId: res.conversationId,
-      proposals: cur?.proposals ?? [],
-      quotes: cur?.quotes,
-      messages: [...(cur?.messages ?? []).filter(m => m.id !== userMsg.id), { ...userMsg, id: "u-" + res.reply.id }, res.reply],
-    }));
-    if (res.seriesUpdated) onSeriesChanged?.();
+    try {
+      const res = await comicDirectorApi.chat(seriesId, { message: msg, expectedRevision: savedDetail.series.revision, language }, signal);
+      if (signal.aborted) return;
+      setState(cur => {
+        const nextProposals = res.proposal
+          ? [res.proposal, ...(cur?.proposals ?? []).filter(row => row.id !== res.proposal!.id)]
+          : (cur?.proposals ?? []);
+        const nextQuotes = res.quote?.confirmationId
+          ? [{ quote: res.quote, confirmed: false }, ...(cur?.quotes ?? []).filter(q => q.quote.confirmationId !== res.quote!.confirmationId)]
+          : cur?.quotes;
+        return {
+          conversationId: res.conversationId,
+          proposals: nextProposals,
+          quotes: nextQuotes,
+          messages: [...(cur?.messages ?? []).filter(m => m.id !== userMsg.id), { ...userMsg, id: "u-" + res.reply.id }, res.reply],
+        };
+      });
+      if (res.proposal) setSelected(res.proposal.id);
+      if (res.seriesUpdated) onSeriesChanged?.();
+      if (res.proposal || res.quote) reload();
+    } catch (reason) {
+      setState(cur => cur ? { ...cur, messages: (cur.messages ?? []).filter(m => m.id !== userMsg.id) } : cur);
+      if (reason instanceof ApiClientError && reason.code === "REVISION_CONFLICT") onSeriesChanged?.();
+      throw reason;
+    }
   });
   const runCheck = () => void action("check", async signal => {
     const savedDetail = await getSaved();
@@ -164,7 +184,9 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
                 {issue.code === "SPEAKER_NOT_IN_CAST" ? t("说话人「{0}」未在出镜人物中", [issue.speaker])
                   : issue.code === "REFERENCE_LIMIT_EXCEEDED" ? t("参考图 {0}/{1} 张超限", [issue.count, issue.limit])
                     : issue.code === "DIALOGUE_TOO_LONG" ? t("台词约 {0} 秒超出镜头时长", [+(issue.estimatedMs / 1000).toFixed(1)])
-                      : t("角色「{0}」造型已更新", [issue.characterName])}
+                      : issue.code === "INVALID_MATERIAL_REFERENCE"
+                        ? t("绑定的素材「{0}」已失效", [issue.name ?? issue.materialId.slice(0, 8)])
+                        : t("角色「{0}」造型已更新", [issue.characterName])}
               </span>
             </li>
           ))}
@@ -189,10 +211,12 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
         </div>
         <div className="comic-chat-log" aria-live="polite">
           {messages.length === 0 && <p className="comic-generation-note">
-            {t("可直接让导演读取整集、修改单个分镜、重排顺序、检索角色或素材库、执行查漏。")}
+            {t("可直接让导演读取整集、修改单个分镜、重排顺序、拆分镜提案、发起费用预览、检索角色或素材库、执行查漏。")}
           </p>}
-          {messages.map(msg => (
-            <article key={msg.id} className={`comic-chat-bubble ${msg.role}`}>
+          {messages.map(msg => {
+            const linkedProposal = msg.proposalId ? proposals.find(item => item.id === msg.proposalId) : undefined;
+            const linkedQuote = msg.confirmationId ? state?.quotes?.find(item => item.quote.confirmationId === msg.confirmationId) : undefined;
+            return <article key={msg.id} className={`comic-chat-bubble ${msg.role}`}>
               <small>{msg.role === "user" ? t("我") : t("漫剧导演")}</small>
               <p>{msg.content}</p>
               {msg.toolCalls && msg.toolCalls.length > 0 && (
@@ -202,9 +226,49 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
                   ))}
                 </ul>
               )}
-            </article>
-          ))}
+              {linkedProposal && (
+                <ProposalCard key={linkedProposal.id} proposal={linkedProposal} busy={busy || locked}
+                  stale={linkedProposal.baseRevision !== revision}
+                  decide={decision => decide(linkedProposal, decision)}
+                  role={(index, input) => void action("decision", async () => {
+                    const outcome = await applyRole(linkedProposal, index, input);
+                    if (outcome) record({ ...linkedProposal, roleDecisions: { ...linkedProposal.roleDecisions, [index]: outcome } });
+                  })} />
+              )}
+              {linkedQuote && (
+                <div className="comic-director-proposal">
+                  <header>
+                    <strong>{t("生成费用预览")}</strong>
+                    <span role="status">{t(linkedQuote.confirmed ? "已确认生成" : "待确认费用")}</span>
+                  </header>
+                  <small>{t("{0} 个分镜", [linkedQuote.quote.items.length])}
+                    {linkedQuote.quote.skipped.length > 0 ? ` · ${t("跳过 {0} 项", [linkedQuote.quote.skipped.length])}` : ""}</small>
+                  <div className="comic-actions">
+                    <button type="button" className="primary" disabled={locked && !linkedQuote.confirmed} onClick={() => {
+                      const target = linkedQuote.quote.items[0]?.clipId;
+                      if (linkedQuote.confirmed && target) openClip(target);
+                      else setChatQuote(linkedQuote.quote);
+                    }}>{t(linkedQuote.confirmed ? "查看分镜生成" : "查看费用确认")}</button>
+                  </div>
+                </div>
+              )}
+            </article>;
+          })}
         </div>
+        {chatQuote && <GenerationQuoteDialog quote={chatQuote}
+          label={clipId => {
+            const target = detail.clips.find(item => item.id === clipId);
+            return target ? `${t("分镜 {0}", [target.ordinal])}${target.draft.scene ? " · " + target.draft.scene : ""}` : t("分镜");
+          }}
+          close={() => setChatQuote(null)}
+          confirm={id => comicGenerationApi.confirm({ resource: "series", id: seriesId }, id)}
+          submitted={() => {
+            const firstClip = chatQuote.items[0]?.clipId;
+            setChatQuote(null);
+            reload();
+            onSeriesChanged?.();
+            if (firstClip) openClip(firstClip);
+          }} />}
         <form className="comic-chat-form" onSubmit={event => { event.preventDefault(); sendChat(); }}>
           <fieldset disabled={busy || locked}>
             <textarea rows={3} maxLength={4000} value={chatInput} onChange={e => setChatInput(e.target.value)}

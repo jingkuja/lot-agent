@@ -85,11 +85,25 @@ export const comicVoiceAuditionSchema = z.object({
     z.object({ kind: z.literal("character"), characterId: id }).strict(),
   ]),
 }).strict();
-export const comicEditAutoDialogueSchema = z.object({
+export const comicVoiceAuditionReleaseSchema = comicVoiceAuditionSchema.extend({
+  acknowledgePossibleCharge: z.literal(true),
+}).strict();
+export const comicEditAutoDialogueOverrideSchema = z.object({
+  videoItemId: id,
+  lineId: id,
+  text: z.string().trim().min(1).max(1000).optional(),
+  speed: z.number().min(0.5).max(2).optional(),
+  overflowAction: z.enum(["trim", "skip"]).optional(),
+}).strict();
+export const comicEditAutoDialoguePreviewSchema = z.object({
   expectedRevision: revision,
   includeVoice: z.boolean().default(true),
   includeSubtitles: z.boolean().default(true),
   fallbackPreset: voice.optional(),
+  overrides: z.array(comicEditAutoDialogueOverrideSchema).max(300).optional(),
+}).strict();
+export const comicEditAutoDialogueSchema = comicEditAutoDialoguePreviewSchema.extend({
+  overflowMode: z.enum(["ask", "trim"]).default("ask"),
 }).strict();
 export const comicSpeechRequestSchema = z.object({
   expectedRevision: revision, expectedClipRevision: revision,
@@ -103,6 +117,9 @@ export const comicSpeechReleaseSchema = comicSpeechRequestSchema.extend({
 }).strict();
 export type ComicVoiceBind = z.infer<typeof comicVoiceBindSchema>;
 export type ComicVoiceAudition = z.infer<typeof comicVoiceAuditionSchema>;
+export type ComicVoiceAuditionRelease = z.infer<typeof comicVoiceAuditionReleaseSchema>;
+export type ComicEditAutoDialogueOverride = z.infer<typeof comicEditAutoDialogueOverrideSchema>;
+export type ComicEditAutoDialoguePreview = z.infer<typeof comicEditAutoDialoguePreviewSchema>;
 export type ComicEditAutoDialogue = z.infer<typeof comicEditAutoDialogueSchema>;
 export type ComicSpeechRequest = z.infer<typeof comicSpeechRequestSchema>;
 export type ComicSpeechRelease = z.infer<typeof comicSpeechReleaseSchema>;
@@ -120,10 +137,54 @@ export type ComicSpeechLines = {
   lines: { id: string; text: string; speaker: string | null; speed: number; emotionKey: string | null }[];
   characters: { id: string; name: string; aliases: string[] }[];
 };
-export type ComicSpeechTake = { mediaId: string; durationMs: number; cached: boolean };
+export type ComicSpeechTake = { mediaId: string; durationMs: number; cached: boolean; attemptId?: string };
+export type ComicAutoDialoguePlanLine = {
+  videoItemId: string;
+  clipId: string | null;
+  lineId: string;
+  speaker: string | null;
+  text: string;
+  speed: number;
+  status: "already_placed" | "cached" | "to_synthesize" | "unknown_blocked" | "no_voice" | "compliance_blocked" | "no_room";
+  remainingMs: number;
+  cachedDurationMs?: number;
+  overflowMs?: number;
+  suggestedSpeed?: number;
+  errorCode?: string;
+};
+export type ComicAutoDialoguePlan = {
+  totalLines: number;
+  alreadyPlacedCount: number;
+  cachedCount: number;
+  toSynthesizeCount: number;
+  blockedCount: number;
+  skippedCount: number;
+  overflowCount: number;
+  feeStatus: "free_cached" | "unverified_gateway";
+  lines: ComicAutoDialoguePlanLine[];
+};
+export type ComicAutoDialogueItemOutcome = {
+  videoItemId: string;
+  clipId: string | null;
+  lineId: string;
+  speaker: string | null;
+  text: string;
+  speed: number;
+  status: "applied" | "trimmed" | "overflow" | "failed" | "skipped";
+  cached: boolean;
+  audioDurationMs?: number;
+  remainingMs?: number;
+  suggestedSpeed?: number;
+  errorCode?: string;
+};
 export type ComicAutoDialogueResult = {
   edit: ComicEdit;
   voicedCount: number;
   subtitledCount: number;
+  cachedCount: number;
+  synthesizedCount: number;
   skippedLines: number;
+  overflowCount: number;
+  failedCount: number;
+  items: ComicAutoDialogueItemOutcome[];
 };

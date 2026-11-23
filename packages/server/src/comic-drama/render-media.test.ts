@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { COMIC_RENDER_MAX_INPUTS, comicTimelineSchema, layoutComicTimeline } from "@lot-agent/core/comic-drama";
 import { ffmpeg, inspectMedia, mediaCapabilities, mediaProcess } from "../marketing-video/media.js";
@@ -119,4 +121,50 @@ describe("comic render audio stem premixing", () => {
       await rm(folder, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("P2 #11: mutes original clip audio in FFmpeg export when clip volume is 0", async () => {
+    const caps = await mediaCapabilities();
+    if (!caps.composition) return;
+    const folder = await mkdtemp(join(tmpdir(), "lot-comic-mute-test-"));
+    try {
+      const videoPath = join(folder, "loud.mp4");
+      await mediaProcess(ffmpeg(), [
+        "-nostdin", "-v", "error",
+        "-f", "lavfi", "-i", "color=c=0x112233:s=320x568:r=30:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k", "-shortest", "-threads", "1", videoPath,
+      ], { timeoutMs: 20_000 });
+      const info = await inspectMedia(videoPath);
+      expect(info.audio).toBe(true);
+      const durationMs = Math.round(info.duration * 1000);
+      const takeId = uuid(901);
+      const timeline = comicTimelineSchema.parse({
+        schemaVersion: 1, aspectRatio: "9:16",
+        video: [{
+          id: uuid(902), takeId, sourceDurationMs: durationMs, inMs: 0, outMs: durationMs,
+          volume: 0, transitionIn: { kind: "cut", durationMs: 0 },
+        }],
+        voice: [], sfx: [], music: [], subtitles: [],
+      });
+      const rendered = await composeComicRender(
+        timeline,
+        { videos: new Map([[takeId, { path: videoPath, durationMs }]]), audio: new Map() },
+        AbortSignal.timeout(30_000),
+      );
+      try {
+        const execFileAsync = promisify(execFile);
+        const probe = await execFileAsync(ffmpeg(), [
+          "-nostdin", "-i", rendered.file, "-af", "volumedetect", "-f", "null", "-",
+        ], { timeout: 15_000 });
+        const maxVolMatch = /max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/.exec(probe.stderr);
+        expect(maxVolMatch).toBeTruthy();
+        expect(Number(maxVolMatch![1])).toBeLessThanOrEqual(-80);
+      } finally {
+        await rendered.dispose();
+      }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }, 45_000);
 });

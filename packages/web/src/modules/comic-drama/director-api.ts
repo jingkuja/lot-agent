@@ -37,7 +37,7 @@ const errors: Record<string, string> = {
   DIRECTOR_BUSY: "本集已有剧本提案正在生成",
   DIRECTOR_ARCHIVED: "归档剧集仅可查看提案",
   DIRECTOR_PROPOSAL_STALE: "剧集已更新，请基于最新修订生成提案",
-  REVISION_CONFLICT: "剧集已更新，请基于最新修订生成提案",
+  REVISION_CONFLICT: "剧集已被其他窗口更新，请刷新后重试",
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
 };
 export const comicDirectorError = (error: unknown) => error instanceof ApiClientError && error.code ? errors[error.code] ?? editError(error) : editError(error);

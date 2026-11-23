@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   checkComicClipIssues, type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip, type ComicDramaClipDraft,
-  type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialKind, type ComicMaterialRef, type ComicSeriesCast,
+  type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialKind, type ComicMaterialRef,
+  type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -144,6 +145,14 @@ function ClipIssueBanner({ issues, cast, disabled, addCast }: {
             ? t("角色「{0}」当前造型已晚于已生成版本，建议核对或重生成", [issue.characterName])
             : t("角色「{0}」在角色库中有更新，可到选角处同步", [issue.characterName])}</span>
         )}
+        {issue.code === "INVALID_MATERIAL_REFERENCE" && (
+          <span>{t("所绑定的{0}素材「{1}」已失效（{2}），请重新绑定或移除", [
+            t(issue.role === "scene" ? "场景" : issue.role === "prop" ? "道具" : "音效"),
+            issue.name ?? issue.materialId.slice(0, 8),
+            t(issue.reason === "ARCHIVED" ? "已归档" : issue.reason === "OUTDATED_VERSION" ? "已有新版"
+              : issue.reason === "WRONG_KIND" ? "类别不符" : "已缺失"),
+          ])}</span>
+        )}
       </li>
     ))}</ul>
   </div>;
@@ -175,7 +184,7 @@ function ClipFields({ draft, disabled, cast, change }: {
   const framing = useComicChoices("framing");
   const movement = useComicChoices("movement");
   const emotions = useComicChoices("emotion");
-  const [picker, setPicker] = useState<"scene" | "prop" | "sound" | null>(null);
+  const [picker, setPicker] = useState<{ kind: "scene" | "prop" | "sound"; shotIndex?: number } | null>(null);
   const firstFraming = framing.find(entry => !entry.inactive)?.key;
   const firstMovement = movement.find(entry => !entry.inactive)?.key;
   const update = (values: Partial<ComicDramaClipDraft>) => change({ ...draft, ...values });
@@ -188,14 +197,23 @@ function ClipFields({ draft, disabled, cast, change }: {
     const share = Math.floor(100 / shots.length);
     update({ shots: shots.map((shot, i) => ({ ...shot, durationShare: i === shots.length - 1 ? 100 - share * i : share })) });
   };
-  const pickMaterial = (kind: "scene" | "prop" | "sound", material: ComicMaterial) => {
+  const pickMaterial = (target: { kind: "scene" | "prop" | "sound"; shotIndex?: number }, material: ComicMaterial) => {
     const ref: ComicMaterialRef = { materialId: material.id, mediaId: material.media.id, name: material.name };
-    if (kind === "scene") {
+    if (target.kind === "scene") {
       update({ sceneRef: ref });
-    } else if (kind === "prop") {
+    } else if (target.kind === "prop") {
       const current = draft.propRefs ?? [];
       if (!current.some(item => item.mediaId === ref.mediaId) && current.length < 10) {
         update({ propRefs: [...current, ref] });
+      }
+    } else if (typeof target.shotIndex === "number") {
+      const shot = draft.shots[target.shotIndex];
+      if (shot) {
+        const current = shot.sfxRefs ?? [];
+        if (current.length < 5) {
+          const nextRef: ComicShotSfxRef = { ...ref, position: "start" };
+          updateShot(target.shotIndex, { sfxRefs: [...current, nextRef] });
+        }
       }
     } else {
       const current = draft.sfxRefs ?? [];
@@ -218,9 +236,9 @@ function ClipFields({ draft, disabled, cast, change }: {
 
     <div className="comic-section-heading"><h3>{t("场景 / 道具 / 音效素材引用")}</h3>
       <div className="comic-actions">
-        <button type="button" onClick={() => setPicker("scene")}>{t(draft.sceneRef ? "更换场景图" : "绑定场景图")}</button>
-        <button type="button" disabled={(draft.propRefs?.length ?? 0) >= 10} onClick={() => setPicker("prop")}>＋ {t("绑定道具图")}</button>
-        <button type="button" disabled={(draft.sfxRefs?.length ?? 0) >= 10} onClick={() => setPicker("sound")}>＋ {t("绑定音效")}</button>
+        <button type="button" onClick={() => setPicker({ kind: "scene" })}>{t(draft.sceneRef ? "更换场景图" : "绑定场景图")}</button>
+        <button type="button" disabled={(draft.propRefs?.length ?? 0) >= 10} onClick={() => setPicker({ kind: "prop" })}>＋ {t("绑定道具图")}</button>
+        <button type="button" disabled={(draft.sfxRefs?.length ?? 0) >= 10} onClick={() => setPicker({ kind: "sound" })}>＋ {t("绑定分镜音效")}</button>
       </div>
     </div>
     {(draft.sceneRef || (draft.propRefs?.length ?? 0) > 0 || (draft.sfxRefs?.length ?? 0) > 0) && (
@@ -241,7 +259,9 @@ function ClipFields({ draft, disabled, cast, change }: {
         </span>)}
       </div>
     )}
-    {picker && <MaterialRefPicker kind={picker} choose={mat => pickMaterial(picker, mat)} close={() => setPicker(null)} />}
+    {picker && picker.shotIndex === undefined && (
+      <MaterialRefPicker kind={picker.kind} choose={mat => pickMaterial(picker, mat)} close={() => setPicker(null)} />
+    )}
 
     <ClipCast cast={cast} current={draft.cast ?? []} change={actors => update({ cast: actors })} />
     <div className="comic-section-heading"><h3>{t("镜头")}</h3>
@@ -264,12 +284,38 @@ function ClipFields({ draft, disabled, cast, change }: {
               if (Number.isFinite(value)) update({ shots: rebalanceShares(draft.shots, index, value) });
             }} />
         </label>
+        <button type="button" disabled={(shot.sfxRefs?.length ?? 0) >= 5} onClick={() => setPicker({ kind: "sound", shotIndex: index })}>
+          ＋ {t("镜头音效")}
+        </button>
         <button type="button" disabled={draft.shots.length <= 1} onClick={() => setShots(draft.shots.filter(item => item.id !== shot.id))}>
           {t("删除镜头")}
         </button>
       </div>
       <label>{t("镜头描述")}<textarea rows={3} maxLength={2000} value={shot.description}
         onChange={event => updateShot(index, { description: event.target.value })} /></label>
+      {(shot.sfxRefs?.length ?? 0) > 0 && (
+        <div className="comic-ref-chips comic-shot-sfx-list">
+          {(shot.sfxRefs ?? []).map((sfx, sfxIndex) => (
+            <span className="comic-ref-chip comic-shot-sfx-chip" key={`${sfx.mediaId}-${sfxIndex}`}>
+              <span>{t("音效")} · {sfx.name ?? sfx.materialId.slice(0, 8)}</span>
+              <select aria-label={t("音效入点位置")} value={sfx.position ?? "start"} onChange={event => {
+                const pos = event.target.value as ComicShotSfxPosition;
+                const nextSfx = (shot.sfxRefs ?? []).map((item, i) => i === sfxIndex ? { ...item, position: pos, offsetMs: undefined } : item);
+                updateShot(index, { sfxRefs: nextSfx });
+              }}>
+                <option value="start">{t("镜头开始")}</option>
+                <option value="middle">{t("镜头中段")}</option>
+                <option value="end">{t("镜头结尾")}</option>
+              </select>
+              <button type="button" aria-label={t("移除")} onClick={() => {
+                const nextSfx = (shot.sfxRefs ?? []).filter((_, i) => i !== sfxIndex);
+                updateShot(index, { sfxRefs: nextSfx.length ? nextSfx : undefined });
+              }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {picker && picker.shotIndex === index && <MaterialRefPicker kind="sound" choose={mat => pickMaterial(picker, mat)} close={() => setPicker(null)} />}
     </div>)}
     <div className="comic-section-heading"><h3>{t("台词")}</h3>
       <button type="button" disabled={draft.lines.length >= 30} onClick={() => update({

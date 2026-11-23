@@ -3,17 +3,33 @@ import { complete, LLMIncompleteError, type ChatOptions, type LLMProvider, type 
 import {
   checkComicSeriesIssues, COMIC_DIRECTOR_AGENT_ID, COMIC_DIRECTOR_TOOL_NAMES, comicDirectorBreakdownSchema, comicDirectorDefinition,
   comicDirectorModelSchema, comicDramaClipDraftSchema, comicDramaIdSchema, comicMaterialKind,
-  type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorToolCallSummary, type ComicDramaClipDraft,
-  type ComicDramaRepository, type ComicLibraryRepository,
+  type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorProposal, type ComicDirectorToolCallSummary,
+  type ComicDramaClip, type ComicDramaClipDraft, type ComicDramaDetail, type ComicDramaRepository, type ComicGenerationMode,
+  type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicLibraryRepository,
 } from "@lot-agent/core/comic-drama";
 import { AgentConversationError, type AgentExtension } from "../services/agent-extensions.js";
 import type { PgComicDirector } from "./director-repository.js";
+import { ComicDramaError } from "./repository.js";
 import type { PgComicSettings } from "./settings-repository.js";
 
 export type ComicDirectorToolsDeps = {
   episodes: Pick<ComicDramaRepository, "get" | "saveClip" | "reorder">;
   library: Pick<ComicLibraryRepository, "listCharacters" | "listMaterials">;
   settings?: Pick<PgComicSettings, "getStylePreset">;
+  previewGeneration?: (owner: string, seriesId: string, body: ComicGenerationPreviewRequest) => Promise<ComicGenerationQuote>;
+};
+
+export type ComicDirectorToolsOptions = {
+  expectedRevision?: number;
+  initialDetail?: ComicDramaDetail;
+  language?: "zh" | "en" | "id";
+  userMessage?: string;
+  createProposal?: (
+    action: "script" | "breakdown" | "sequel",
+    text: string,
+    mode: "outline" | "paste",
+    expectedRevision: number,
+  ) => Promise<ComicDirectorProposal>;
 };
 
 const scoped = "Open this director conversation from its comic-drama episode";
@@ -84,10 +100,32 @@ export type DirectorToolExecution = {
   summary: string;
   ok: boolean;
   mutated?: boolean;
+  endsTurn?: boolean;
+  proposal?: ComicDirectorProposal;
+  quote?: ComicGenerationQuote;
   data?: unknown;
 };
 
-export function createComicDirectorTools(owner: string, seriesId: string, deps: ComicDirectorToolsDeps) {
+export function createComicDirectorTools(
+  owner: string,
+  seriesId: string,
+  deps: ComicDirectorToolsDeps,
+  options?: ComicDirectorToolsOptions,
+) {
+  let trackedRevision = options?.expectedRevision;
+  let knownClips: ComicDramaClip[] | null = options?.initialDetail ? [...options.initialDetail.clips] : null;
+  let knownDetail: ComicDramaDetail | null = options?.initialDetail ?? null;
+
+  const ensureRevisionMatch = async () => {
+    const fresh = await deps.episodes.get(owner, seriesId);
+    if (trackedRevision !== undefined && fresh.series.revision !== trackedRevision) {
+      throw new ComicDramaError("REVISION_CONFLICT", fresh.series.revision);
+    }
+    knownDetail = fresh;
+    if (!knownClips) knownClips = [...fresh.clips];
+    return fresh;
+  };
+
   const definitions: NonNullable<Parameters<LLMProvider["chat"]>[1]> = [
     {
       name: "read_series",
@@ -170,16 +208,73 @@ export function createComicDirectorTools(owner: string, seriesId: string, deps: 
     },
     {
       name: "check_series",
-      description: "Inspect the entire episode for missing cast speakers, reference limits, overlong dialogue, and outdated character snapshots.",
+      description: "Inspect the entire episode for missing cast speakers, reference limits, overlong dialogue, invalid materials, and outdated snapshots.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   ];
+
+  if (options?.createProposal) {
+    definitions.push(
+      {
+        name: "write_script",
+        description: "Generate a recoverable script proposal card for user review. Ends the turn and waits for user approval.",
+        parameters: {
+          type: "object",
+          properties: {
+            prompt: { type: "string", description: "Story outline or script instructions" },
+            mode: { type: "string", enum: ["outline", "paste"] },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "breakdown_script",
+        description: "Break down the episode script into an editable storyboard proposal card for user review. Ends the turn before any generation.",
+        parameters: {
+          type: "object",
+          properties: {
+            sourceText: { type: "string", description: "Optional script override; defaults to current episode script" },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "continue_series",
+        description: "Propose the next episode's script as a recoverable sequel proposal card. Ends the turn and waits for user approval.",
+        parameters: {
+          type: "object",
+          properties: {
+            outline: { type: "string", description: "Optional sequel direction or outline" },
+          },
+          additionalProperties: false,
+        },
+      },
+    );
+  }
+  if (deps.previewGeneration) {
+    definitions.push({
+      name: "request_generation",
+      description: "Create a cost quote preview card for keyframe or video generation without submitting any paid job. Ends the turn for confirmation.",
+      parameters: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string", enum: ["keyframe", "from_keyframe", "references"] },
+          clipIds: { type: "array", items: { type: "string" }, description: "Optional clip UUIDs (max 10); defaults to pending clips" },
+          replaceAdopted: { type: "boolean" },
+        },
+        additionalProperties: false,
+      },
+    });
+  }
 
   async function execute(name: string, rawArgs: unknown): Promise<DirectorToolExecution> {
     const args = (rawArgs && typeof rawArgs === "object" ? rawArgs : {}) as Record<string, unknown>;
     try {
       if (name === "read_series") {
         const detail = await deps.episodes.get(owner, seriesId);
+        knownDetail = detail;
+        if (!knownClips) knownClips = [...detail.clips];
         return {
           name, ok: true, summary: `已读取剧集「${detail.series.title}」（${detail.clips.length} 个分镜，${detail.cast.length} 名角色）`,
           data: {
@@ -232,19 +327,23 @@ export function createComicDirectorTools(owner: string, seriesId: string, deps: 
       }
       if (name === "reorder_clips") {
         const clipIds = Array.isArray(args.clipIds) ? args.clipIds.filter((item): item is string => typeof item === "string") : [];
-        const detail = await deps.episodes.get(owner, seriesId);
-        const updated = await deps.episodes.reorder(owner, seriesId, { expectedRevision: detail.series.revision, clipIds });
+        const detail = await ensureRevisionMatch();
+        const expectedRevision = trackedRevision ?? detail.series.revision;
+        const updated = await deps.episodes.reorder(owner, seriesId, { expectedRevision, clipIds });
+        if (trackedRevision !== undefined) trackedRevision = updated.seriesRevision;
+        knownClips = [...updated.clips];
         return {
           name, ok: true, mutated: true, summary: `已重排 ${updated.clips.length} 个分镜顺序`,
           data: { seriesRevision: updated.seriesRevision, order: updated.clips.map(clip => ({ id: clip.id, ordinal: clip.ordinal })) },
         };
       }
       if (name === "update_clip") {
-        const detail = await deps.episodes.get(owner, seriesId);
+        const detail = await ensureRevisionMatch();
+        const lookupClips = knownClips ?? detail.clips;
         const targetClip = typeof args.clipId === "string"
-          ? detail.clips.find(clip => clip.id === args.clipId)
+          ? lookupClips.find(clip => clip.id === args.clipId)
           : typeof args.ordinal === "number"
-            ? detail.clips.find(clip => clip.ordinal === args.ordinal)
+            ? lookupClips.find(clip => clip.ordinal === args.ordinal)
             : undefined;
         if (!targetClip) return { name, ok: false, summary: "未找到指定的分镜", data: { error: "CLIP_NOT_FOUND" } };
         const nextDraft: ComicDramaClipDraft = { ...targetClip.draft };
@@ -263,6 +362,7 @@ export function createComicDirectorTools(owner: string, seriesId: string, deps: 
             movementKey: typeof shot.movementKey === "string" ? shot.movementKey : (targetClip.draft.shots[i]?.movementKey ?? "fixed"),
             description: typeof shot.description === "string" ? shot.description.trim().slice(0, 2000) : "",
             durationShare: sharesValid ? shot.durationShare! : baseShare + (i < 100 % rawShots.length ? 1 : 0),
+            ...(targetClip.draft.shots[i]?.sfxRefs ? { sfxRefs: targetClip.draft.shots[i]!.sfxRefs } : {}),
           }));
         }
         if (Array.isArray(args.lines)) {
@@ -290,20 +390,97 @@ export function createComicDirectorTools(owner: string, seriesId: string, deps: 
         const validated = comicDramaClipDraftSchema.safeParse(nextDraft);
         if (!validated.success) return { name, ok: false, summary: "分镜修改参数不合法", data: { error: "INVALID_DRAFT" } };
         const saved = await deps.episodes.saveClip(owner, seriesId, targetClip.id, {
-          expectedRevision: targetClip.revision, draft: validated.data,
+          expectedRevision: targetClip.revision,
+          ...(trackedRevision !== undefined ? { expectedSeriesRevision: trackedRevision } : {}),
+          draft: validated.data,
         });
+        if (trackedRevision !== undefined) trackedRevision = saved.seriesRevision;
+        if (knownClips) {
+          knownClips = knownClips.map(clip => clip.id === saved.clip.id ? saved.clip : clip);
+        }
         return {
           name, ok: true, mutated: true, summary: `已更新分镜 ${targetClip.ordinal}`,
           data: { clipId: saved.clip.id, revision: saved.clip.revision, seriesRevision: saved.seriesRevision },
         };
       }
+      if ((name === "write_script" || name === "breakdown_script" || name === "continue_series") && options?.createProposal) {
+        const detail = await ensureRevisionMatch();
+        const expectedRevision = trackedRevision ?? detail.series.revision;
+        const action = name === "breakdown_script" ? "breakdown" : name === "continue_series" ? "sequel" : "script";
+        const fallbackText = action === "breakdown"
+          ? (detail.script?.content.trim() || options.userMessage || detail.series.logline || detail.series.title)
+          : (options.userMessage || detail.script?.content.trim() || detail.series.logline || detail.series.title);
+        const rawText = action === "breakdown" ? args.sourceText : action === "sequel" ? args.outline : args.prompt;
+        const text = (typeof rawText === "string" && rawText.trim() ? rawText.trim() : fallbackText).slice(0, 20_000);
+        if (!text) return { name, ok: false, summary: "缺少剧本或原稿内容，无法发起提案", data: { error: "MISSING_SOURCE_TEXT" } };
+        const mode: "outline" | "paste" = action === "script" && args.mode === "outline" ? "outline" : "paste";
+        const proposal = await options.createProposal(action, text, mode, expectedRevision);
+        const actionLabel = action === "breakdown" ? "拆分镜提案" : action === "sequel" ? "续集提案" : "剧本提案";
+        return {
+          name,
+          ok: proposal.status === "ready",
+          endsTurn: true,
+          proposal,
+          summary: proposal.status === "ready"
+            ? `已生成${actionLabel}，请在下方核对并确认应用`
+            : `已发起${actionLabel}（当前状态：${proposal.status}），请在卡片中查看结果`,
+          data: { proposalId: proposal.id, status: proposal.status, action },
+        };
+      }
+      if (name === "request_generation" && deps.previewGeneration) {
+        const detail = await ensureRevisionMatch();
+        const mode: ComicGenerationMode = args.mode === "from_keyframe" || args.mode === "references" ? args.mode : "keyframe";
+        const replaceAdopted = args.replaceAdopted === true;
+        const requestedIds = Array.isArray(args.clipIds)
+          ? [...new Set(args.clipIds.filter((item): item is string => typeof item === "string"))]
+          : [];
+        const picked = requestedIds.length
+          ? detail.clips.filter(clip => requestedIds.includes(clip.id)).slice(0, 10)
+          : detail.clips.filter(clip => mode === "keyframe"
+            ? !clip.progress?.keyframeApproved || clip.progress.keyframeStale
+            : !clip.progress?.adoptedVideoTakeId || clip.progress.adoptedStale).slice(0, 10);
+        if (!picked.length) {
+          return {
+            name,
+            ok: false,
+            summary: detail.clips.length
+              ? "当前没有待生成的分镜；如需重新生成，请明确指定分镜"
+              : "当前剧集还没有分镜，请先完成并应用拆分提案后再预览生成费用",
+            data: { error: detail.clips.length ? "NO_PENDING_CLIPS" : "NO_CLIPS_TO_GENERATE" },
+          };
+        }
+        const quote = await deps.previewGeneration(owner, seriesId, {
+          expectedSeriesRevision: detail.series.revision,
+          mode,
+          targets: picked.map(clip => ({
+            clipId: clip.id,
+            expectedRevision: clip.revision,
+            ...(replaceAdopted ? { replaceAdopted: true } : {}),
+          })),
+        });
+        return {
+          name,
+          ok: true,
+          endsTurn: true,
+          quote,
+          summary: quote.items.length
+            ? `已生成 ${quote.items.length} 个分镜的费用预览，确认后才会提交生成`
+            : `已核对 ${picked.length} 个分镜，暂无可提交项（跳过 ${quote.skipped.length} 项）`,
+          data: { confirmationId: quote.confirmationId, itemCount: quote.items.length, skippedCount: quote.skipped.length },
+        };
+      }
       return { name, ok: false, summary: `未知工具 ${name}`, data: { error: "UNKNOWN_TOOL" } };
     } catch (error) {
+      if (error instanceof ComicDramaError && error.code === "REVISION_CONFLICT") throw error;
       return { name, ok: false, summary: `执行 ${name} 失败`, data: { error: error instanceof Error ? error.message : "FAILED" } };
     }
   }
 
-  return { definitions, execute };
+  return {
+    definitions,
+    execute,
+    currentRevision: () => trackedRevision ?? knownDetail?.series.revision,
+  };
 }
 
 export class ComicDirector {
@@ -317,13 +494,33 @@ export class ComicDirector {
   async chat(owner: string, series: string, input: ComicDirectorChatInput, signal: AbortSignal): Promise<ComicDirectorChatResponse> {
     if (!this.toolsDeps) throw new Error("DIRECTOR_TOOLS_UNAVAILABLE");
     this.accepting?.();
+    const initialDetail = await this.toolsDeps.episodes.get(owner, series);
+    if (initialDetail.series.revision !== input.expectedRevision) {
+      throw new ComicDramaError("REVISION_CONFLICT", initialDetail.series.revision);
+    }
     const session = await this.repo.ensureChatSession(owner, series);
+    if (session.revision !== input.expectedRevision) {
+      throw new ComicDramaError("REVISION_CONFLICT", session.revision);
+    }
     await this.extension.beginTurn({
       agentId: COMIC_DIRECTOR_AGENT_ID, userId: owner, conversationId: session.conversationId, metadata: { comicSeriesId: series }, toolNames: [],
     });
     const { llm, usedModelId } = await this.extension.resolveModel(owner);
     const history = await this.repo.chatMessages(session.conversationId, 12);
-    const toolbox = createComicDirectorTools(owner, series, this.toolsDeps);
+    const toolbox = createComicDirectorTools(owner, series, this.toolsDeps, {
+      expectedRevision: input.expectedRevision,
+      initialDetail,
+      language: input.language,
+      userMessage: input.message,
+      createProposal: (action, text, mode, expectedRevision) => this.write(owner, series, {
+        requestId: randomUUID(),
+        expectedRevision,
+        mode,
+        language: input.language,
+        text,
+        action,
+      }, signal),
+    });
     const messages: Message[] = [
       {
         role: "system",
@@ -331,8 +528,11 @@ export class ComicDirector {
           comicDirectorDefinition.systemPrompt +
           " You are chatting inside the right-hand Director Assistant drawer of the comic-drama workspace. " +
           `Respond concisely in ${input.language === "en" ? "English" : input.language === "id" ? "Indonesian" : "Simplified Chinese"}. ` +
-          "Use read_series, check_series, search_characters, search_materials, update_clip, and reorder_clips when helpful. " +
-          "Never claim to submit paid image or video generation — guide the user to confirm in the quote dialog instead.",
+          "Use read_series, check_series, search_characters, search_materials, update_clip, reorder_clips, write_script, breakdown_script, " +
+          "continue_series, and request_generation when helpful. " +
+          "If the user asks to both break down a script and generate keyframes/videos, ONLY call breakdown_script first so the user can review " +
+          "and apply the storyboard before any generation quote preview is created. " +
+          "Never claim to submit paid image or video generation — request_generation only creates a quote preview card for user confirmation.",
       },
       ...history.map(item => ({ role: item.role, content: item.content })),
       { role: "user", content: input.message },
@@ -340,6 +540,8 @@ export class ComicDirector {
     const toolResults: Array<ComicDirectorToolCallSummary & { data?: unknown }> = [];
     let seriesUpdated = false;
     let replyText = "";
+    let proposal: ComicDirectorProposal | undefined;
+    let quote: ComicGenerationQuote | undefined;
     for (let step = 0; step < 4; step++) {
       signal.throwIfAborted();
       let stepText = "";
@@ -363,22 +565,34 @@ export class ComicDirector {
         break;
       }
       messages.push({ role: "assistant", content: stepText, toolCalls: calls });
+      let endedTurn = false;
       for (const call of calls) {
         const outcome = await toolbox.execute(call.name, call.arguments);
         if (outcome.mutated) seriesUpdated = true;
+        if (outcome.proposal) proposal = outcome.proposal;
+        if (outcome.quote) quote = outcome.quote;
         toolResults.push({ name: outcome.name, summary: outcome.summary, ok: outcome.ok, data: outcome.data });
         messages.push({
           role: "tool",
           toolCallId: call.id,
           content: JSON.stringify({ ok: outcome.ok, summary: outcome.summary, data: outcome.data }),
         });
+        if (outcome.endsTurn) {
+          endedTurn = true;
+          replyText = stepText.trim() || outcome.summary;
+          break;
+        }
       }
+      if (endedTurn) break;
     }
     if (!replyText) {
       replyText = toolResults.map(item => item.summary).join("；") || "已完成检查。";
     }
     const summaries: ComicDirectorToolCallSummary[] = toolResults.map(({ name, summary, ok }) => ({ name, summary, ok }));
-    const reply = await this.repo.recordChatTurn(session.conversationId, input.message, replyText, summaries, usedModelId);
+    const reply = await this.repo.recordChatTurn(session.conversationId, input.message, replyText, summaries, usedModelId, {
+      proposalId: proposal?.id,
+      confirmationId: quote?.confirmationId ?? undefined,
+    });
     const latest = await this.repo.episode(owner, series);
     return {
       conversationId: session.conversationId,
@@ -386,6 +600,8 @@ export class ComicDirector {
       toolResults,
       seriesUpdated,
       latestRevision: latest.revision,
+      ...(proposal ? { proposal } : {}),
+      ...(quote ? { quote } : {}),
     };
   }
 

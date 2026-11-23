@@ -1,28 +1,41 @@
 import type { Pool, PoolClient } from "pg";
 import {
-  comicDramaClipSchema, comicDramaIdSchema, comicDramaSeriesSchema, type ComicClipProgress, type ComicDramaClip, type ComicDramaClipDraft,
-  type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent, type ComicDramaDetail, type ComicDramaEpisodeSummary,
-  type ComicDramaListQuery, type ComicDramaListing, type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion,
-  type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate, type ComicSeriesCast,
+  comicDramaClipSchema, comicDramaIdSchema, comicDramaSeriesSchema, type ComicClipProgress, type ComicCurrencyAmount,
+  type ComicDramaClip, type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent,
+  type ComicDramaDetail, type ComicDramaEpisodeSummary, type ComicDramaListQuery, type ComicDramaListing, type ComicDramaReorder,
+  type ComicDramaRepository, type ComicDramaScriptVersion, type ComicDramaSeries, type ComicDramaSeriesInput,
+  type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate, type ComicEpisodeCostSummary, type ComicInvalidMaterialRef,
+  type ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 
 import { editSeriesCast, readSeriesCast, requireClipCast } from "./cast-store.js";
 import { readComicDictionary, requireComicChoice } from "./dictionary.js";
+import type { ComicQuery } from "./library-db.js";
 import { comicQuoteCurrency } from "./pricing.js";
+
+export type ComicEpisodeCostEstimate = {
+  imageMicros: number | null;
+  videoPerSecMicros: number | null;
+  currency: "CNY" | "USD";
+};
 
 export type ComicEpisodeCostEstimator = (
   owner: string,
   videoModel: string | null,
-) => Promise<{ imageMicros: number | null; videoPerSecMicros: number | null; currency: "CNY" | "USD" }>;
+  db?: ComicQuery,
+) => Promise<ComicEpisodeCostEstimate>;
 
 const seriesFields = `id, parent_id AS "parentId", title, logline, series_group AS "seriesGroup", episode_no AS "episodeNo",
   style_key AS "styleKey", aspect_ratio AS "aspectRatio", video_model AS "videoModel", revision, archived_at AS "archivedAt"`;
-const clipFields = "id, revision, ordinal, draft";
+const clipFields = 'id, revision, selection_revision AS "selectionRevision", ordinal, draft';
 type SeriesRow = Omit<ComicDramaSeries, "archivedAt"> & { archivedAt: Date | null };
 const asSeries = (row: SeriesRow) => comicDramaSeriesSchema.parse({ ...row, archivedAt: row.archivedAt?.toISOString() ?? null });
 
 export class ComicDramaError extends Error {
-  constructor(readonly code: "NOT_FOUND" | "REVISION_CONFLICT" | "INVALID_ORDER" | "INVALID_CURSOR", readonly currentRevision?: number) {
+  constructor(
+    readonly code: "NOT_FOUND" | "REVISION_CONFLICT" | "INVALID_ORDER" | "INVALID_CURSOR" | "INVALID_MATERIAL_REFERENCE",
+    readonly currentRevision?: number,
+  ) {
     super(code);
   }
 }
@@ -49,13 +62,230 @@ type ClipMetaRow = {
   adoptedRefs: unknown;
 };
 
-type SpendRow = {
+export type EpisodeSpendRow = {
   amountMicros: number | null;
   unit: string | null;
   durationMs: number | null;
   status: string;
+  submitState?: string | null;
+  error?: string | null;
+  gatewayHttpStatus?: number | null;
   currency: string | null;
+  settledAmountMicros?: string | number | null;
+  settledCurrency?: string | null;
 };
+
+type MaterialRefEntry = {
+  role: "scene" | "prop" | "sfx";
+  materialId: string;
+  mediaId: string;
+  name?: string;
+};
+
+type MaterialCheckRow = {
+  materialId: string;
+  kind: string;
+  archived: boolean;
+  mediaId: string | null;
+  mime: string | null;
+  version: number | null;
+  latestVersion: number | null;
+};
+
+const CURRENCY_ORDER: readonly ("CNY" | "USD")[] = ["CNY", "USD"];
+const isCurrency = (value: unknown): value is "CNY" | "USD" => value === "CNY" || value === "USD";
+
+function toCurrencyAmounts(totals: Map<"CNY" | "USD", number>): ComicCurrencyAmount[] {
+  const result: ComicCurrencyAmount[] = [];
+  for (const currency of CURRENCY_ORDER) {
+    const amountMicros = totals.get(currency);
+    if (amountMicros !== undefined) result.push({ currency, amountMicros });
+  }
+  return result;
+}
+
+/** Pure episode cost breakdown separating settled charges, unbilled quotes, remaining estimate and reconcile items per currency. */
+export function summarizeEpisodeCosts(
+  rows: readonly EpisodeSpendRow[],
+  clips: readonly ComicDramaClip[],
+  estimate: ComicEpisodeCostEstimate | null,
+  defaultCurrency: "CNY" | "USD" = comicQuoteCurrency(),
+): {
+  costs: ComicEpisodeCostSummary;
+  estimatedMicros: number | null;
+  estimatedUnverifiedCount: number;
+  spentMicros: number;
+  spentUnverifiedCount: number;
+  currency: "CNY" | "USD";
+} {
+  const settledTotals = new Map<"CNY" | "USD", number>();
+  const quotedTotals = new Map<"CNY" | "USD", number>();
+  let settledTakeCount = 0;
+  let unbilledReadyCount = 0;
+  let pendingReconcileCount = 0;
+
+  for (const row of rows) {
+    const parsedSettled = row.settledAmountMicros !== null && row.settledAmountMicros !== undefined
+      ? Number(row.settledAmountMicros)
+      : Number.NaN;
+    if (Number.isFinite(parsedSettled) && parsedSettled >= 0 && isCurrency(row.settledCurrency)) {
+      settledTotals.set(row.settledCurrency, (settledTotals.get(row.settledCurrency) ?? 0) + Math.round(parsedSettled));
+      settledTakeCount += 1;
+      continue;
+    }
+
+    const gateway5xx = row.error === "VIDEO_GATEWAY_FAILED"
+      || (typeof row.gatewayHttpStatus === "number" && row.gatewayHttpStatus >= 500);
+    const needsReconcile = row.status === "unknown"
+      || row.status === "released"
+      || row.status === "recoverable"
+      || row.submitState === "unknown"
+      || gateway5xx;
+    if (needsReconcile) {
+      pendingReconcileCount += 1;
+      continue;
+    }
+
+    if (row.status !== "ready") continue;
+    unbilledReadyCount += 1;
+    if (typeof row.amountMicros === "number" && Number.isFinite(row.amountMicros) && isCurrency(row.currency)) {
+      const qty = row.unit === "second" && row.durationMs ? row.durationMs / 1000 : 1;
+      quotedTotals.set(row.currency, (quotedTotals.get(row.currency) ?? 0) + Math.round(row.amountMicros * qty));
+    } else {
+      pendingReconcileCount += 1;
+    }
+  }
+
+  const estimateCurrency: "CNY" | "USD" = estimate?.currency ?? defaultCurrency;
+  let estimatedMicros: number | null = 0;
+  let estimatedUnverifiedCount = 0;
+  for (const clip of clips) {
+    const hasReadyVideo = clip.progress?.videoState === "ready";
+    const hasApprovedFrame = !!clip.progress?.keyframeApproved;
+    if (!hasApprovedFrame) {
+      if (estimate && estimate.imageMicros !== null) {
+        if (estimatedMicros !== null) estimatedMicros += estimate.imageMicros;
+      } else {
+        estimatedMicros = null;
+        estimatedUnverifiedCount += 1;
+      }
+    }
+    if (!hasReadyVideo) {
+      if (estimate && estimate.videoPerSecMicros !== null) {
+        if (estimatedMicros !== null) estimatedMicros += Math.round(estimate.videoPerSecMicros * (clip.draft.durationMs / 1000));
+      } else {
+        estimatedMicros = null;
+        estimatedUnverifiedCount += 1;
+      }
+    }
+  }
+
+  const settled = toCurrencyAmounts(settledTotals);
+  const quotedUnbilled = toCurrencyAmounts(quotedTotals);
+  const costs: ComicEpisodeCostSummary = {
+    settled,
+    settledTakeCount,
+    quotedUnbilled,
+    unbilledReadyCount,
+    remainingEstimate: {
+      currency: estimateCurrency,
+      amountMicros: estimatedMicros,
+      unverifiedCount: estimatedUnverifiedCount,
+    },
+    pendingReconcileCount,
+  };
+  const spentMicros = settled.length === 1
+    ? settled[0].amountMicros
+    : (settledTotals.get(estimateCurrency) ?? 0);
+  const displayCurrency = settled.length === 1 ? settled[0].currency : estimateCurrency;
+
+  return {
+    costs,
+    estimatedMicros,
+    estimatedUnverifiedCount,
+    spentMicros,
+    spentUnverifiedCount: pendingReconcileCount + unbilledReadyCount,
+    currency: displayCurrency,
+  };
+}
+
+function collectDraftMaterialRefs(draft: ComicDramaClipDraft): MaterialRefEntry[] {
+  const entries: MaterialRefEntry[] = [];
+  if (draft.sceneRef) entries.push({ role: "scene", ...draft.sceneRef });
+  for (const ref of draft.propRefs ?? []) entries.push({ role: "prop", ...ref });
+  for (const ref of draft.sfxRefs ?? []) entries.push({ role: "sfx", ...ref });
+  for (const shot of draft.shots) {
+    for (const ref of shot.sfxRefs ?? []) entries.push({ role: "sfx", ...ref });
+  }
+  return entries;
+}
+
+const materialRefKey = (entry: Pick<MaterialRefEntry, "role" | "materialId" | "mediaId">) =>
+  `${entry.role}:${entry.materialId}:${entry.mediaId}`;
+
+function expectedMaterialKind(role: MaterialRefEntry["role"]): "scene" | "prop" | "sound" {
+  return role === "sfx" ? "sound" : role;
+}
+
+function isValidMaterialMime(role: MaterialRefEntry["role"], mime: string | null): boolean {
+  if (!mime) return false;
+  if (role === "sfx") return mime === "audio/mpeg" || mime === "audio/wav";
+  return mime.startsWith("image/");
+}
+
+async function inspectMaterialRefs(
+  client: ComicQuery,
+  owner: string,
+  entries: readonly MaterialRefEntry[],
+): Promise<Map<string, ComicInvalidMaterialRef>> {
+  const invalid = new Map<string, ComicInvalidMaterialRef>();
+  if (!entries.length) return invalid;
+  const materialIds = [...new Set(entries.map(item => item.materialId))];
+  const { rows } = await client.query<MaterialCheckRow>(
+    `SELECT m.id AS "materialId", m.kind, (m.archived_at IS NOT NULL) AS archived,
+       v.media_id AS "mediaId", f.mime, v.version,
+       max(v.version) OVER (PARTITION BY m.id) AS "latestVersion"
+     FROM lot_comic_drama.cd_materials m
+     LEFT JOIN lot_comic_drama.cd_material_versions v ON (v.owner_id, v.material_id) = (m.owner_id, m.id)
+     LEFT JOIN lot_comic_drama.cd_media f ON (f.owner_id, f.id) = (v.owner_id, v.media_id)
+     WHERE m.owner_id=$1 AND m.id=ANY($2::uuid[])
+     ORDER BY v.version DESC NULLS LAST`,
+    [owner, materialIds],
+  );
+  const byMaterial = new Map<string, MaterialCheckRow[]>();
+  for (const row of rows) {
+    const list = byMaterial.get(row.materialId) ?? [];
+    list.push(row);
+    byMaterial.set(row.materialId, list);
+  }
+  for (const entry of entries) {
+    const key = materialRefKey(entry);
+    if (invalid.has(key)) continue;
+    const matRows = byMaterial.get(entry.materialId);
+    if (!matRows?.length) {
+      invalid.set(key, { ...entry, reason: "MISSING" });
+      continue;
+    }
+    const head = matRows[0]!;
+    if (head.archived) {
+      invalid.set(key, { ...entry, reason: "ARCHIVED" });
+      continue;
+    }
+    if (head.kind !== expectedMaterialKind(entry.role)) {
+      invalid.set(key, { ...entry, reason: "WRONG_KIND" });
+      continue;
+    }
+    const versionRow = matRows.find(row => row.mediaId === entry.mediaId);
+    if (!versionRow || !isValidMaterialMime(entry.role, versionRow.mime)) {
+      invalid.set(key, { ...entry, reason: "MISSING" });
+      continue;
+    }
+    if (versionRow.latestVersion !== null && versionRow.version !== versionRow.latestVersion) {
+      invalid.set(key, { ...entry, reason: "OUTDATED_VERSION" });
+    }
+  }
+  return invalid;
+}
 
 function isCastSnapshotStale(refs: unknown, cast: readonly ComicSeriesCast[]): boolean {
   if (!Array.isArray(refs) || !cast.length) return false;
@@ -143,6 +373,8 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         value === "recoverable" || value === "unknown") return value;
       return "none";
     };
+    const allMaterialRefs = clips.flatMap(clip => collectDraftMaterialRefs(clip.draft));
+    const invalidMaterialMap = await inspectMaterialRefs(client, owner, allMaterialRefs);
     const enriched = clips.map(clip => {
       const meta = byId.get(clip.id);
       if (!meta) return clip;
@@ -152,6 +384,17 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       const keyframeApproved = takeApproved || manualApproved;
       const keyframeMediaId = takeApproved ? meta.keyframeTakeMediaId : manualApproved ? meta.keyframeMediaId : meta.keyframeTakeMediaId;
       const keyframeStale = !!meta.keyframeTakeId && meta.keyframeTakeState === "ready" && meta.keyframeTakeRev !== clip.revision;
+      const seenInvalid = new Set<string>();
+      const invalidMaterialRefs: ComicInvalidMaterialRef[] = [];
+      for (const entry of collectDraftMaterialRefs(clip.draft)) {
+        const key = materialRefKey(entry);
+        if (seenInvalid.has(key)) continue;
+        const issue = invalidMaterialMap.get(key);
+        if (issue) {
+          seenInvalid.add(key);
+          invalidMaterialRefs.push(issue);
+        }
+      }
       const progress: ComicClipProgress = {
         keyframeState: keyframeApproved ? "ready" : asState(meta.latestImageState),
         keyframeMediaId: keyframeMediaId ?? null,
@@ -164,6 +407,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         adoptedVideoMediaId: meta.adoptedMediaId,
         adoptedStale: !!meta.adoptedVideoTakeId && meta.adoptedClipRev !== null && meta.adoptedClipRev !== clip.revision,
         castSnapshotStale: isCastSnapshotStale(meta.adoptedRefs, cast),
+        ...(invalidMaterialRefs.length ? { invalidMaterialRefs } : {}),
       };
       return { ...clip, progress };
     });
@@ -173,58 +417,31 @@ export class PgComicDramaRepository implements ComicDramaRepository {
   private async buildSummary(
     client: PoolClient, owner: string, series: ComicDramaSeries, clips: ComicDramaClip[], completedCount: number, generatingCount: number,
   ): Promise<ComicDramaEpisodeSummary> {
-    const { rows: spendRows } = await client.query<SpendRow>(
+    const { rows: spendRows } = await client.query<EpisodeSpendRow>(
       `SELECT (r.frozen->'price'->>'amountMicros')::double precision AS "amountMicros",
          r.frozen->'price'->>'unit' AS unit,
          (t.input->>'durationMs')::int AS "durationMs",
-         t.status,
-         r.frozen->'price'->>'currency' AS currency
+         CASE WHEN t.status IN ('pending','running','recoverable') AND coalesce(job.status,'failed') NOT IN ('pending','running') THEN
+           CASE WHEN (CASE WHEN t.video_version IS NOT NULL
+             THEN coalesce(t.submit_state,'unsubmitted') IN ('unsubmitted','accepted','output')
+             ELSE (receipt.state IN ('submitted','completed') OR receipt.state IS NULL) END)
+             THEN 'recoverable' WHEN receipt.state='failed' THEN 'failed' ELSE 'unknown' END
+           ELSE t.status END AS status,
+         t.submit_state AS "submitState",
+         coalesce(t.error, receipt.error) AS error,
+         t.gateway_http_status AS "gatewayHttpStatus",
+         r.frozen->'price'->>'currency' AS currency,
+         t.settled_amount_micros::text AS "settledAmountMicros",
+         t.settled_currency AS "settledCurrency"
        FROM lot_comic_drama.cd_takes t
        JOIN lot_comic_drama.cd_generation_requests r ON (r.owner_id, r.id) = (t.owner_id, t.request_id)
+       LEFT JOIN tasks job ON job.id = r.task_id AND job.user_id = t.owner_id::text
+       LEFT JOIN image_call_receipts receipt ON receipt.task_id = job.id AND receipt.user_id = t.owner_id::text AND receipt.slot = t.slot
        WHERE r.owner_id=$1 AND r.series_id=$2 AND r.confirmed_at IS NOT NULL`,
       [owner, series.id],
     );
-    let spentMicros = 0;
-    let spentUnverifiedCount = 0;
-    let currency: "CNY" | "USD" = comicQuoteCurrency();
-    for (const row of spendRows) {
-      if (row.currency === "USD" || row.currency === "CNY") currency = row.currency;
-      if (row.status === "unknown") {
-        spentUnverifiedCount += 1;
-        continue;
-      }
-      if (row.status !== "ready") continue;
-      if (typeof row.amountMicros === "number" && Number.isFinite(row.amountMicros)) {
-        const qty = row.unit === "second" && row.durationMs ? row.durationMs / 1000 : 1;
-        spentMicros += Math.round(row.amountMicros * qty);
-      } else {
-        spentUnverifiedCount += 1;
-      }
-    }
-    const estimate = this.costEstimator ? await this.costEstimator(owner, series.videoModel).catch(() => null) : null;
-    if (estimate) currency = estimate.currency;
-    let estimatedMicros: number | null = 0;
-    let estimatedUnverifiedCount = 0;
-    for (const clip of clips) {
-      const hasReadyVideo = clip.progress?.videoState === "ready";
-      const hasApprovedFrame = !!clip.progress?.keyframeApproved;
-      if (!hasApprovedFrame) {
-        if (estimate && estimate.imageMicros !== null) {
-          if (estimatedMicros !== null) estimatedMicros += estimate.imageMicros;
-        } else {
-          estimatedMicros = null;
-          estimatedUnverifiedCount += 1;
-        }
-      }
-      if (!hasReadyVideo) {
-        if (estimate && estimate.videoPerSecMicros !== null) {
-          if (estimatedMicros !== null) estimatedMicros += Math.round(estimate.videoPerSecMicros * (clip.draft.durationMs / 1000));
-        } else {
-          estimatedMicros = null;
-          estimatedUnverifiedCount += 1;
-        }
-      }
-    }
+    const estimate = this.costEstimator ? await this.costEstimator(owner, series.videoModel, client).catch(() => null) : null;
+    const costBreakdown = summarizeEpisodeCosts(spendRows, clips, estimate, comicQuoteCurrency());
     return {
       seriesId: series.id,
       title: series.title,
@@ -233,12 +450,25 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       completedCount,
       generatingCount,
       totalDurationMs: clips.reduce((sum, clip) => sum + clip.draft.durationMs, 0),
-      estimatedMicros,
-      estimatedUnverifiedCount,
-      spentMicros,
-      spentUnverifiedCount,
-      currency,
+      ...costBreakdown,
     };
+  }
+
+  async recordTakeSettlement(
+    owner: string,
+    takeId: string,
+    settlement: { amountMicros: number; currency: "CNY" | "USD"; source?: string },
+  ): Promise<boolean> {
+    if (!Number.isInteger(settlement.amountMicros) || settlement.amountMicros < 0) {
+      throw new ComicDramaError("INVALID_ORDER");
+    }
+    const { rowCount } = await this.pool.query(
+      `UPDATE lot_comic_drama.cd_takes
+       SET settled_amount_micros=$3, settled_currency=$4, settled_at=now(), settled_source=$5
+       WHERE owner_id=$1 AND id=$2`,
+      [owner, takeId, settlement.amountMicros, settlement.currency, settlement.source ?? "gateway"],
+    );
+    return (rowCount ?? 0) > 0;
   }
 
   private async content(client: PoolClient, id: string, seriesRevision: number): Promise<ComicDramaContent> {
@@ -529,9 +759,10 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return comicDramaClipSchema.parse(rows[0]);
   }
 
-  saveClip(owner: string, id: string, clipId: string, { expectedRevision, draft }: ComicDramaClipUpdate) {
+  saveClip(owner: string, id: string, clipId: string, { expectedRevision, expectedSeriesRevision, draft }: ComicDramaClipUpdate) {
     return this.transaction(async client => {
-      await this.series(client, owner, id, true);
+      const series = await this.series(client, owner, id, true);
+      if (expectedSeriesRevision !== undefined) requireRevision(series.revision, expectedSeriesRevision);
       const existing = await this.clip(client, id, clipId);
       requireRevision(existing.revision, expectedRevision);
       const existingFramings = new Set(existing.draft.shots.map(shot => shot.framingKey));
@@ -547,6 +778,12 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         if (!existingEmotions.has(key)) await requireComicChoice(client, owner, "emotion", key);
       }
       await requireClipCast(client, id, draft.cast);
+      const existingMatKeys = new Set(collectDraftMaterialRefs(existing.draft).map(materialRefKey));
+      const addedMats = collectDraftMaterialRefs(draft).filter(entry => !existingMatKeys.has(materialRefKey(entry)));
+      if (addedMats.length) {
+        const invalidMats = await inspectMaterialRefs(client, owner, addedMats);
+        if (invalidMats.size > 0) throw new ComicDramaError("INVALID_MATERIAL_REFERENCE");
+      }
       const { rows } = await client.query(`UPDATE lot_comic_drama.cd_clips SET draft=$2,revision=revision+1,updated_at=clock_timestamp()
         WHERE id=$1 RETURNING ${clipFields}`, [clipId, draft]);
       return { clip: comicDramaClipSchema.parse(rows[0]), seriesRevision: await this.bump(client, id) };

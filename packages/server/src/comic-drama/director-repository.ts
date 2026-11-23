@@ -100,12 +100,16 @@ export class PgComicDirector {
       const toolCalls = Array.isArray(row.metadata?.toolCalls)
         ? row.metadata.toolCalls as ComicDirectorToolCallSummary[]
         : undefined;
+      const proposalId = typeof row.metadata?.proposalId === "string" ? row.metadata.proposalId : undefined;
+      const confirmationId = typeof row.metadata?.confirmationId === "string" ? row.metadata.confirmationId : undefined;
       return {
         id: row.id,
         role: row.role,
         content: row.content,
         createdAt: row.createdAt.toISOString(),
         ...(toolCalls?.length ? { toolCalls } : {}),
+        ...(proposalId ? { proposalId } : {}),
+        ...(confirmationId ? { confirmationId } : {}),
       };
     });
   }
@@ -124,16 +128,23 @@ export class PgComicDirector {
     assistantText: string,
     toolCalls: ComicDirectorToolCallSummary[],
     model?: string,
+    cards?: { proposalId?: string; confirmationId?: string },
   ): Promise<ComicDirectorChatMessage> {
     return libraryTransaction(this.pool, async db => {
       await db.query(
         "INSERT INTO messages(conversation_id,role,content,metadata) VALUES($1,'user',$2,$3)",
         [conversationId, userText, { comicDirectorChat: true }],
       );
+      const metadata = {
+        comicDirectorChat: true,
+        ...(toolCalls.length ? { toolCalls } : {}),
+        ...(cards?.proposalId ? { proposalId: cards.proposalId, endsTurn: true } : {}),
+        ...(cards?.confirmationId ? { confirmationId: cards.confirmationId, endsTurn: true } : {}),
+      };
       const { rows: [saved] } = await db.query<{ id: string; createdAt: Date }>(
         `INSERT INTO messages(conversation_id,role,content,model,metadata) VALUES($1,'assistant',$2,$3,$4)
          RETURNING id, created_at AS "createdAt"`,
-        [conversationId, assistantText, model ?? null, { comicDirectorChat: true, ...(toolCalls.length ? { toolCalls } : {}) }],
+        [conversationId, assistantText, model ?? null, metadata],
       );
       await db.query("UPDATE conversations SET updated_at=now(),model=$2 WHERE id=$1", [conversationId, model ?? null]);
       return {
@@ -142,6 +153,8 @@ export class PgComicDirector {
         content: assistantText,
         createdAt: saved.createdAt.toISOString(),
         ...(toolCalls.length ? { toolCalls } : {}),
+        ...(cards?.proposalId ? { proposalId: cards.proposalId } : {}),
+        ...(cards?.confirmationId ? { confirmationId: cards.confirmationId } : {}),
       };
     });
   }

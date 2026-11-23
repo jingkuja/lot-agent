@@ -45,12 +45,28 @@ export const comicDramaSeriesSchema = comicDramaSeriesFieldsSchema.extend({
   archivedAt: z.string().datetime().nullable(),
 }).strict();
 
+export const comicMaterialRefSchema = z.object({
+  materialId: id,
+  mediaId: id,
+  name: z.string().trim().min(1).max(120).optional(),
+}).strict();
+export type ComicMaterialRef = z.infer<typeof comicMaterialRefSchema>;
+
+export const comicShotSfxPositionSchema = z.enum(["start", "middle", "end"]);
+export type ComicShotSfxPosition = z.infer<typeof comicShotSfxPositionSchema>;
+export const comicShotSfxRefSchema = comicMaterialRefSchema.extend({
+  position: comicShotSfxPositionSchema.optional(),
+  offsetMs: z.number().int().min(0).max(60_000).optional(),
+}).strict();
+export type ComicShotSfxRef = z.infer<typeof comicShotSfxRefSchema>;
+
 const shot = z.object({
   id,
   framingKey: dictionaryKey,
   movementKey: dictionaryKey,
   description: z.string().trim().max(2000),
   durationShare: z.number().int().min(1).max(100),
+  sfxRefs: z.array(comicShotSfxRefSchema).max(5).optional(),
 }).strict();
 
 const line = z.object({
@@ -60,13 +76,6 @@ const line = z.object({
   emotionKey: dictionaryKey.nullable(),
   speed: z.number().min(0.5).max(2),
 }).strict();
-
-export const comicMaterialRefSchema = z.object({
-  materialId: id,
-  mediaId: id,
-  name: z.string().trim().min(1).max(120).optional(),
-}).strict();
-export type ComicMaterialRef = z.infer<typeof comicMaterialRefSchema>;
 
 export const comicDramaClipDraftSchema = z.object({
   schemaVersion: z.literal(1),
@@ -90,6 +99,14 @@ export const comicDramaClipDraftSchema = z.object({
   }
 });
 
+export type ComicInvalidMaterialRef = {
+  role: "scene" | "prop" | "sfx";
+  materialId: string;
+  mediaId: string;
+  name?: string;
+  reason: "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
+};
+
 export type ComicClipProgress = {
   keyframeState: "none" | "pending" | "running" | "ready" | "failed" | "recoverable" | "unknown";
   keyframeMediaId: string | null;
@@ -102,11 +119,13 @@ export type ComicClipProgress = {
   adoptedVideoMediaId: string | null;
   adoptedStale: boolean;
   castSnapshotStale: boolean;
+  invalidMaterialRefs?: ComicInvalidMaterialRef[];
 };
 
 export const comicDramaClipSchema = z.object({
   id,
   revision,
+  selectionRevision: revision.default(1),
   ordinal: z.number().int().positive(),
   draft: comicDramaClipDraftSchema,
 }).strict();
@@ -119,6 +138,7 @@ export const comicAddClipSchema = z.object({
 
 export const updateComicDramaClipSchema = z.object({
   expectedRevision: revision,
+  expectedSeriesRevision: revision.optional(),
   draft: comicDramaClipDraftSchema,
 }).strict();
 
@@ -162,6 +182,22 @@ export type ComicDramaListQuery = z.infer<typeof comicDramaSeriesListSchema>;
 
 export type ComicDramaScript = { version: number; content: string };
 export type ComicDramaScriptVersion = { version: number; content: string; source: "user" | "assistant"; createdAt: string };
+export type ComicCurrencyAmount = {
+  currency: "CNY" | "USD";
+  amountMicros: number;
+};
+export type ComicEpisodeCostSummary = {
+  settled: ComicCurrencyAmount[];
+  settledTakeCount: number;
+  quotedUnbilled: ComicCurrencyAmount[];
+  unbilledReadyCount: number;
+  remainingEstimate: {
+    currency: "CNY" | "USD";
+    amountMicros: number | null;
+    unverifiedCount: number;
+  };
+  pendingReconcileCount: number;
+};
 export type ComicDramaEpisodeSummary = {
   seriesId: string;
   title: string;
@@ -175,6 +211,7 @@ export type ComicDramaEpisodeSummary = {
   spentMicros: number;
   spentUnverifiedCount: number;
   currency: "CNY" | "USD";
+  costs: ComicEpisodeCostSummary;
 };
 export type ComicDramaDetail = {
   series: ComicDramaSeries;

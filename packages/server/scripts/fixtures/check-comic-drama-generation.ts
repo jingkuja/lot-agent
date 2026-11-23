@@ -191,11 +191,15 @@ export async function verifyComicGeneration(app: FixtureApp, pool: Pool, fixture
   assert.equal((await confirm(payable)).taskId, result.taskId);
   assert.equal(counts.publications, 1);
   assert.equal((await request(`/media/${take.mediaId}/links`, "GET", undefined, "fixture-two")).status, 404);
-  await json(firstPath + "/keyframe/confirm", "POST", { keyframeTakeId: take.id, expectedClipRevision: saved.clip.revision });
+  const confirmed = await json<{ ok: true; selectionRevision: number }>(firstPath + "/keyframe/confirm", "POST", {
+    keyframeTakeId: take.id, expectedClipRevision: saved.clip.revision, expectedSelectionRevision: saved.clip.selectionRevision ?? 1,
+  });
   assert.equal((await json<ComicKeyframeHistory>(firstPath + "/keyframes")).approvedTakeId, take.id);
   saved = await save(saved.clip);
   assert.equal((await json<ComicKeyframeHistory>(firstPath + "/keyframes")).approvedTakeId, null);
-  await json(firstPath + "/keyframe/confirm", "POST", { keyframeTakeId: take.id, expectedClipRevision: saved.clip.revision }, 409);
+  await json(firstPath + "/keyframe/confirm", "POST", {
+    keyframeTakeId: take.id, expectedClipRevision: saved.clip.revision, expectedSelectionRevision: confirmed.selectionRevision,
+  }, 409);
 
   const { id: characterId } = await json<{ id: string }>("/characters", "POST",
     { name: "W5 fixture lead", tags: [], aliases: [], roleKey: "lead", age: "", appearance: "Black hair", personality: "Calm" }, 201);

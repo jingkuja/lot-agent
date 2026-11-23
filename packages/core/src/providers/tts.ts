@@ -74,6 +74,7 @@ export class OpenAISpeechProvider implements SpeechProvider {
       }
     } catch (error) {
       if (error instanceof ProviderError) throw error;
+      if (requestId) throw fail("TRANSPORT_ERROR");
       signal?.throwIfAborted(); throw fail("TRANSPORT_ERROR");
     }
     if (!size) throw fail("INVALID_RESPONSE");

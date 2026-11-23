@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MarketingCaptionsSchema } from "../marketing-video/index.js";
+import type { ComicDramaClipDraft } from "./index.js";
 
 const id = z.string().uuid();
 const ms = z.number().int().min(0).max(2_147_483_647);
@@ -124,3 +125,68 @@ export type ComicRender = {
 };
 export type ComicRenderHistory = { entries: ComicRender[]; nextCursor: string | null };
 export type ComicRenderDownload = { url: string; filename: string };
+
+/** Compute clip-anchored SFX timeline blocks from per-shot sfxRefs and legacy card-level sfxRefs. */
+export function planClipSfxPlacements(
+  draft: Pick<ComicDramaClipDraft, "shots" | "sfxRefs">,
+  videoItemId: string,
+  videoDurationMs: number,
+  mediaDurations: ReadonlyMap<string, number>,
+  makeId: () => string,
+): ComicTimeline["sfx"] {
+  if (videoDurationMs <= 0) return [];
+  const items: ComicTimeline["sfx"] = [];
+  const maxOffset = Math.max(0, videoDurationMs - 1);
+  let cumulativeShare = 0;
+
+  for (const shot of draft.shots) {
+    const shotStartMs = Math.min(maxOffset, Math.round((videoDurationMs * cumulativeShare) / 100));
+    const nextShare = Math.min(100, cumulativeShare + shot.durationShare);
+    const shotEndMs = Math.min(videoDurationMs, Math.round((videoDurationMs * nextShare) / 100));
+    const shotDurationMs = Math.max(1, shotEndMs - shotStartMs);
+    cumulativeShare = nextShare;
+    for (const ref of shot.sfxRefs ?? []) {
+      const sourceDurationMs = mediaDurations.get(ref.mediaId);
+      if (!sourceDurationMs || sourceDurationMs <= 0) continue;
+      let intraOffsetMs = 0;
+      if (typeof ref.offsetMs === "number") {
+        intraOffsetMs = Math.min(Math.max(0, ref.offsetMs), Math.max(0, shotDurationMs - 1));
+      } else if (ref.position === "middle") {
+        intraOffsetMs = Math.floor(shotDurationMs / 2);
+      } else if (ref.position === "end") {
+        intraOffsetMs = Math.max(0, shotDurationMs - Math.min(sourceDurationMs, shotDurationMs));
+      }
+      const offsetMs = Math.min(maxOffset, Math.max(0, shotStartMs + intraOffsetMs));
+      const durationMs = Math.max(1, Math.min(sourceDurationMs, videoDurationMs - offsetMs));
+      items.push({
+        id: makeId(),
+        mediaId: ref.mediaId,
+        anchor: { kind: "clip", videoItemId, offsetMs },
+        durationMs,
+        sourceInMs: 0,
+        volume: 1,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        loop: false,
+      });
+    }
+  }
+
+  for (const ref of draft.sfxRefs ?? []) {
+    const sourceDurationMs = mediaDurations.get(ref.mediaId);
+    if (!sourceDurationMs || sourceDurationMs <= 0) continue;
+    items.push({
+      id: makeId(),
+      mediaId: ref.mediaId,
+      anchor: { kind: "clip", videoItemId, offsetMs: 0 },
+      durationMs: Math.max(1, Math.min(sourceDurationMs, videoDurationMs)),
+      sourceInMs: 0,
+      volume: 1,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+      loop: false,
+    });
+  }
+
+  return items;
+}

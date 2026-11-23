@@ -7,24 +7,35 @@ import {
   buildComicGenerationInput, comicCharacterGenerateSchema, comicDramaIdSchema, comicDramaRevisionSchema, comicGenerationConfirmSchema,
   comicGenerationPreviewSchema, comicKeyframeReviewSchema, comicKeyframeSelectSchema, comicTakeReleaseSchema, comicVideoProfile,
   type ComicCharacterGenerateRequest, type ComicCharacterUpload, type ComicGenerationPreviewRequest, type ComicGenerationImage,
-  type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicTakeInput,
+  type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicSkippedInvalidReference, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK } from "../jobs/task-queues.js";
 import { assertComicDramaCompliance } from "./compliance.js";
 import { readComicDictionary } from "./dictionary.js";
 import { type ComicGenerationScope, type ComicPrice, type FrozenVisualReference, PgComicGeneration } from "./generation-repository.js";
-import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
+import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction } from "./library-db.js";
 import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import { ComicDramaError, type PgComicDramaRepository } from "./repository.js";
 import { PgComicSettings } from "./settings-repository.js";
-import { PgComicVideo } from "./video-repository.js";
+import { PgComicVideo, visualReferenceKey } from "./video-repository.js";
 import { createComicVideoRoutes } from "./video-routes.js";
 
 export type GenerationQueue = {
   publishNewTask(id: string, type: string): Promise<void>;
   canResumePersisted(id: string): Promise<boolean>;
   resumePersisted(id: string, type: string): Promise<void>;
+};
+export type ComicSeriesPreviewDeps = {
+  pool: Pool;
+  series: Pick<PgComicDramaRepository, "get">;
+  media: Pick<ComicMediaLibrary, "assertAvailable" | "assertVideoReferenceOrigin">;
+  quotePrice: (owner: string, model?: string) => Promise<ComicPrice | null>;
+  quoteVideoPrice?: (owner: string, model: string) => Promise<ComicPrice | null>;
+  repo?: Pick<PgComicGeneration, "quote">;
+  video?: Pick<PgComicVideo, "frames" | "references" | "inspectReferences">;
+  settings?: Pick<PgComicSettings, "getStylePreset">;
+  readStyleDictionary?: (owner: string) => ReturnType<typeof readComicDictionary>;
 };
 type Dependencies = {
   pool: Pool;
@@ -37,28 +48,16 @@ type Dependencies = {
   accepting?: () => void;
 };
 
-export function createComicGenerationRoutes(deps: Dependencies) {
-  const { pool, library, series, media, quotePrice, queue } = deps;
-  const repo = new PgComicGeneration(pool);
-  const video = new PgComicVideo(pool);
-  const settings = new PgComicSettings(pool);
-  const director = new PgComicDirector(pool, series);
-  const app = new Hono<{ Variables: { userId: string } }>();
-  const limit = bodyLimit({ maxSize: 16 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
-  app.onError((error, c) => {
-    if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
-    if (error instanceof ComicDramaError && error.code === "NOT_FOUND") return c.json({ code: "NOT_FOUND" }, 404);
-    console.error("[comic-drama] generation request failed", { path: c.req.routePath, errorType: error.name });
-    return c.json({ code: "TEMPORARILY_UNAVAILABLE" }, 503);
-  });
+export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
+  const repo = deps.repo ?? new PgComicGeneration(deps.pool);
+  const video = deps.video ?? new PgComicVideo(deps.pool);
+  const settings = deps.settings ?? new PgComicSettings(deps.pool);
+  const readStyles = deps.readStyleDictionary ?? ((owner: string) => readComicDictionary(deps.pool, owner, "style"));
 
-  const pathId = (value: string) => {
-    const result = comicDramaIdSchema.safeParse(value);
-    if (!result.success) libraryMissing();
-    return result.data;
-  };
-  async function previewSeries(owner: string, scope: ComicGenerationScope, body: ComicGenerationPreviewRequest) {
-    const detail = await series.get(owner, scope.id);
+  return async function previewSeries(
+    owner: string, scope: ComicGenerationScope, body: ComicGenerationPreviewRequest,
+  ): Promise<ComicGenerationQuote> {
+    const detail = await deps.series.get(owner, scope.id);
     if (detail.series.archivedAt) libraryMissing();
     if (detail.series.revision !== body.expectedSeriesRevision) throw new ComicLibraryError("QUOTE_STALE", 409);
     const clips = body.targets.map(target => {
@@ -83,13 +82,13 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       ...(clip.draft.sceneRef ? [{ kind: "scene" as const, materialId: clip.draft.sceneRef.materialId, mediaId: clip.draft.sceneRef.mediaId }] : []),
       ...(clip.draft.propRefs ?? []).map(ref => ({ kind: "prop" as const, materialId: ref.materialId, mediaId: ref.mediaId })),
     ]);
-    const uniquePersisted = [...new Map(persistedSpecs.map(ref => [`${ref.materialId}:${ref.mediaId}`, ref])).values()];
-    const [price, styles, frames, explicitVisualRefs, persistedVisualRefs, stylePreset] = await Promise.all([
-      isVideo ? videoModel && deps.quoteVideoPrice ? deps.quoteVideoPrice(owner, videoModel) : null : quotePrice(owner),
-      readComicDictionary(pool, owner, "style"),
+    const uniquePersisted = [...new Map(persistedSpecs.map(ref => [visualReferenceKey(ref), ref])).values()];
+    const [price, styles, frames, explicitVisualRefs, persistedInspection, stylePreset] = await Promise.all([
+      isVideo ? videoModel && deps.quoteVideoPrice ? deps.quoteVideoPrice(owner, videoModel) : null : deps.quotePrice(owner),
+      readStyles(owner),
       isVideo ? video.frames(owner, scope.id, clips.map(clip => clip.id)) : null,
       video.references(owner, explicitRefs),
-      uniquePersisted.length ? video.references(owner, uniquePersisted).catch(() => []) : Promise.resolve([]),
+      video.inspectReferences(owner, uniquePersisted),
       explicitRefs.some(ref => ref.kind === "style") ? Promise.resolve(null) : settings.getStylePreset(owner, detail.series.styleKey),
     ]);
     const styleDescription = styles.find(entry => entry.key === detail.series.styleKey)?.labels.en;
@@ -100,7 +99,6 @@ export function createComicGenerationRoutes(deps: Dependencies) {
         mediaId: stylePreset.media.id, version: 1, mime: stylePreset.media.mime, sizeBytes: stylePreset.media.sizeBytes,
         width: stylePreset.media.width, height: stylePreset.media.height, kind: "style", label: styleDescription ?? detail.series.styleKey,
       } : null;
-    const persistedByKey = new Map(persistedVisualRefs.map(ref => [`${ref.materialId}:${ref.mediaId}`, ref]));
     const inputs: ComicTakeInput[] = [];
     const skipped: ComicGenerationQuote["skipped"] = [];
     const replaceAdopted = body.targets.filter(target => target.replaceAdopted).map(target => target.clipId);
@@ -116,20 +114,36 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       if (versions?.adopted && !replaceAdopted.includes(clip.id)) { skipped.push({ clipId: clip.id, reason: "ALREADY_COMPLETE" }); continue; }
       const clipRefs: Array<ComicGenerationReference & { kind: "style" | "scene" | "prop" }> = [...explicitVisualRefs];
       const seenMedia = new Set(clipRefs.map(ref => ref.mediaId));
-      const clipPersisted = [
-        ...(clip.draft.sceneRef ? [clip.draft.sceneRef] : []),
-        ...(clip.draft.propRefs ?? []),
+      const clipPersisted: Array<{ role: "scene" | "prop"; materialId: string; mediaId: string; name?: string }> = [
+        ...(clip.draft.sceneRef ? [{ role: "scene" as const, ...clip.draft.sceneRef }] : []),
+        ...(clip.draft.propRefs ?? []).map(ref => ({ role: "prop" as const, ...ref })),
       ];
+      const invalidReferences: ComicSkippedInvalidReference[] = [];
+      const clipFrozen: FrozenVisualReference[] = [];
       for (const ref of clipPersisted) {
-        if (seenMedia.has(ref.mediaId)) continue;
-        const resolved = persistedByKey.get(`${ref.materialId}:${ref.mediaId}`);
-        if (resolved) {
-          seenMedia.add(resolved.mediaId);
-          clipRefs.push(resolved);
-          frozenVisualMap.set(`${resolved.materialId}:${resolved.mediaId}`, {
-            materialId: resolved.materialId, mediaId: resolved.mediaId, version: resolved.version,
+        const key = visualReferenceKey({ kind: ref.role, materialId: ref.materialId, mediaId: ref.mediaId });
+        const invalidReason = persistedInspection.invalid.get(key);
+        if (invalidReason) {
+          invalidReferences.push({
+            role: ref.role, materialId: ref.materialId, mediaId: ref.mediaId, ...(ref.name ? { name: ref.name } : {}), reason: invalidReason,
           });
+          continue;
         }
+        const resolved = persistedInspection.resolved.get(key);
+        if (!resolved) {
+          invalidReferences.push({
+            role: ref.role, materialId: ref.materialId, mediaId: ref.mediaId, ...(ref.name ? { name: ref.name } : {}), reason: "MISSING",
+          });
+          continue;
+        }
+        if (seenMedia.has(resolved.mediaId)) continue;
+        seenMedia.add(resolved.mediaId);
+        clipRefs.push(resolved);
+        clipFrozen.push({ materialId: resolved.materialId, mediaId: resolved.mediaId, version: resolved.version });
+      }
+      if (invalidReferences.length) {
+        skipped.push({ clipId: clip.id, reason: "INVALID_MATERIAL_REFERENCE", invalidReferences });
+        continue;
       }
       if (styleRef && !seenMedia.has(styleRef.mediaId)) clipRefs.push(styleRef);
       const built = buildComicGenerationInput({ series: detail.series, clip, cast: detail.cast,
@@ -143,11 +157,44 @@ export function createComicGenerationRoutes(deps: Dependencies) {
         skipped.push({ clipId: clip.id, reason: "REFERENCE_LIMIT", referenceLimit: MAX_IMAGE_EDIT_REFERENCES });
       }
       else if (!isVideo && built.input.prompt.length > 24_000) skipped.push({ clipId: clip.id, reason: "PROMPT_TOO_LONG" });
-      else inputs.push(built.input);
+      else {
+        for (const frozenRef of clipFrozen) {
+          frozenVisualMap.set(`${frozenRef.materialId}:${frozenRef.mediaId}`, frozenRef);
+        }
+        inputs.push(built.input);
+      }
     }
-    if (price && isVideo && inputs.some(input => input.references.length || ("firstFrame" in input && input.firstFrame))) media.assertVideoReferenceOrigin();
+    if (price && isVideo && inputs.some(input => input.references.length || ("firstFrame" in input && input.firstFrame))) {
+      deps.media.assertVideoReferenceOrigin();
+    }
     return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted, [...frozenVisualMap.values()]);
-  }
+  };
+}
+
+export function createComicGenerationRoutes(deps: Dependencies) {
+  const { pool, library, series, media, quotePrice, queue } = deps;
+  const repo = new PgComicGeneration(pool);
+  const video = new PgComicVideo(pool);
+  const settings = new PgComicSettings(pool);
+  const director = new PgComicDirector(pool, series);
+  const previewSeries = createComicSeriesPreviewer({ ...deps, repo, video, settings });
+  const app = new Hono<{ Variables: { userId: string } }>();
+  const limit = bodyLimit({ maxSize: 16 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
+  app.onError((error, c) => {
+    if (error instanceof ComicSelectionConflictError) {
+      return c.json({ code: error.code, currentSelectionRevision: error.currentSelectionRevision }, 409);
+    }
+    if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
+    if (error instanceof ComicDramaError && error.code === "NOT_FOUND") return c.json({ code: "NOT_FOUND" }, 404);
+    console.error("[comic-drama] generation request failed", { path: c.req.routePath, errorType: error.name });
+    return c.json({ code: "TEMPORARILY_UNAVAILABLE" }, 503);
+  });
+
+  const pathId = (value: string) => {
+    const result = comicDramaIdSchema.safeParse(value);
+    if (!result.success) libraryMissing();
+    return result.data;
+  };
   async function previewCharacter(owner: string, scope: ComicGenerationScope, req: ComicCharacterGenerateRequest) {
     const target: ComicCharacterUpload = req.kind === "slot"
       ? { kind: "slot", key: req.key, outfitId: req.outfitId }
@@ -274,23 +321,24 @@ export function createComicGenerationRoutes(deps: Dependencies) {
   app.post("/series/:id/clips/:clipId/keyframe/confirm", limit, async c => {
     const body = comicKeyframeReviewSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
-    await repo.approve(c.get("userId"), pathId(c.req.param("id")), pathId(c.req.param("clipId")), body.data.keyframeTakeId,
-      body.data.expectedClipRevision);
-    return c.json({ ok: true });
+    const updated = await repo.approve(c.get("userId"), pathId(c.req.param("id")), pathId(c.req.param("clipId")),
+      body.data.keyframeTakeId, body.data.expectedClipRevision, body.data.expectedSelectionRevision);
+    return c.json({ ok: true, selectionRevision: updated.selectionRevision });
   });
   app.post("/series/:id/clips/:clipId/keyframe/select", limit, async c => {
     const body = comicKeyframeSelectSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
-    await repo.selectKeyframeMedia(c.get("userId"), pathId(c.req.param("id")), pathId(c.req.param("clipId")), body.data.mediaId,
-      body.data.expectedClipRevision);
-    return c.json({ ok: true });
+    const updated = await repo.selectKeyframeMedia(c.get("userId"), pathId(c.req.param("id")), pathId(c.req.param("clipId")),
+      body.data.mediaId, body.data.expectedClipRevision, body.data.expectedSelectionRevision);
+    return c.json({ ok: true, selectionRevision: updated.selectionRevision });
   });
   app.post("/series/:id/clips/:clipId/keyframe/upload", async c => {
     const rev = comicDramaRevisionSchema.safeParse({ expectedRevision: Number(c.req.query("expectedClipRevision")) });
-    if (!rev.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const sel = comicDramaRevisionSchema.safeParse({ expectedRevision: Number(c.req.query("expectedSelectionRevision")) });
+    if (!rev.success || !sel.success) return c.json({ code: "INVALID_INPUT" }, 400);
     const owner = c.get("userId"), sid = pathId(c.req.param("id")), clipId = pathId(c.req.param("clipId"));
     return c.json(await media.upload(c.req.raw, owner, "scene", file =>
-      repo.uploadKeyframeMedia(owner, sid, clipId, rev.data.expectedRevision, file)), 201);
+      repo.uploadKeyframeMedia(owner, sid, clipId, rev.data.expectedRevision, sel.data.expectedRevision, file)), 201);
   });
   app.get("/characters/:id/generations", async c => c.json(await repo.characterHistory(c.get("userId"), pathId(c.req.param("id")))));
   app.post("/image-takes/:id/cancel", limit, async c => {

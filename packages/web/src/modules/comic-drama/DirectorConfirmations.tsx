@@ -5,6 +5,7 @@ import type {
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDirectorApi, comicDirectorError } from "./director-api.js";
+import { computeComicBatchPlan } from "./batch-plan.js";
 import { comicLibraryApi } from "./library-api.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
@@ -77,10 +78,18 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
     setSelectedIds(cur => cur.includes(id) ? cur.filter(item => item !== id) : cur.length < 10 ? [...cur, id] : cur);
   };
   const selectPending = () => {
-    const ids = detail.clips
-      .filter(clip => mode === "keyframe" ? !clip.progress?.keyframeApproved : !clip.progress?.adoptedVideoTakeId)
-      .slice(0, 10).map(clip => clip.id);
-    setSelectedIds(ids.length ? ids : detail.clips.slice(0, 10).map(clip => clip.id));
+    const plan = computeComicBatchPlan(detail.clips, mode);
+    if (plan.batchIds.length > 0) {
+      setSelectedIds(plan.batchIds);
+      setError("");
+      return;
+    }
+    setSelectedIds([]);
+    if (plan.allCompleted) {
+      setError(mode === "keyframe"
+        ? "全部首帧已审核完成；如需重新生成，请手动勾选分镜后再预览费用。"
+        : "全部视频已采用完成；如需重新生成，请手动勾选分镜后再预览费用。");
+    }
   };
   const preview = async () => {
     if (!validSelected.length) return;

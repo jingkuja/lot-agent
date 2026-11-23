@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ComicDramaClip, ComicDramaDetail, ComicGenerationMode, ComicGenerationQuote, ComicImageRequest, ComicLibraryPage, ComicMaterial,
 } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
+import { COMIC_BATCH_LIMIT, computeComicBatchPlan } from "./batch-plan.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError, GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
@@ -20,15 +22,20 @@ type Props = {
   disabled: boolean;
   initialMode?: ComicGenerationMode;
   quickAction?: { mode: ComicGenerationMode; token: number } | null;
+  onQuickActionHandled?: () => void;
+  onSeriesChanged?: () => void;
   choose: (id: string) => void;
 };
 
-export function ComicImageGeneration({ detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe", quickAction }: Props) {
+export function ComicImageGeneration({
+  detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe", quickAction, onQuickActionHandled, onSeriesChanged,
+}: Props) {
   const { t } = useI18n();
   const [checked, setChecked] = useState<string[]>([]);
   const [quoting, setQuoting] = useState(false);
   const [quote, setQuote] = useState<ComicGenerationQuote | null>(null);
   const [error, setError] = useState("");
+  const [batchNotice, setBatchNotice] = useState("");
   const [batch, setBatch] = useState<ComicImageRequest | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [mode, setMode] = useState(initialMode);
@@ -39,6 +46,7 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
   const pending = useRef(false);
   const clip = detail.clips.find(item => item.id === selected) ?? detail.clips[0];
   const selection = detail.clips.filter(item => checked.includes(item.id)).map(item => item.id);
+  const batchPlan = useMemo(() => computeComicBatchPlan(detail.clips, mode), [detail.clips, mode]);
   const scope = { resource: "series", id: detail.series.id } as const;
   const label = (id: string) => {
     const target = detail.clips.find(item => item.id === id);
@@ -68,28 +76,86 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
   useEffect(() => {
     if (!quickAction || quickAction.token === lastQuickToken.current || disabled) return;
     lastQuickToken.current = quickAction.token;
+    onQuickActionHandled?.();
     setMode(quickAction.mode);
-    const eligible = detail.clips.filter(item =>
-      quickAction.mode === "keyframe" ? !item.progress?.keyframeApproved : !item.progress?.adoptedVideoTakeId,
-    ).slice(0, 10).map(item => item.id);
-    const targets = eligible.length ? eligible : detail.clips.slice(0, 10).map(item => item.id);
-    if (targets.length) {
-      setChecked(targets);
-      void preview(targets, quickAction.mode);
+    const plan = computeComicBatchPlan(detail.clips, quickAction.mode);
+    if (plan.batchIds.length > 0) {
+      setChecked(plan.batchIds);
+      setBatchNotice(plan.remainingCount > 0
+        ? t("待处理 {0} 个（单批上限 10，本批 {1} + 余 {2}）", [plan.pendingIds.length, plan.batchIds.length, plan.remainingCount])
+        : "");
+      void preview(plan.batchIds, quickAction.mode);
+      return;
     }
-  }, [detail.clips, disabled, preview, quickAction]);
+    setChecked([]);
+    if (plan.allCompleted) {
+      setBatchNotice(t(quickAction.mode === "keyframe"
+        ? "全部首帧已审核完成；如需重新生成，请手动勾选分镜后再预览费用。"
+        : "全部视频已采用完成；如需重新生成，请手动勾选分镜后再预览费用。"));
+    } else if (plan.blockedCount > 0 && quickAction.mode === "from_keyframe") {
+      setBatchNotice(t("尚有 {0} 个分镜未确认首帧，请先审核首帧或切换到直接参考生成。", [plan.blockedCount]));
+    } else if (plan.busyCount > 0) {
+      setBatchNotice(t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [plan.busyCount]));
+    }
+  }, [detail.clips, disabled, onQuickActionHandled, preview, quickAction, t]);
   return <div className="comic-board">
     <section className="comic-edit-card comic-generation-picker">
       <header><h2>{t(isVideo ? "生成视频" : "生成首帧")}</h2></header>
       <div className="comic-actions comic-generation-modes" role="group" aria-label={t("生成模式")}>
         {([["keyframe", "首帧图片"], ["from_keyframe", "用已确认首帧"], ["references", "直接参考生成"]] as const).map(([value, label]) =>
-          <button type="button" key={value} aria-pressed={mode === value} disabled={quoting} onClick={() => setMode(value)}>{t(label)}</button>)}
+          <button type="button" key={value} aria-pressed={mode === value} disabled={quoting} onClick={() => {
+            setMode(value); setBatchNotice("");
+          }}>{t(label)}</button>)}
       </div>
       {detail.clips.length === 0 && <p>{t("先在分镜中添加镜头")}</p>}
+      {detail.clips.length > 0 && !disabled && (
+        <div className="comic-batch-banner" role="status">
+          {batchPlan.allCompleted ? (
+            <small>{t(isVideo
+              ? "全部视频已采用完成；如需重新生成，请手动勾选分镜后再预览费用。"
+              : "全部首帧已审核完成；如需重新生成，请手动勾选分镜后再预览费用。")}</small>
+          ) : batchPlan.pendingIds.length > 0 ? (
+            <>
+              <small>
+                {batchPlan.remainingCount > 0
+                  ? t("待处理 {0} 个（单批上限 10，本批 {1} + 余 {2}）",
+                    [batchPlan.pendingIds.length, batchPlan.batchIds.length, batchPlan.remainingCount])
+                  : t("待处理 {0} 个", [batchPlan.pendingIds.length])}
+                {batchPlan.busyCount > 0 ? ` · ${t("生成中 {0}", [batchPlan.busyCount])}` : ""}
+              </small>
+              <div className="comic-actions">
+                <button type="button" disabled={quoting} onClick={() => {
+                  setChecked(batchPlan.batchIds);
+                  setBatchNotice("");
+                }}>
+                  {batchPlan.remainingCount > 0
+                    ? t("选中下一批（{0}，余 {1}）", [batchPlan.batchIds.length, batchPlan.remainingCount])
+                    : t("选中全部待处理（{0}）", [batchPlan.batchIds.length])}
+                </button>
+                <button type="button" disabled={quoting} onClick={() => {
+                  setChecked(batchPlan.batchIds);
+                  void preview(batchPlan.batchIds, mode);
+                }}>
+                  {batchPlan.remainingCount > 0
+                    ? t("预览本批（{0} + 余 {1}）", [batchPlan.batchIds.length, batchPlan.remainingCount])
+                    : t("预览待处理费用（{0}）", [batchPlan.batchIds.length])}
+                </button>
+              </div>
+            </>
+          ) : (
+            <small>
+              {batchPlan.blockedCount > 0 && mode === "from_keyframe"
+                ? t("尚有 {0} 个分镜未确认首帧，请先审核首帧或切换到直接参考生成。", [batchPlan.blockedCount])
+                : t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [batchPlan.busyCount])}
+            </small>
+          )}
+        </div>
+      )}
+      {batchNotice && <p className="comic-generation-note" role="status">{batchNotice}</p>}
       <ul className="comic-generation-targets">
         {detail.clips.map(item => <li key={item.id}>
           {!disabled && <input type="checkbox" aria-label={t("选择{0}", [label(item.id)])} checked={selection.includes(item.id)}
-            disabled={!selection.includes(item.id) && selection.length >= 10} onChange={event => {
+            disabled={!selection.includes(item.id) && selection.length >= COMIC_BATCH_LIMIT} onChange={event => {
               setChecked(event.target.checked ? [...selection, item.id] : selection.filter(id => id !== item.id));
             }} />}
           <button type="button" aria-pressed={item.id === clip?.id} onClick={() => select(item.id)}>{label(item.id)}</button>
@@ -111,23 +177,24 @@ export function ComicImageGeneration({ detail, selected, select, getSaved, disab
     <div className="comic-generation-results">
       {error && <p className="comic-error" role="alert">{t(error)}</p>}
       {clip && (isVideo ? <ClipVideoVersions key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
-        choose={choose} quoting={quoting} preview={() => void preview([clip.id])} /> :
+        choose={choose} quoting={quoting} preview={() => void preview([clip.id])} onSeriesChanged={onSeriesChanged} /> :
         <KeyframeHistory key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
-          quoting={quoting} preview={() => void preview([clip.id])} />)}
+          quoting={quoting} preview={() => void preview([clip.id])} onSeriesChanged={onSeriesChanged} />)}
       {batch && batch.takes.length > 1 && <BatchStatus key={batch.id} request={batch} label={label} select={select}
-        refreshed={() => setRefresh(value => value + 1)} />}
+        refreshed={() => { setRefresh(value => value + 1); onSeriesChanged?.(); }} />}
     </div>
     {quote && <GenerationQuoteDialog quote={quote} label={label} close={() => setQuote(null)}
       confirm={id => comicGenerationApi.confirm(scope, id)} submitted={result => {
         setBatch(result);
         setRefresh(value => value + 1);
         setChecked([]);
+        onSeriesChanged?.();
       }} />}
   </div>;
 }
 
-function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }: {
-  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
+function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview, onSeriesChanged }: {
+  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void; onSeriesChanged?: () => void;
 }) {
   const { t, locale } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.keyframes(seriesId, clip.id, signal), [seriesId, clip.id]);
@@ -136,16 +203,26 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
   const [pickingMaterial, setPickingMaterial] = useState(false);
   const [saveMediaId, setSaveMediaId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
   const reviewing = useRef(false);
   const approved = history.current?.approvedTakeId;
   const approvedMediaId = history.current?.approvedMediaId;
+  const selectionRevision = history.current?.selectionRevision ?? clip.selectionRevision ?? 1;
+  const handleError = (reason: unknown) => {
+    setError(comicGenerationError(reason));
+    setConflict(reason instanceof ApiClientError && reason.code === "SELECTION_CONFLICT");
+  };
   const review = async (id: string) => {
     if (reviewing.current) return;
     reviewing.current = true;
     setBusyTake(id);
     setError("");
-    try { await comicGenerationApi.approve(seriesId, clip.id, id, clip.revision); history.refresh(); }
-    catch (reason) { setError(comicGenerationError(reason)); }
+    setConflict(false);
+    try {
+      await comicGenerationApi.approve(seriesId, clip.id, id, clip.revision, selectionRevision);
+      history.refresh();
+      onSeriesChanged?.();
+    } catch (reason) { handleError(reason); }
     finally { reviewing.current = false; setBusyTake(null); }
   };
   const uploadManual = async (file: File) => {
@@ -153,10 +230,12 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
     reviewing.current = true;
     setBusyTake("upload");
     setError("");
+    setConflict(false);
     try {
-      await comicGenerationApi.uploadKeyframe(seriesId, clip.id, clip.revision, file, AbortSignal.timeout(30_000));
+      await comicGenerationApi.uploadKeyframe(seriesId, clip.id, clip.revision, selectionRevision, file, AbortSignal.timeout(30_000));
       history.refresh();
-    } catch (reason) { setError(comicGenerationError(reason)); }
+      onSeriesChanged?.();
+    } catch (reason) { handleError(reason); }
     finally { reviewing.current = false; setBusyTake(null); }
   };
   const selectManual = async (mediaId: string) => {
@@ -164,11 +243,13 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
     reviewing.current = true;
     setBusyTake("select");
     setError("");
+    setConflict(false);
     try {
-      await comicGenerationApi.selectKeyframe(seriesId, clip.id, mediaId, clip.revision);
+      await comicGenerationApi.selectKeyframe(seriesId, clip.id, mediaId, clip.revision, selectionRevision);
       setPickingMaterial(false);
       history.refresh();
-    } catch (reason) { setError(comicGenerationError(reason)); }
+      onSeriesChanged?.();
+    } catch (reason) { handleError(reason); }
     finally { reviewing.current = false; setBusyTake(null); }
   };
   return <section className="comic-edit-card">
@@ -190,7 +271,12 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview }
         </button>
       </div>}
     </header>
-    {error && <p className="comic-error" role="alert">{t(error)}</p>}
+    {error && <div className="comic-error" role="alert">
+      <span>{t(error)}</span>
+      {conflict && <button type="button" onClick={() => {
+        setError(""); setConflict(false); history.refresh(); onSeriesChanged?.();
+      }}>{t("重新读取")}</button>}
+    </div>}
     {pickingMaterial && <KeyframeMaterialPicker choose={id => void selectManual(id)} close={() => setPickingMaterial(false)} />}
     {history.failed && <button onClick={history.refresh}>{t("重新读取")}</button>}
     {!approved && approvedMediaId && (

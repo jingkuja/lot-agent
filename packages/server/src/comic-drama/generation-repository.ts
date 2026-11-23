@@ -5,7 +5,7 @@ import {
   type ComicImageTake, type ComicImageTakeInput, type ComicImageTakeState, type ComicKeyframeHistory, type ComicTakeInput, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, taskQueueName } from "../jobs/task-queues.js";
-import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
+import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 import { insertComicCharacterVersion, insertComicMedia } from "./library-repository.js";
 import { requireComicChoice } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
@@ -172,19 +172,21 @@ export class PgComicGeneration {
   }
 
   async history(owner: string, seriesId: string, clipId: string): Promise<ComicKeyframeHistory> {
-    const { rows } = await this.pool.query<{ approved: string | null; approvedMedia: string | null }>(`SELECT
+    const { rows } = await this.pool.query<{ approved: string | null; approvedMedia: string | null; selectionRevision: number }>(`SELECT
       CASE WHEN (t.input->>'clipRevision')::int=c.revision THEN c.keyframe_take_id ELSE NULL END AS approved,
-      CASE WHEN (t.input->>'clipRevision')::int=c.revision THEN t.media_id ELSE c.keyframe_media_id END AS "approvedMedia"
+      CASE WHEN (t.input->>'clipRevision')::int=c.revision THEN t.media_id ELSE c.keyframe_media_id END AS "approvedMedia",
+      c.selection_revision AS "selectionRevision"
       FROM ${namespace}.cd_series s JOIN ${namespace}.cd_clips c ON c.series_id=s.id
       LEFT JOIN ${namespace}.cd_takes t ON t.id=c.keyframe_take_id AND t.owner_id=s.owner_id
       WHERE s.owner_id=$1 AND s.id=$2 AND c.id=$3 AND s.deleted_at IS NULL`, [owner, seriesId, clipId]);
     if (!rows[0]) libraryMissing();
     const approvedTakeId = rows[0].approved;
     const approvedMediaId = rows[0].approvedMedia;
+    const selectionRevision = Number(rows[0].selectionRevision);
     const takes = await this.pool.query<ComicImageTake>(`SELECT ${takeColumns} ${joinTakes}
       WHERE t.owner_id=$1 AND r.series_id=$2 AND t.target_id=$3 AND t.video_version IS NULL
       ORDER BY (t.id IS NOT DISTINCT FROM $4::uuid) DESC,t.created_at DESC,t.id DESC LIMIT 30`, [owner, seriesId, clipId, approvedTakeId]);
-    return { approvedTakeId, approvedMediaId, takes: takes.rows };
+    return { approvedTakeId, approvedMediaId, selectionRevision, takes: takes.rows };
   }
 
   async characterHistory(owner: string, id: string) {
@@ -196,44 +198,80 @@ export class PgComicGeneration {
     return rows;
   }
 
-  async approve(owner: string, seriesId: string, clipId: string, takeId: string, revision: number) {
-    await libraryTransaction(this.pool, async db => {
+  private async assertClipSelectionVersion(
+    db: ComicQuery, seriesId: string, clipId: string, expectedClipRevision: number, expectedSelectionRevision: number,
+  ) {
+    const { rows: [clip] } = await db.query<{ revision: number; selectionRevision: number }>(
+      `SELECT revision, selection_revision AS "selectionRevision"
+       FROM ${namespace}.cd_clips WHERE series_id=$1 AND id=$2 FOR UPDATE`,
+      [seriesId, clipId],
+    );
+    if (!clip || Number(clip.revision) !== expectedClipRevision) {
+      throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+    }
+    if (Number(clip.selectionRevision) !== expectedSelectionRevision) {
+      throw new ComicSelectionConflictError(Number(clip.selectionRevision));
+    }
+  }
+
+  async approve(
+    owner: string, seriesId: string, clipId: string, takeId: string, revision: number, expectedSelectionRevision: number,
+  ): Promise<{ selectionRevision: number }> {
+    return libraryTransaction(this.pool, async db => {
       await this.lockSeries(db, owner, seriesId);
-      const { rowCount } = await db.query(`UPDATE ${namespace}.cd_clips c SET keyframe_take_id=t.id, keyframe_media_id=NULL
+      await this.assertClipSelectionVersion(db, seriesId, clipId, revision, expectedSelectionRevision);
+      const { rows } = await db.query<{ selectionRevision: number }>(`UPDATE ${namespace}.cd_clips c
+        SET keyframe_take_id=t.id, keyframe_media_id=NULL, selection_revision=c.selection_revision+1
         FROM ${namespace}.cd_takes t JOIN ${namespace}.cd_generation_requests r ON (r.owner_id,r.id)=(t.owner_id,t.request_id)
         WHERE r.owner_id=$1 AND r.series_id=$2 AND c.series_id=$2 AND c.id=$3 AND t.target_id=c.id
-          AND t.id=$4 AND t.status='ready' AND t.video_version IS NULL AND c.revision=$5 AND (t.input->>'clipRevision')::int=$5`,
-      [owner, seriesId, clipId, takeId, revision]);
-      if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+          AND t.id=$4 AND t.status='ready' AND t.video_version IS NULL AND c.revision=$5
+          AND c.selection_revision=$6 AND (t.input->>'clipRevision')::int=$5
+        RETURNING c.selection_revision AS "selectionRevision"`,
+      [owner, seriesId, clipId, takeId, revision, expectedSelectionRevision]);
+      if (!rows[0]) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+      return { selectionRevision: Number(rows[0].selectionRevision) };
     });
   }
 
-  async selectKeyframeMedia(owner: string, seriesId: string, clipId: string, mediaId: string, revision: number) {
-    await libraryTransaction(this.pool, async db => {
+  async selectKeyframeMedia(
+    owner: string, seriesId: string, clipId: string, mediaId: string, revision: number, expectedSelectionRevision: number,
+  ): Promise<{ selectionRevision: number }> {
+    return libraryTransaction(this.pool, async db => {
       await this.lockSeries(db, owner, seriesId);
+      await this.assertClipSelectionVersion(db, seriesId, clipId, revision, expectedSelectionRevision);
       const { rows: [media] } = await db.query<{ mime: string }>(
         `SELECT mime FROM ${namespace}.cd_media WHERE owner_id=$1 AND id=$2`, [owner, mediaId],
       );
       if (!media) libraryMissing();
       if (!media.mime.startsWith("image/")) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
-      const { rowCount } = await db.query(
-        `UPDATE ${namespace}.cd_clips SET keyframe_media_id=$4, keyframe_take_id=NULL WHERE series_id=$1 AND id=$2 AND revision=$3`,
-        [seriesId, clipId, revision, mediaId],
+      const { rows } = await db.query<{ selectionRevision: number }>(
+        `UPDATE ${namespace}.cd_clips
+         SET keyframe_media_id=$4, keyframe_take_id=NULL, selection_revision=selection_revision+1
+         WHERE series_id=$1 AND id=$2 AND revision=$3 AND selection_revision=$5
+         RETURNING selection_revision AS "selectionRevision"`,
+        [seriesId, clipId, revision, mediaId, expectedSelectionRevision],
       );
-      if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+      if (!rows[0]) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+      return { selectionRevision: Number(rows[0].selectionRevision) };
     });
   }
 
-  async uploadKeyframeMedia(owner: string, seriesId: string, clipId: string, revision: number, media: StoredComicMedia) {
+  async uploadKeyframeMedia(
+    owner: string, seriesId: string, clipId: string, revision: number, expectedSelectionRevision: number, media: StoredComicMedia,
+  ): Promise<{ mediaId: string; selectionRevision: number }> {
     return libraryTransaction(this.pool, async db => {
       await this.lockSeries(db, owner, seriesId);
+      await this.assertClipSelectionVersion(db, seriesId, clipId, revision, expectedSelectionRevision);
       await insertComicMedia(db, media);
-      const { rowCount } = await db.query(
-        `UPDATE ${namespace}.cd_clips SET keyframe_media_id=$4, keyframe_take_id=NULL WHERE series_id=$1 AND id=$2 AND revision=$3`,
-        [seriesId, clipId, revision, media.id],
+      const { rows } = await db.query<{ selectionRevision: number }>(
+        `UPDATE ${namespace}.cd_clips
+         SET keyframe_media_id=$4, keyframe_take_id=NULL, selection_revision=selection_revision+1
+         WHERE series_id=$1 AND id=$2 AND revision=$3 AND selection_revision=$5
+         RETURNING selection_revision AS "selectionRevision"`,
+        [seriesId, clipId, revision, media.id, expectedSelectionRevision],
       );
-      if (!rowCount) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
-      return { mediaId: media.id };
+      if (!rows[0]) throw new ComicLibraryError("KEYFRAME_STALE_OR_UNAVAILABLE", 409);
+      return { mediaId: media.id, selectionRevision: Number(rows[0].selectionRevision) };
     });
   }
 
@@ -290,7 +328,8 @@ export class PgComicGeneration {
           WHERE all_v.owner_id=m.owner_id AND all_v.material_id=m.id) AS "latestVersion"
       FROM ${namespace}.cd_materials m
       JOIN ${namespace}.cd_material_versions v ON (m.owner_id,m.id)=(v.owner_id,v.material_id)
-      WHERE m.owner_id=$1 AND v.media_id=ANY($2::uuid[])`,
+      WHERE m.owner_id=$1 AND v.media_id=ANY($2::uuid[])
+      ORDER BY v.version DESC`,
       [owner, [...new Set([...unique.values()].map(item => item.mediaId))]],
     );
     for (const ref of unique.values()) {

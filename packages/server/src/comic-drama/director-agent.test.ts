@@ -3,8 +3,10 @@ import {
   LLMIncompleteError, mapAnthropicStream, mapOpenAIStream, mapResponsesStream, type LLMProvider,
 } from "@lot-agent/core";
 import type { ComicDramaDetail } from "@lot-agent/core/comic-drama";
-import { collectProposal, createComicDirectorTools, proposalTool } from "./director-agent.js";
+import { ComicDirector, collectProposal, createComicDirectorTools, proposalTool } from "./director-agent.js";
 import { createComicDirectorLlmResolver } from "./director-model.js";
+import type { PgComicDirector } from "./director-repository.js";
+import { ComicDramaError } from "./repository.js";
 
 async function* streamOf<T>(items: T[]): AsyncIterable<T> {
   for (const item of items) yield item;
@@ -156,7 +158,7 @@ describe("comic director §8.5 tools and default text model resolver", () => {
     }],
     clips: [
       {
-        id: clipA, revision: 2, ordinal: 1,
+        id: clipA, revision: 2, selectionRevision: 1, ordinal: 1,
         draft: {
           schemaVersion: 1, durationMs: 4000, scene: "便利店门外",
           shots: [{ id: shotA, framingKey: "wide", movementKey: "fixed", description: "林夏推门", durationShare: 100 }],
@@ -164,7 +166,7 @@ describe("comic director §8.5 tools and default text model resolver", () => {
         },
       },
       {
-        id: clipB, revision: 1, ordinal: 2,
+        id: clipB, revision: 1, selectionRevision: 1, ordinal: 2,
         draft: { schemaVersion: 1, durationMs: 5000, scene: "收银台", shots: [], lines: [] },
       },
     ],
@@ -172,7 +174,7 @@ describe("comic director §8.5 tools and default text model resolver", () => {
 
   it("executes all 6 §8.5 tools with owner scoping and revision checks", async () => {
     const saveClip = vi.fn(async (_o, _s, cid, input) => ({
-      clip: { id: cid, ordinal: 1, revision: input.expectedRevision + 1, draft: input.draft },
+      clip: { id: cid, ordinal: 1, revision: input.expectedRevision + 1, selectionRevision: 1, draft: input.draft },
       seriesRevision: 4,
     }));
     const reorder = vi.fn(async (_o, _s, input) => ({
@@ -255,5 +257,222 @@ describe("comic director §8.5 tools and default text model resolver", () => {
     const second = await prefResolver(ownerId);
     expect(second.usedModelId).toBe("claude-sonnet-5-5");
     expect(chosen).toEqual(["kimi-k3.1-pro", "claude-sonnet-5-5"]);
+  });
+
+  it("P1 #2: rejects stale concurrent director writes with REVISION_CONFLICT while allowing consecutive same-turn writes", async () => {
+    let seriesRev = 3;
+    let clips = detail.clips.map(clip => ({
+      ...clip,
+      draft: {
+        ...clip.draft,
+        shots: clip.draft.shots.map(s => ({
+          ...s,
+          sfxRefs: [{ materialId: mediaA, mediaId: mediaA, name: "推门声", position: "start" as const }],
+        })),
+      },
+    }));
+    const currentDetail = (): ComicDramaDetail => ({
+      ...detail,
+      series: { ...detail.series, revision: seriesRev },
+      clips,
+    });
+    const saveClip = vi.fn(async (_o, _s, cid, input) => {
+      if (input.expectedSeriesRevision !== undefined && input.expectedSeriesRevision !== seriesRev) {
+        throw new ComicDramaError("REVISION_CONFLICT", seriesRev);
+      }
+      const target = clips.find(c => c.id === cid)!;
+      if (target.revision !== input.expectedRevision) throw new ComicDramaError("REVISION_CONFLICT", target.revision);
+      seriesRev += 1;
+      const updated = { ...target, revision: target.revision + 1, draft: input.draft };
+      clips = clips.map(c => c.id === cid ? updated : c);
+      return { clip: updated, seriesRevision: seriesRev };
+    });
+    const reorder = vi.fn(async (_o, _s, input) => {
+      if (input.expectedRevision !== seriesRev) throw new ComicDramaError("REVISION_CONFLICT", seriesRev);
+      seriesRev += 1;
+      const byId = new Map(clips.map(c => [c.id, c]));
+      clips = input.clipIds.map((id: string, idx: number) => ({ ...byId.get(id)!, ordinal: idx + 1 }));
+      return { seriesRevision: seriesRev, script: detail.script, cast: detail.cast, clips };
+    });
+
+    const repo = {
+      ensureChatSession: vi.fn(async () => ({ conversationId: "conv-1", revision: seriesRev, title: detail.series.title })),
+      chatMessages: vi.fn(async () => []),
+      recordChatTurn: vi.fn(async (_conv, _u, assistantText, toolCalls) => ({
+        id: "msg-1", role: "assistant" as const, content: assistantText, createdAt: new Date().toISOString(), toolCalls,
+      })),
+      episode: vi.fn(async () => ({ title: detail.series.title, logline: "", revision: seriesRev, archived: false })),
+    } as unknown as PgComicDirector;
+
+    // Case 1: Another tab mutates series & reorders while LLM is thinking -> write must fail with REVISION_CONFLICT
+    let concurrentMutated = false;
+    const concurrentLlm: LLMProvider = {
+      async *chat() {
+        if (!concurrentMutated) {
+          concurrentMutated = true;
+          seriesRev = 4;
+          clips = [clips[1], clips[0]].map((c, idx) => ({ ...c, ordinal: idx + 1 }));
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { id: "c1", name: "update_clip", arguments: { ordinal: 1, scene: "旧轮次覆盖" } },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const makeDirector = (llm: LLMProvider) => new ComicDirector(
+      repo,
+      {
+        agentId: "comic-director", ownerKeyOnly: true, disableUserMemory: true,
+        conversationMetadata: () => ({}), assertConversation: () => {}, validateChatMedia: async () => null,
+        beginTurn: async () => ({ allowedToolNames: [], blockedToolNames: [], dynamicParts: [] }),
+        resolveModel: async () => ({ llm, usedModelId: "test-llm", modelIds: ["test-llm"] }),
+      },
+      undefined,
+      {
+        episodes: { get: vi.fn(async () => currentDetail()), saveClip, reorder },
+        library: { listCharacters: vi.fn(), listMaterials: vi.fn() },
+      },
+    );
+
+    await expect(makeDirector(concurrentLlm).chat(ownerId, seriesId, {
+      message: "把第一段场景改一下", expectedRevision: 3, language: "zh",
+    }, new AbortController().signal)).rejects.toMatchObject({ code: "REVISION_CONFLICT", currentRevision: 4 });
+    expect(saveClip).not.toHaveBeenCalled();
+    expect(clips[0].id).toBe(clipB); // Order from other tab preserved!
+
+    // Case 2: Same-turn consecutive update_clip -> reorder_clips succeeds and preserves shot sfxRefs!
+    let step = 0;
+    const sequentialLlm: LLMProvider = {
+      async *chat() {
+        step += 1;
+        if (step === 1) {
+          yield {
+            type: "tool_call",
+            toolCall: {
+              id: "s1", name: "update_clip",
+              arguments: {
+                clipId: clipA, scene: "新门廊",
+                shots: [{ description: "林夏推门并四处张望", framingKey: "wide", movementKey: "push", durationShare: 100 }],
+              },
+            },
+          };
+          yield {
+            type: "tool_call",
+            toolCall: { id: "s2", name: "reorder_clips", arguments: { clipIds: [clipA, clipB] } },
+          };
+          yield { type: "done", finishReason: "tool_calls" };
+          return;
+        }
+        yield { type: "text", content: "已按要求修改并重排。" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const res = await makeDirector(sequentialLlm).chat(ownerId, seriesId, {
+      message: "更新分镜并重排", expectedRevision: 4, language: "zh",
+    }, new AbortController().signal);
+    expect(res.seriesUpdated).toBe(true);
+    expect(res.latestRevision).toBe(6);
+    expect(saveClip).toHaveBeenCalledTimes(1);
+    expect(reorder).toHaveBeenCalledTimes(1);
+    expect(clips[0].id).toBe(clipA);
+    expect(clips[0].draft.shots[0].sfxRefs).toHaveLength(1); // P2 #8 preserved shot sfxRefs!
+  });
+
+  it("P2 #9: halts on breakdown_script before request_generation, then previews quote after apply with zero paid submissions", async () => {
+    let episodeClips: ComicDramaDetail["clips"] = [];
+    let seriesRev = 1;
+    const previewGeneration = vi.fn(async () => ({
+      confirmationId: "11111111-1111-4111-8111-111111111111",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      items: [{ clipId: clipA, modelId: "gpt-image-2", unit: "image" as const, quantity: 1, amountMicros: 50_000 }],
+      skipped: [],
+      totalMicros: 50_000,
+      currency: "CNY" as const,
+    }));
+    const recordedCards: Array<{ proposalId?: string; confirmationId?: string } | undefined> = [];
+    const createdProposal = {
+      id: "22222222-2222-4222-8222-222222222222",
+      conversationId: "conv-2",
+      baseRevision: 1,
+      createdAt: new Date().toISOString(),
+      input: { requestId: clipA, expectedRevision: 1, mode: "paste" as const, language: "zh" as const, text: "原稿", action: "breakdown" as const },
+      original: "原稿",
+      status: "ready" as const,
+      appliedRevision: null,
+      proposal: { script: "", roles: [], clips: [detail.clips[0].draft], previousScenes: [] },
+    };
+    const repo = {
+      ensureChatSession: vi.fn(async () => ({ conversationId: "conv-2", revision: seriesRev, title: detail.series.title })),
+      chatMessages: vi.fn(async () => []),
+      recordChatTurn: vi.fn(async (_conv, _u, assistantText, toolCalls, _model, cards) => {
+        recordedCards.push(cards);
+        return {
+          id: "msg-" + recordedCards.length, role: "assistant" as const, content: assistantText,
+          createdAt: new Date().toISOString(), toolCalls, ...cards,
+        };
+      }),
+      episode: vi.fn(async () => ({ title: detail.series.title, logline: "", revision: seriesRev, archived: false })),
+      claim: vi.fn(async () => ({
+        episode: { title: detail.series.title, logline: "", revision: seriesRev },
+        proposal: createdProposal,
+        created: false,
+        previousScenes: [],
+      })),
+    } as unknown as PgComicDirector;
+
+    // Turn 1: user asks "把原稿拆成分镜，再生成首帧"; even if LLM emits BOTH tool calls, breakdown_script endsTurn immediately!
+    const turn1Llm: LLMProvider = {
+      async *chat() {
+        yield { type: "tool_call", toolCall: { id: "t1", name: "breakdown_script", arguments: { sourceText: "林夏走进雨夜便利店" } } };
+        yield { type: "tool_call", toolCall: { id: "t2", name: "request_generation", arguments: { mode: "keyframe" } } };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const makeDirector = (llm: LLMProvider) => new ComicDirector(
+      repo,
+      {
+        agentId: "comic-director", ownerKeyOnly: true, disableUserMemory: true,
+        conversationMetadata: () => ({}), assertConversation: () => {}, validateChatMedia: async () => null,
+        beginTurn: async () => ({ allowedToolNames: [], blockedToolNames: [], dynamicParts: [] }),
+        resolveModel: async () => ({ llm, usedModelId: "test-llm", modelIds: ["test-llm"] }),
+      },
+      undefined,
+      {
+        episodes: {
+          get: vi.fn(async () => ({ ...detail, series: { ...detail.series, revision: seriesRev }, clips: episodeClips })),
+          saveClip: vi.fn(),
+          reorder: vi.fn(),
+        },
+        library: { listCharacters: vi.fn(), listMaterials: vi.fn() },
+        previewGeneration,
+      },
+    );
+
+    const r1 = await makeDirector(turn1Llm).chat(ownerId, seriesId, {
+      message: "把原稿拆成分镜，再生成首帧", expectedRevision: 1, language: "zh",
+    }, new AbortController().signal);
+    expect(r1.proposal?.id).toBe(createdProposal.id);
+    expect(r1.quote).toBeUndefined();
+    expect(previewGeneration).not.toHaveBeenCalled();
+    expect(recordedCards[0]).toEqual({ proposalId: createdProposal.id, confirmationId: undefined });
+
+    // Simulate user applying the breakdown proposal (clips now exist, seriesRev=2)
+    episodeClips = [detail.clips[0]];
+    seriesRev = 2;
+
+    // Turn 2: now user asks to preview keyframe generation -> quote preview card created, 0 paid submissions
+    const turn2Llm: LLMProvider = {
+      async *chat() {
+        yield { type: "tool_call", toolCall: { id: "t3", name: "request_generation", arguments: { mode: "keyframe" } } };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const r2 = await makeDirector(turn2Llm).chat(ownerId, seriesId, {
+      message: "帮我预览首帧生成费用", expectedRevision: 2, language: "zh",
+    }, new AbortController().signal);
+    expect(previewGeneration).toHaveBeenCalledTimes(1);
+    expect(r2.quote?.confirmationId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(recordedCards[1]).toEqual({ proposalId: undefined, confirmationId: "11111111-1111-4111-8111-111111111111" });
   });
 });

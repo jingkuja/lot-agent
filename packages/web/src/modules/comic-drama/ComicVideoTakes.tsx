@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComicDramaClip, ComicMediaLinks, ComicTake, ComicVideoReceipt, ComicVideoTake } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
@@ -7,13 +8,15 @@ import { ComicTakeStatus, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { SaveComicFrame } from "./SaveComicFrame.js";
 
-export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, preview, choose }: {
-  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void; choose: (id: string) => void;
+export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, preview, choose, onSeriesChanged }: {
+  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
+  choose: (id: string) => void; onSeriesChanged?: () => void;
 }) {
   const { t } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.videos(seriesId, clip.id, signal), [seriesId, clip.id]);
   const history = useGenerationHistory(load, 5_000, refresh);
   const busy = history.current?.some(take => ["pending", "running", "unknown", "recoverable"].includes(take.state));
+  const selectionRevision = history.current?.[0]?.clipSelectionRevision ?? clip.selectionRevision ?? 1;
   return <section className="comic-edit-card">
     <header><h2>{t("视频版本 · 分镜 {0}", [clip.ordinal])}</h2>
       {!disabled && <button type="button" disabled={quoting || busy} onClick={preview}>{t("预览视频费用")}</button>}
@@ -23,8 +26,11 @@ export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, 
       !history.current.length ? <p className="comic-generation-note">{t("暂无视频版本")}</p> :
       <div className="comic-library-grid">{history.current.map(take => <VideoTakeCard key={take.id} take={take}
         choose={() => choose(take.id)}
-        adopt={disabled || take.adopted ? undefined : () => comicGenerationApi.adopt(seriesId, clip.id, take.id, clip.revision)}
-        refresh={history.refresh} />)}</div>}
+        adopt={disabled || take.adopted ? undefined : async () => {
+          await comicGenerationApi.adopt(seriesId, clip.id, take.id, clip.revision, selectionRevision);
+          onSeriesChanged?.();
+        }}
+        refresh={() => { history.refresh(); onSeriesChanged?.(); }} />)}</div>}
   </section>;
 }
 
@@ -93,6 +99,7 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
   const [attempt, reload] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [selectionConflict, setSelectionConflict] = useState(false);
   const [frame, setFrame] = useState<number | null>(null);
   const [savedFrame, setSavedFrame] = useState(false);
   const renewed = useRef(false);
@@ -118,8 +125,12 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
     if (!adopt || saving) return;
     setSaving(true);
     setError("");
+    setSelectionConflict(false);
     try { await adopt(); refresh(); }
-    catch (reason) { setError(comicGenerationError(reason)); }
+    catch (reason) {
+      setError(comicGenerationError(reason));
+      setSelectionConflict(reason instanceof ApiClientError && reason.code === "SELECTION_CONFLICT");
+    }
     finally { setSaving(false); }
   };
   return <article className="comic-library-card comic-video-card">
@@ -170,7 +181,10 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
       {open && take.ordinal !== null && <button type="button" onClick={open}>{t("打开对应分镜")}</button>}
     </div>}
     {savedFrame && <small role="status">{t("已保存截帧")}</small>}
-    {error && <p className="comic-error" role="alert">{t(error)}</p>}
+    {error && <div className="comic-error" role="alert">
+      <span>{t(error)}</span>
+      {selectionConflict && <button type="button" onClick={() => { setError(""); setSelectionConflict(false); refresh(); }}>{t("重新读取")}</button>}
+    </div>}
     {frame !== null && <SaveComicFrame take={take} initialTime={frame} close={() => setFrame(null)} saved={() => setSavedFrame(true)} />}
   </article>;
 }

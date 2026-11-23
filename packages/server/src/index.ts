@@ -74,7 +74,7 @@ import { PgComicLibrary } from "./comic-drama/library-repository.js";
 import { ComicMediaLibrary } from "./comic-drama/media-library.js";
 import { createComicLibraryRoutes } from "./comic-drama/library-routes.js";
 import { createComicDramaRoutes } from "./comic-drama/routes.js";
-import { createComicGenerationRoutes } from "./comic-drama/generation-routes.js";
+import { createComicGenerationRoutes, createComicSeriesPreviewer } from "./comic-drama/generation-routes.js";
 import { PgComicGeneration } from "./comic-drama/generation-repository.js";
 import { PgComicEdits } from "./comic-drama/edit-repository.js";
 import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
@@ -453,14 +453,14 @@ async function main() {
       `${COMIC_DRAMA_API_ROOT}/settings/styles/:styleKey/reference/upload`,
     ], uploadRateLimit);
     const library = new PgComicLibrary(service.db.pool);
-    const resolveImageModel = async (owner: string, requested?: string) => {
+    const resolveImageModel = async (owner: string, requested?: string, db?: Parameters<PgComicSettings["getPreferences"]>[1]) => {
       if (requested) return requested;
-      const pref = (await comicSettings.getPreferences(owner).catch(() => null))?.defaultImageModel;
+      const pref = (await comicSettings.getPreferences(owner, db).catch(() => null))?.defaultImageModel;
       return pref || process.env.COMIC_DRAMA_IMAGE_MODEL || "gpt-image-2";
     };
-    const series = new PgComicDramaRepository(service.db.pool, async (owner, videoModel) => {
+    const series = new PgComicDramaRepository(service.db.pool, async (owner, videoModel, db) => {
       const currency = comicQuoteCurrency();
-      const imageModel = await resolveImageModel(owner);
+      const imageModel = await resolveImageModel(owner, undefined, db);
       const imageQuote = quoteComicCatalogPrice(service.modelCatalog, "image", imageModel);
       const videoQuote = videoModel ? quoteComicCatalogPrice(service.modelCatalog, "video", videoModel) : null;
       return {
@@ -469,6 +469,23 @@ async function main() {
         currency: videoQuote?.currency ?? imageQuote?.currency ?? currency,
       };
     });
+    const quoteComicImagePrice = async (owner: string, modelId?: string) => {
+      const chosen = await resolveImageModel(owner, modelId);
+      const price = quoteComicCatalogPrice(service.modelCatalog, "image", chosen);
+      if (!price) return null;
+      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+      if (!key) return null;
+      const catalog = await service.getUserModelCatalog(owner, key);
+      return catalog?.image.some(item => item.id === chosen) ? price : null;
+    };
+    const quoteComicVideoPrice = async (owner: string, modelId: string) => {
+      const price = quoteComicCatalogPrice(service.modelCatalog, "video", modelId);
+      if (!price) return null;
+      const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
+      if (!key) return null;
+      const catalog = await service.getUserModelCatalog(owner, key);
+      return catalog?.video.some(item => item.id === modelId) ? price : null;
+    };
     const edits = new PgComicEdits(service.db.pool);
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
       presetModel: process.env.COMIC_DRAMA_TTS_MODEL?.trim() || undefined,
@@ -509,7 +526,23 @@ async function main() {
     ], generationRateLimit);
     app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`, uploadRateLimit);
     const parser = fileURLToPath(new URL(`./workers/knowledge-parser.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
-    const directorToolsDeps = { episodes: series, library, settings: comicSettings };
+    const previewSeriesForDirector = service.jobQueue instanceof BullmqJobQueue
+      ? createComicSeriesPreviewer({
+        pool: service.db.pool, series, media: comicMedia,
+        quotePrice: quoteComicImagePrice, quoteVideoPrice: quoteComicVideoPrice, settings: comicSettings,
+      })
+      : undefined;
+    const directorToolsDeps = {
+      episodes: series, library, settings: comicSettings,
+      ...(previewSeriesForDirector ? {
+        previewGeneration: async (owner: string, seriesId: string, body: Parameters<typeof previewSeriesForDirector>[2]) => {
+          comicMedia.assertAvailable();
+          const quote = await previewSeriesForDirector(owner, { kind: "series", id: seriesId }, body);
+          await directorRepo.recordQuote(owner, seriesId, quote);
+          return quote;
+        },
+      } : {}),
+    };
     app.route(COMIC_DRAMA_API_ROOT, createComicDirectorRoutes(
       directorRepo,
       new ComicDirector(directorRepo, directorExtension, rollout.accepting, directorToolsDeps),
@@ -538,23 +571,8 @@ async function main() {
       app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
         pool: service.db.pool, library, series, media: comicMedia, queue: service.jobQueue,
         accepting: rollout.accepting,
-        quotePrice: async (owner, modelId) => {
-          const chosen = await resolveImageModel(owner, modelId);
-          const price = quoteComicCatalogPrice(service.modelCatalog, "image", chosen);
-          if (!price) return null;
-          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-          if (!key) return null;
-          const catalog = await service.getUserModelCatalog(owner, key);
-          return catalog?.image.some(item => item.id === chosen) ? price : null;
-        },
-        quoteVideoPrice: async (owner, modelId) => {
-          const price = quoteComicCatalogPrice(service.modelCatalog, "video", modelId);
-          if (!price) return null;
-          const key = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
-          if (!key) return null;
-          const catalog = await service.getUserModelCatalog(owner, key);
-          return catalog?.video.some(item => item.id === modelId) ? price : null;
-        },
+        quotePrice: quoteComicImagePrice,
+        quoteVideoPrice: quoteComicVideoPrice,
       }));
     }
   }

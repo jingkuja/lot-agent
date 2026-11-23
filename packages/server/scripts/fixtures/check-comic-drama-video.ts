@@ -155,14 +155,21 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   const first = (await settled((await confirm(ep, firstQuote)).id)).takes[0];
   assert.equal(first.state, "ready");
   const clipPath = ep.path + "/clips/" + ready.id;
-  await json(clipPath + "/keyframe/confirm", "POST", { keyframeTakeId: first.id, expectedClipRevision: ready.revision });
+  const readySel1 = await json<{ ok: true; selectionRevision: number }>(clipPath + "/keyframe/confirm", "POST", {
+    keyframeTakeId: first.id, expectedClipRevision: ready.revision, expectedSelectionRevision: ready.selectionRevision ?? 1,
+  });
   const fromFrame = await preview(ep, [ready], "from_keyframe");
   assert.equal(fromFrame.totalMicros, 2_000_000);
   assert.equal(fromFrame.items[0].unit, "second");
   assert.equal(fromFrame.items[0].referenceVersions?.[0].mediaId, first.mediaId);
   assert.equal(submitted.length, 0, "Discarding a video preview makes no gateway call");
   const secondFrame = (await settled((await confirm(ep, await preview(ep, [ready], "keyframe"))).id)).takes[0];
-  await json(clipPath + "/keyframe/confirm", "POST", { keyframeTakeId: secondFrame.id, expectedClipRevision: ready.revision });
+  await json(clipPath + "/keyframe/confirm", "POST", {
+    keyframeTakeId: secondFrame.id, expectedClipRevision: ready.revision, expectedSelectionRevision: ready.selectionRevision ?? 1,
+  }, 409);
+  const readySel2 = await json<{ ok: true; selectionRevision: number }>(clipPath + "/keyframe/confirm", "POST", {
+    keyframeTakeId: secondFrame.id, expectedClipRevision: ready.revision, expectedSelectionRevision: readySel1.selectionRevision,
+  });
   const stale = await json<{ code: string }>(ep.path + "/generate", "POST", { confirmationId: fromFrame.confirmationId }, 409);
   assert.equal(stale.code, "QUOTE_STALE");
   assert.equal(submitted.length, 0);
@@ -206,8 +213,12 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal(releasedReconcile?.error_category, "released");
   assert.equal(releasedReconcile?.gateway_request_id, "fixture-unknown-video");
 
-  await json(ep.path + `/clips/${rejected.id}/video/adopt`, "POST", { takeId: good.id, expectedClipRevision: rejected.revision }, 409);
-  await json(clipPath + "/video/adopt", "POST", { takeId: good.id, expectedClipRevision: ready.revision });
+  await json(ep.path + `/clips/${rejected.id}/video/adopt`, "POST", {
+    takeId: good.id, expectedClipRevision: rejected.revision, expectedSelectionRevision: rejected.selectionRevision ?? 1,
+  }, 409);
+  await json(clipPath + "/video/adopt", "POST", {
+    takeId: good.id, expectedClipRevision: ready.revision, expectedSelectionRevision: readySel2.selectionRevision,
+  });
   assert.equal((await preview(ep, [ready])).skipped[0].reason, "ALREADY_COMPLETE");
   assert.ok((await preview(ep, [ready], "references", { targets: targets([ready], true) })).confirmationId);
   const history = await json<ComicVideoHistory>("/videos?adopted=true&seriesQuery=W6");
@@ -255,7 +266,8 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   const kling = await makeEpisode("W6 Kling fixture", w6Kling, ["W6 cancel after submit", "W6 cancel before submit"]);
   const frame = (await settled((await confirm(kling, await preview(kling, [kling.detail.clips[0]], "keyframe"))).id)).takes[0];
   await json(kling.path + `/clips/${kling.detail.clips[0].id}/keyframe/confirm`, "POST",
-    { keyframeTakeId: frame.id, expectedClipRevision: kling.detail.clips[0].revision });
+    { keyframeTakeId: frame.id, expectedClipRevision: kling.detail.clips[0].revision,
+      expectedSelectionRevision: kling.detail.clips[0].selectionRevision ?? 1 });
   const references = { visualReferences: [{ materialId: savedFrame.id, mediaId: versions[0].media.id, kind: "scene" }] };
   const withRefs = await preview(kling, undefined, "from_keyframe", references);
   assert.deepEqual(withRefs.items[0].referenceVersions?.map(item => item.mediaId), [frame.mediaId, versions[0].media.id]);
@@ -263,7 +275,7 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   const sibling = kling.detail.clips[1];
   const siblingFrame = (await settled((await confirm(kling, await preview(kling, [sibling], "keyframe"))).id)).takes[0];
   await json(kling.path + `/clips/${sibling.id}/keyframe/confirm`, "POST",
-    { keyframeTakeId: siblingFrame.id, expectedClipRevision: sibling.revision });
+    { keyframeTakeId: siblingFrame.id, expectedClipRevision: sibling.revision, expectedSelectionRevision: sibling.selectionRevision ?? 1 });
   const staleRefQuote = await preview(kling, [kling.detail.clips[0]], "from_keyframe", references);
   const replaceMaterial = await app.request(COMIC_DRAMA_API_ROOT + `/materials/${savedFrame.id}/files`, {
     method: "POST",

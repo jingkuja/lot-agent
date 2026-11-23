@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  comicSpeechPresets, type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
+  comicSpeechPresets, matchComicCharacters, type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -74,7 +74,7 @@ function DialogueLine({ line, data, remaining, attached, disabled, generate, rel
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
-  const matches = data.characters.filter(role => role.name === line.speaker || role.aliases.includes(line.speaker ?? ""));
+  const matches = line.speaker ? matchComicCharacters(line.speaker, data.characters) : [];
   const choice = selection || (matches.length === 1 ? matches[0].id : data.presets[0] ?? data.characters[0]?.id ?? "");
   const voiceChoice = (): ComicSpeechRequest["voice"] => {
     const preset = comicSpeechPresets.find(key => key === choice);

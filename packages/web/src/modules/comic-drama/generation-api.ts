@@ -21,20 +21,25 @@ export const comicGenerationApi = {
   status: (id: string, signal?: AbortSignal) => request<ComicImageRequest>(root + `/generation-requests/${id}`, { signal }),
   recover: (id: string) => post<ComicImageRequest>(`/generation-requests/${id}/recover`, {}),
   keyframes: (id: string, clipId: string, signal?: AbortSignal) => request<ComicKeyframeHistory>(root + series(id, clipId) + "/keyframes", { signal }),
-  approve: (id: string, clipId: string, keyframeTakeId: string, expectedClipRevision: number) =>
-    post<{ ok: true }>(series(id, clipId) + "/keyframe/confirm", { keyframeTakeId, expectedClipRevision }),
-  selectKeyframe: (id: string, clipId: string, mediaId: string, expectedClipRevision: number) =>
-    post<{ ok: true }>(series(id, clipId) + "/keyframe/select", { mediaId, expectedClipRevision }),
-  uploadKeyframe: (id: string, clipId: string, expectedClipRevision: number, file: File, signal: AbortSignal) =>
-    uploadImage<{ mediaId: string }>(series(id, clipId) + `/keyframe/upload?expectedClipRevision=${expectedClipRevision}`, file, signal),
+  approve: (id: string, clipId: string, keyframeTakeId: string, expectedClipRevision: number, expectedSelectionRevision: number) =>
+    post<{ ok: true; selectionRevision: number }>(series(id, clipId) + "/keyframe/confirm",
+      { keyframeTakeId, expectedClipRevision, expectedSelectionRevision }),
+  selectKeyframe: (id: string, clipId: string, mediaId: string, expectedClipRevision: number, expectedSelectionRevision: number) =>
+    post<{ ok: true; selectionRevision: number }>(series(id, clipId) + "/keyframe/select",
+      { mediaId, expectedClipRevision, expectedSelectionRevision }),
+  uploadKeyframe: (id: string, clipId: string, expectedClipRevision: number, expectedSelectionRevision: number, file: File, signal: AbortSignal) =>
+    uploadImage<{ mediaId: string; selectionRevision: number }>(
+      series(id, clipId) + `/keyframe/upload?expectedClipRevision=${expectedClipRevision}&expectedSelectionRevision=${expectedSelectionRevision}`,
+      file, signal),
   characterTakes: (id: string, signal?: AbortSignal) => request<ComicImageTake[]>(root + `/characters/${id}/generations`, { signal }),
   imageAction: (id: string, action: "cancel" | "release") =>
     post<ComicImageTake>(`/image-takes/${id}/${action}`, action === "release" ? { acknowledgePossibleCharge: true } : {}),
   videos: (id: string, clipId: string, signal?: AbortSignal) => request<ComicVideoTake[]>(root + series(id, clipId) + "/videos", { signal }),
   videoHistory: (filters: URLSearchParams, signal?: AbortSignal) => request<ComicVideoHistory>(root + "/clips?" + filters, { signal }),
   videoTake: (id: string, signal?: AbortSignal) => request<ComicVideoTake>(root + "/video-takes/" + encodeURIComponent(id), { signal }),
-  adopt: (id: string, clipId: string, takeId: string, expectedClipRevision: number) =>
-    post<{ ok: true }>(series(id, clipId) + "/video/adopt", { takeId, expectedClipRevision }),
+  adopt: (id: string, clipId: string, takeId: string, expectedClipRevision: number, expectedSelectionRevision: number) =>
+    post<{ ok: true; selectionRevision: number }>(series(id, clipId) + "/video/adopt",
+      { takeId, expectedClipRevision, expectedSelectionRevision }),
   videoAction: (id: string, action: "cancel" | "release" | "recover") =>
     post<ComicVideoTake>(`/video-takes/${id}/${action}`, action === "release" ? { acknowledgePossibleCharge: true } : {}),
   receipt: (id: string, signal?: AbortSignal) => request<ComicVideoReceipt>(root + `/video-takes/${id}/receipt`, { signal }),

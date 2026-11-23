@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   comicTimelineSchema, comicVideoItem, layoutComicTimeline,
-  type ComicEdit, type ComicEditSource, type ComicMaterial, type ComicTimeline, type ComicVideoTake,
+  type ComicAutoDialoguePlan, type ComicAutoDialogueResult, type ComicEdit, type ComicEditAutoDialogueOverride,
+  type ComicEditSource, type ComicMaterial, type ComicTimeline, type ComicVideoTake,
 } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { ComicTrimmedPreview } from "./ComicTrimmedPreview.js";
 import { ComicTimelineTracks } from "./ComicTimelineTracks.js";
@@ -18,8 +20,9 @@ type Video = ComicTimeline["video"][number];
 type Editable = Pick<ComicEdit, "title" | "timeline">;
 const seconds = (ms: number) => String(ms / 1000);
 
-export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
+export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDialogue, onAutoDialogueOpened }: {
   id: string; exit: () => void; openVideo: (seriesId: string, clipId: string) => void; setGuard: (guard: (() => boolean) | null) => void;
+  autoOpenDialogue?: boolean; onAutoDialogueOpened?: () => void;
 }) {
   const { t } = useI18n();
   const [project, setProject] = useState<ComicEdit | null>(null);
@@ -35,6 +38,13 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
   const [picking, setPicking] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(true);
   const [replacement, setReplacement] = useState(false);
+  const [dialogueModalOpen, setDialogueModalOpen] = useState(false);
+  const [dialoguePlan, setDialoguePlan] = useState<ComicAutoDialoguePlan | null>(null);
+  const [dialogueResult, setDialogueResult] = useState<ComicAutoDialogueResult | null>(null);
+  const [dialogueBusy, setDialogueBusy] = useState(false);
+  const [dialogueError, setDialogueError] = useState("");
+  const [dialogueOverrides, setDialogueOverrides] = useState<Record<string, ComicEditAutoDialogueOverride>>({});
+  const autoOpenedRef = useRef(false);
   const [position, setPosition] = useState(0);
   const [seek, setSeek] = useState({ ms: 0 });
   const draggingIndex = useRef<number | null>(null);
@@ -134,15 +144,79 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
     apply({ ...draft.timeline, [track]: [...draft.timeline[track], entry] });
   };
 
-  const runAutoDialogue = () => void run(async () => {
+  const openAutoDialoguePreview = useCallback(async (targetProject: ComicEdit, overridesList?: ComicEditAutoDialogueOverride[]) => {
+    setDialogueModalOpen(true);
+    setDialogueBusy(true);
+    setDialogueError("");
+    setDialogueResult(null);
+    try {
+      const plan = await comicEditApi.previewAutoDialogue(targetProject.id, {
+        expectedRevision: targetProject.revision,
+        includeVoice: true,
+        includeSubtitles: true,
+        ...(overridesList?.length ? { overrides: overridesList } : {}),
+      });
+      setDialoguePlan(plan);
+    } catch (reason) {
+      setDialogueError(editError(reason));
+    } finally {
+      setDialogueBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoOpenDialogue || autoOpenedRef.current || !project || !project.timeline.video.length) return;
+    autoOpenedRef.current = true;
+    onAutoDialogueOpened?.();
+    void openAutoDialoguePreview(project);
+  }, [autoOpenDialogue, onAutoDialogueOpened, openAutoDialoguePreview, project]);
+
+  const openAutoDialogue = () => {
     if (!project || dirty) return;
     setNotice("");
-    const result = await comicEditApi.autoDialogue(id, {
-      expectedRevision: project.revision, includeVoice: true, includeSubtitles: true,
-    });
-    receive(result.edit);
-    setNotice(t("已批量合成 {0} 句配音、铺设 {1} 条字幕", [result.voicedCount, result.subtitledCount]));
-  });
+    setDialogueOverrides({});
+    void openAutoDialoguePreview(project);
+  };
+
+  const executeAutoDialogue = async (overridesList?: ComicEditAutoDialogueOverride[]) => {
+    if (!project || dialogueBusy) return;
+    setDialogueBusy(true);
+    setDialogueError("");
+    try {
+      const result = await comicEditApi.autoDialogue(project.id, {
+        expectedRevision: project.revision,
+        includeVoice: true,
+        includeSubtitles: true,
+        overflowMode: "ask",
+        ...(overridesList?.length ? { overrides: overridesList } : {}),
+      });
+      receive(result.edit);
+      setDialogueResult(result);
+      const nextOverrides: Record<string, ComicEditAutoDialogueOverride> = {};
+      for (const row of result.items) {
+        if (row.status === "overflow" || row.status === "failed") {
+          const key = `${row.videoItemId}:${row.lineId}`;
+          nextOverrides[key] = {
+            videoItemId: row.videoItemId,
+            lineId: row.lineId,
+            text: row.text,
+            speed: row.status === "overflow" && row.suggestedSpeed ? row.suggestedSpeed : row.speed,
+          };
+        }
+      }
+      setDialogueOverrides(nextOverrides);
+      setNotice(result.overflowCount > 0 || result.failedCount > 0
+        ? t("批量配音已入轨 {0} 句（超长 {1} 句、失败 {2} 句待处理）", [result.voicedCount, result.overflowCount, result.failedCount])
+        : t("已批量合成 {0} 句配音、铺设 {1} 条字幕", [result.voicedCount, result.subtitledCount]));
+      if (result.overflowCount === 0 && result.failedCount === 0) {
+        setDialogueModalOpen(false);
+      }
+    } catch (reason) {
+      setDialogueError(editError(reason));
+    } finally {
+      setDialogueBusy(false);
+    }
+  };
 
   if (!project || !draft) return error ? <div className="comic-error" role="alert">
     {t(error)} <button type="button" onClick={reload}>{t("重新读取")}</button>
@@ -186,7 +260,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
       <div><h1>{project.title}</h1><small role="status">{t(saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small></div>
       <div className="comic-actions">
         <button type="button" onClick={() => setShelfOpen(v => !v)}>{t(shelfOpen ? "收起片源架" : "展开片源架")}</button>
-        <button type="button" disabled={saving || dirty || !video.length} onClick={runAutoDialogue}>{t("一键配音与字幕")}</button>
+        <button type="button" disabled={saving || dirty || !video.length} onClick={openAutoDialogue}>{t("一键配音与字幕")}</button>
         <button type="button" onClick={exit}>{t("返回剪辑工程列表")}</button>
         <button type="button" onClick={reload} disabled={saving}>{t("重新读取工程")}</button>
         <button type="button" className="primary" disabled={!dirty || !draft.title.trim() || saving} onClick={save}>{t("保存工程")}</button>
@@ -208,7 +282,8 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
             browseAll={() => setPicking(true)}
           />
         )}
-        <ComicTrimmedPreview timeline={timeline} sources={sources} seek={seek} position={position} onPosition={setPosition} />
+        <ComicTrimmedPreview timeline={timeline} sources={sources} audioSources={audioSources}
+          seek={seek} position={position} onPosition={setPosition} />
         <section className="comic-edit-card">
           <header><h2>{t("视频轨")}</h2><strong>{t("总时长 {0} 秒", [seconds(layout.durationMs)])}</strong></header>
           <fieldset disabled={saving} className="comic-editor-fields">
@@ -276,7 +351,151 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard }: {
           step={0.001} required defaultValue={seconds(adopted.durationMs)} /></label>
       </> : <p>{t("替换后保留当前入点和出点。")}</p>}
     </LibraryDialog>}
+    {dialogueModalOpen && (
+      <BatchDialogueDialog
+        plan={dialoguePlan}
+        result={dialogueResult}
+        overrides={dialogueOverrides}
+        busy={dialogueBusy}
+        error={dialogueError}
+        updateOverride={(key, patch) => setDialogueOverrides(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }))}
+        confirm={() => void executeAutoDialogue()}
+        retry={() => void executeAutoDialogue(Object.values(dialogueOverrides))}
+        close={() => { if (!dialogueBusy) setDialogueModalOpen(false); }}
+      />
+    )}
   </>;
+}
+
+function BatchDialogueDialog({ plan, result, overrides, busy, error, updateOverride, confirm, retry, close }: {
+  plan: ComicAutoDialoguePlan | null;
+  result: ComicAutoDialogueResult | null;
+  overrides: Record<string, ComicEditAutoDialogueOverride>;
+  busy: boolean;
+  error: string;
+  updateOverride: (key: string, patch: Partial<ComicEditAutoDialogueOverride>) => void;
+  confirm: () => void;
+  retry: () => void;
+  close: () => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => { dialogRef.current?.showModal(); }, []);
+  const affected = (result?.items ?? []).filter(item => item.status === "overflow" || item.status === "failed");
+  const statusLabel = (status: ComicAutoDialoguePlan["lines"][number]["status"]) => {
+    switch (status) {
+      case "already_placed": return "已入轨";
+      case "cached": return "缓存命中";
+      case "to_synthesize": return "待新合成";
+      case "unknown_blocked": return "待核实阻断";
+      case "compliance_blocked": return "合规拦截";
+      case "no_voice": return "暂无可用音色";
+      default: return "无剩余时长";
+    }
+  };
+  return <dialog ref={dialogRef} className="comic-dialog comic-quote" aria-label={t("批量配音范围核对")} onCancel={event => {
+    event.preventDefault();
+    close();
+  }}>
+    <h2>{t(result ? "批量配音结果与异常处理" : "批量配音范围核对")}</h2>
+    {error && <p className="comic-error" role="alert">{t(error)}</p>}
+    {!result ? (
+      !plan ? <p role="status">{t("正在核对配音范围…")}</p> : <>
+        <div className="comic-episode-stats">
+          <span>{t("共 {0} 句台词", [plan.totalLines])}</span>
+          <span>{t("缓存命中 {0} 句", [plan.cachedCount])}</span>
+          <span>{t("待新合成 {0} 句", [plan.toSynthesizeCount])}</span>
+          {plan.blockedCount > 0 && <span>{t("阻断 {0} 句", [plan.blockedCount])}</span>}
+          {plan.overflowCount > 0 && <span>{t("预计超长 {0} 句", [plan.overflowCount])}</span>}
+        </div>
+        <p className="comic-generation-note">
+          {plan.feeStatus === "free_cached"
+            ? t("本次全部复用已有缓存，无需新增合成费用。")
+            : t("待新合成 {0} 句，由模型网关按实际用量计费（费用待核实）。", [plan.toSynthesizeCount])}
+        </p>
+        <ul className="comic-dialogue-batch-list">
+          {plan.lines.map(line => (
+            <li key={`${line.videoItemId}:${line.lineId}`}>
+              <div>
+                <strong>{line.speaker ? `${line.speaker} · ` : ""}{line.text}</strong>
+                <small>{t(statusLabel(line.status))} · {t("剩余 {0} 秒", [+(line.remainingMs / 1000).toFixed(2)])}
+                  {line.overflowMs ? ` · ${t("超出 {0} 秒", [+(line.overflowMs / 1000).toFixed(2)])}` : ""}</small>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="comic-actions comic-dialog-actions">
+          <button type="button" disabled={busy} onClick={close}>{t("取消")}</button>
+          <button type="button" className="primary" disabled={busy || plan.totalLines === 0} onClick={confirm}>
+            {t(busy ? "正在合成…" : "确认并执行批量配音")}
+          </button>
+        </div>
+      </>
+    ) : <>
+      <div className="comic-episode-stats">
+        <span>{t("已入轨 {0} 句", [result.voicedCount])}</span>
+        <span>{t("复用缓存 {0} 句", [result.cachedCount])}</span>
+        <span>{t("新合成 {0} 句", [result.synthesizedCount])}</span>
+        {result.overflowCount > 0 && <span>{t("超长待处理 {0} 句", [result.overflowCount])}</span>}
+        {result.failedCount > 0 && <span>{t("失败 {0} 句", [result.failedCount])}</span>}
+      </div>
+      <p className="comic-generation-note">{t("已成功的音频与轨道已保存，重试时将直接复用缓存，不会重复计费。")}</p>
+      <ul className="comic-dialogue-batch-list">
+        {affected.map(item => {
+          const key = `${item.videoItemId}:${item.lineId}`;
+          const ov = overrides[key] ?? { videoItemId: item.videoItemId, lineId: item.lineId, text: item.text, speed: item.speed };
+          return <li key={key}>
+            <div className="comic-dialogue-issue-row">
+              <strong>{item.speaker ? `${item.speaker} · ` : ""}{item.text}</strong>
+              {item.status === "overflow" ? (
+                <>
+                  <small>{t("合成时长 {0} 秒超出剩余 {1} 秒，请选择裁切、改词或调速", [
+                    +((item.audioDurationMs ?? 0) / 1000).toFixed(2),
+                    +((item.remainingMs ?? 0) / 1000).toFixed(2),
+                  ])}</small>
+                  <div className="comic-actions">
+                    <label className="comic-video-replace">
+                      <input type="checkbox" checked={ov.overflowAction === "trim"}
+                        onChange={e => updateOverride(key, { overflowAction: e.target.checked ? "trim" : undefined })} />
+                      {t("裁切并入轨（复用缓存）")}
+                    </label>
+                    <label>{t("调速")}
+                      <select value={ov.speed ?? item.speed} disabled={ov.overflowAction === "trim"}
+                        onChange={e => updateOverride(key, { speed: Number(e.target.value) })}>
+                        {[...new Set([0.75, 1, 1.25, 1.5, 1.75, 2, ...(item.suggestedSpeed ? [item.suggestedSpeed] : [])])]
+                          .sort((a, b) => a - b)
+                          .map(val => <option key={val} value={val}>{val}×</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label>{t("改词")}
+                    <input maxLength={1000} disabled={ov.overflowAction === "trim"} value={ov.text ?? item.text}
+                      onChange={e => updateOverride(key, { text: e.target.value })} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <small className="comic-error">{t(editError(new ApiClientError(item.errorCode ?? "FAILED", 400, item.errorCode)))}</small>
+                  <label>{t("改词")}
+                    <input maxLength={1000} value={ov.text ?? item.text}
+                      onChange={e => updateOverride(key, { text: e.target.value })} />
+                  </label>
+                </>
+              )}
+            </div>
+          </li>;
+        })}
+      </ul>
+      <div className="comic-actions comic-dialog-actions">
+        <button type="button" disabled={busy} onClick={close}>{t("关闭")}</button>
+        {affected.length > 0 && (
+          <button type="button" className="primary" disabled={busy} onClick={retry}>
+            {t(busy ? "正在重试…" : "按调整项重试")}
+          </button>
+        )}
+      </div>
+    </>}
+  </dialog>;
 }
 
 function VideoProperties({ item, first, change }: { item: Video; first: boolean; change: (item: Video) => void }) {

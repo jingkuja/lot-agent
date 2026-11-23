@@ -1,7 +1,8 @@
 import type {
-  ComicAutoDialogueResult, ComicEdit, ComicEditAppendSource, ComicEditAutoDialogue, ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate,
-  ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest, ComicSpeechLines, ComicSpeechRelease,
-  ComicSpeechRequest, ComicSpeechTake, ComicVoiceAudition, ComicVoiceBind, ComicVoiceSettings,
+  ComicAutoDialoguePlan, ComicAutoDialogueResult, ComicEdit, ComicEditAppendSource, ComicEditAutoDialogue, ComicEditAutoDialoguePreview,
+  ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate, ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest,
+  ComicSpeechLines, ComicSpeechRelease, ComicSpeechRequest, ComicSpeechTake, ComicVoiceAudition, ComicVoiceAuditionRelease,
+  ComicVoiceBind, ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
 import { libraryError } from "./LibraryParts.js";
@@ -22,6 +23,8 @@ export const comicEditApi = {
     send<ComicEdit>(item(id, itemId) + "/replace", "POST", fields, signal),
   appendSource: (id: string, fields: ComicEditAppendSource, signal?: AbortSignal) =>
     send<ComicEdit>(edit(id) + "/append-source", "POST", fields, signal),
+  previewAutoDialogue: (id: string, fields: ComicEditAutoDialoguePreview, signal?: AbortSignal) =>
+    send<ComicAutoDialoguePlan>(edit(id) + "/auto-dialogue/preview", "POST", fields, signal),
   autoDialogue: (id: string, fields: ComicEditAutoDialogue, signal?: AbortSignal) =>
     send<ComicAutoDialogueResult>(edit(id) + "/auto-dialogue", "POST", fields, signal),
   lines: (id: string, itemId: string, signal?: AbortSignal) => request<ComicSpeechLines>(item(id, itemId) + "/lines", { signal }),
@@ -32,6 +35,8 @@ export const comicEditApi = {
   voice: (id: string, signal?: AbortSignal) => request<ComicVoiceSettings>(voice(id), { signal }),
   bindVoice: (id: string, fields: ComicVoiceBind, signal?: AbortSignal) => send<{ ok: true }>(voice(id), "PUT", fields, signal),
   auditionVoice: (fields: ComicVoiceAudition, signal?: AbortSignal) => send<ComicSpeechTake>(root + "/voices/audition", "POST", fields, signal),
+  releaseAuditionVoice: (fields: ComicVoiceAuditionRelease, signal?: AbortSignal) =>
+    send<{ ok: true }>(root + "/voices/audition/release", "POST", fields, signal),
   startRender: (id: string, fields: ComicRenderRequest) => send<ComicRender>(edit(id) + "/render", "POST", fields),
   render: (id: string, signal?: AbortSignal) => request<ComicRender>(root + "/renders/" + encodeURIComponent(id), { signal }),
   renders: (editId?: string, cursor?: string, signal?: AbortSignal) => {
@@ -59,6 +64,8 @@ const errors: Record<string, string> = {
   EDIT_SPEECH_UNAVAILABLE: "语音服务暂不可用，请检查模型账号",
   EDIT_SPEECH_UNKNOWN: "配音结果待核实，原请求可能已计费",
   EDIT_SPEECH_NOT_RELEASABLE: "此句配音暂不可释放，请重新读取台词",
+  EDIT_SPEECH_SUPERSEDED: "旧的配音请求已失效，请以最新提交结果为准",
+  INVALID_MATERIAL_REFERENCE: "所选场景、道具或音效素材不可用，请重新选择",
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
   RENDER_NO_VIDEO: "请先添加视频片段",
   RENDER_LIMIT: "导出最多支持 5 分钟、60 段视频及 240 条音频",
