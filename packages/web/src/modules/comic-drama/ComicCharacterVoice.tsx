@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  COMIC_SPEECH_PRESET_CATALOG, comicSpeechPresets, type ComicSpeechTake, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
+  COMIC_SPEECH_PRESET_CATALOG,
+  comicSpeechPresets,
+  type ComicSpeechPresetMeta,
+  type ComicSpeechTake,
+  type ComicVoiceAudition,
+  type ComicVoiceBind,
+  type ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicEditApi, editError } from "./edit-api.js";
 import { DictionaryOptions, LibraryDialog, MediaPreview, useComicChoices } from "./LibraryParts.js";
 
-export function presetVoiceLabel(id: string, locale: "zh" | "en" | "id") {
-  const entry = COMIC_SPEECH_PRESET_CATALOG.find(item => item.id === id);
+export function presetVoiceLabel(
+  id: string,
+  locale: "zh" | "en" | "id",
+  catalog: readonly ComicSpeechPresetMeta[] = COMIC_SPEECH_PRESET_CATALOG,
+) {
+  const entry = catalog.find(item => item.id === id)
+    ?? COMIC_SPEECH_PRESET_CATALOG.find(item => item.id === id);
   return entry ? entry.labels[locale] : id;
 }
 

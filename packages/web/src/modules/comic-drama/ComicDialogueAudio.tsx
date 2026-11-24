@@ -118,7 +118,9 @@ function DialogueLine({ line, data, remaining, attached, disabled, generate, rel
         setSelection(event.target.value); setTake(null); setError(""); setUnknown(false);
       }}>
         {!choice && <option value="">{t("暂无可用音色")}</option>}
-        {data.presets.map(key => <option key={key} value={key}>{presetVoiceLabel(key, locale)}</option>)}
+        {data.presets.map(key => (
+          <option key={key} value={key}>{presetVoiceLabel(key, locale, data.presetCatalog)}</option>
+        ))}
         {data.characters.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
       </select>
       <button type="button" disabled={!choice || disabled || busy} onClick={() => void synthesize()}>{t(busy ? "正在合成…" : "合成此句")}</button>

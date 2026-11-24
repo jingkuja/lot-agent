@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { ComicSpeechPresetMeta } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { messages } from "../../i18n/messages.js";
+import { presetVoiceLabel } from "./ComicCharacterVoice.js";
 import { comicDirectorError } from "./director-api.js";
 import { comicRenderError, editError } from "./edit-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
@@ -76,10 +78,38 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       "当前可用 {0} 积分，预计需要 {1} 积分",
       "重新检查积分",
       "继续生成",
+      "视频默认模型用于新建剧集，图片档位用于角色造型、分镜首帧和图片素材。导演文字模型由系统自动选择。",
     ];
     for (const key of requiredKeys) {
       expect(messages[key]?.en).toBeTruthy();
       expect(messages[key]?.id).toBeTruthy();
     }
+  });
+
+  it("prefers server-returned presetCatalog labels and falls back to COMIC_SPEECH_PRESET_CATALOG", () => {
+    const qwenPresets: readonly ComicSpeechPresetMeta[] = [
+      {
+        id: "nova",
+        gender: "female",
+        age: "young_adult",
+        tone: "balanced",
+        labels: {
+          zh: "龙安灵心 · 温暖女声",
+          en: "Lingxin · Warm Female Voice",
+          id: "Lingxin · Suara Wanita Hangat",
+        },
+        summary: {
+          zh: "温暖自然",
+          en: "Warm and natural",
+          id: "Hangat dan alami",
+        },
+      },
+    ];
+    expect(presetVoiceLabel("nova", "zh", qwenPresets)).toBe("龙安灵心 · 温暖女声");
+    expect(presetVoiceLabel("nova", "en", qwenPresets)).toBe("Lingxin · Warm Female Voice");
+    expect(presetVoiceLabel("nova", "id", qwenPresets)).toBe("Lingxin · Suara Wanita Hangat");
+    expect(presetVoiceLabel("alloy", "zh", qwenPresets)).toBe("清朗中性 · 青年");
+    expect(presetVoiceLabel("nova", "zh")).toBe("明快女声 · 少女/青年");
+    expect(presetVoiceLabel("unknown_voice", "zh", qwenPresets)).toBe("unknown_voice");
   });
 });

@@ -554,8 +554,11 @@ async function main() {
     }));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
-        `${COMIC_DRAMA_API_ROOT}/series/:id/generate`, `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`,
-        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/frame`, `${COMIC_DRAMA_API_ROOT}/video-takes/:id/resume-credits`,
+        `${COMIC_DRAMA_API_ROOT}/series/:id/generate`,
+        `${COMIC_DRAMA_API_ROOT}/characters/:id/generate`,
+        `${COMIC_DRAMA_API_ROOT}/materials/:id/generate`,
+        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/frame`,
+        `${COMIC_DRAMA_API_ROOT}/video-takes/:id/resume-credits`,
         `${COMIC_DRAMA_API_ROOT}/series/:id/episode-budget`,
       ], generationRateLimit);
       const repo = new PgComicGeneration(service.db.pool);

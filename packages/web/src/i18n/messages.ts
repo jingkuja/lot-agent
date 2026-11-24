@@ -153,9 +153,9 @@ export const messages: Record<string, { en: string; id: string }> = {
     en: "Style references are used to generate first frames and reference-mode videos.",
     id: "Referensi gaya digunakan untuk membuat bingkai pertama dan video mode referensi.",
   },
-  "视频默认模型用于新建剧集，图片档位用于角色造型和分镜首帧。导演文字模型由系统自动选择。": {
-    en: "New episodes use the default video model. The image tier covers character artwork and first frames. The director model is selected automatically.",
-    id: "Episode baru memakai model video default. Tingkat gambar berlaku untuk desain karakter dan bingkai pertama. Model sutradara dipilih otomatis.",
+  "视频默认模型用于新建剧集，图片档位用于角色造型、分镜首帧和图片素材。导演文字模型由系统自动选择。": {
+    en: "New episodes use the default video model. The image tier covers character artwork, first frames, and image assets. The director model is selected automatically.",
+    id: "Episode baru memakai model video default. Tingkat gambar berlaku untuk desain karakter, bingkai pertama, dan aset gambar. Model sutradara dipilih otomatis.",
   },
   "所选模型不可用，请重新选择": { en: "The selected model is unavailable. Choose another model.", id: "Model yang dipilih tidak tersedia. Pilih model lain." },
   "请先确认当前分镜的首帧": { en: "Approve this clip’s first frame first", id: "Setujui bingkai awal klip ini dahulu" },
