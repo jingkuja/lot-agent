@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { BullmqJobQueue } from "./jobs/bullmq-queue.js";
 import { createAnalysisAudioRoutes } from "./marketing-analysis/audio-url.js";
 import { createDesktopToolRoutes } from "./desktop/routes.js";
@@ -579,6 +580,7 @@ async function main() {
           let videoCatalog: ReturnType<typeof service.tokenhub.listModels> | undefined;
           return {
             imageModel: selectComicImageModel(catalog?.image ?? [], prefs.defaultImageModel), textModel, speechModel,
+            predictionScope: key ? createHash("sha256").update(key).digest("hex") : undefined,
             videoModels: catalog?.video.filter(model => comicVideoModel(model.id)).map(model => model.id) ?? [],
             predict: (usage, deadline) => {
               if (!key) return Promise.reject(new Error("MODEL_AUTH_REQUIRED"));

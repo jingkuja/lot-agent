@@ -25,32 +25,57 @@ export function selectComicImageModel(models: readonly { id: string }[], preferr
 }
 
 type ReferenceImage = MarketingVideoProfile["referenceImage"] & { maxEdge?: number };
-type ComicVideoProfile = {
+export const comicVideoResolutions = ["480p", "720p", "768P", "1080p", "2K", "4k"] as const;
+export type ComicVideoResolution = typeof comicVideoResolutions[number];
+export type ComicVideoOperation = "reference" | "edit" | "extend";
+export type ComicVideoProfile = {
   referenceImages: { total: number };
   referenceImage: ReferenceImage;
   imagePromptTag: MarketingVideoProfile["imagePromptTag"];
   shotMaxSeconds: number;
   promptMaxChars?: number;
-  resolution?: "720p" | "768P";
+  resolution: ComicVideoResolution;
+  resolutions: readonly ComicVideoResolution[];
+  adaptiveFrame?: boolean;
+  referenceMedia: {
+    count: number; totalFiles: number; audioOnly: boolean; videoBytes: number;
+    minEdge: number; maxEdge: number; minFps: number; minPixels?: number; maxPixels?: number;
+    movPcm: boolean;
+  };
+  operations: readonly ComicVideoOperation[];
+  promptRecommendation?: { chineseChars: number; englishWords: number };
+  promptLimitUnverified?: boolean;
 };
 
 const seedanceImage: ReferenceImage = {
   formats: ["image/jpeg", "image/png", "image/webp"], maxBytes: 30_000_000 - 1, minEdge: 300, maxEdge: 6000, minAspect: 0.4, maxAspect: 2.5,
 };
-const seedance = { referenceImage: seedanceImage, imagePromptTag: { prefix: "@Image", suffix: "", firstNumber: 1 }, resolution: "720p" } as const;
+const seedance = {
+  referenceImage: seedanceImage, imagePromptTag: { prefix: "@Image", suffix: "", firstNumber: 1 }, resolution: "720p",
+  resolutions: ["480p", "720p", "1080p", "4k"],
+  promptRecommendation: { chineseChars: 500, englishWords: 1000 }, promptLimitUnverified: true,
+} as const;
+const seedanceMedia = { videoBytes: 200_000_000, minEdge: 300, maxEdge: 6000, minFps: 24, minPixels: 407696, maxPixels: 8847360, movPcm: true };
 const videoModels = [
   {
     ids: ["doubao-seedance-2-5", "doubao-seedance-2.5", "doubao-seedance-2-5-260628"], label: "Seedance 2.5",
-    profile: { ...seedance, shotMaxSeconds: 30, referenceImages: { total: 30 } },
+    profile: {
+      ...seedance, adaptiveFrame: true, shotMaxSeconds: 30, referenceImages: { total: 30 }, operations: ["reference", "edit", "extend"],
+      referenceMedia: { ...seedanceMedia, count: 10, totalFiles: 50, audioOnly: true },
+    },
   },
   {
     ids: ["doubao-seedance-2-0", "doubao-seedance-2.0", "doubao-seedance-2-0-260128"], label: "Seedance 2.0",
-    profile: { ...seedance, shotMaxSeconds: 15, referenceImages: { total: 9 } },
+    profile: {
+      ...seedance, shotMaxSeconds: 15, referenceImages: { total: 9 }, operations: ["reference", "extend"],
+      referenceMedia: { ...seedanceMedia, maxPixels: 8295044, count: 3, totalFiles: 15, audioOnly: false },
+    },
   },
   {
     ids: ["minimax-video-h3", "MiniMax-H3", "MiniMax/MiniMax-H3"], label: "MiniMax H3",
     profile: {
-      shotMaxSeconds: 15, referenceImages: { total: 9 }, resolution: "768P",
+      shotMaxSeconds: 15, adaptiveFrame: true, referenceImages: { total: 9 }, resolution: "768P", resolutions: ["768P", "2K"], operations: ["reference"],
+      referenceMedia: { count: 3, totalFiles: 12, audioOnly: false, videoBytes: 50_000_000, minEdge: 256, maxEdge: 5760, minFps: 23.976, movPcm: false },
       imagePromptTag: { prefix: "", suffix: "", firstNumber: 1 },
       referenceImage: { ...seedanceImage, maxBytes: 30_000_000, minEdge: 256, maxEdge: 5760 },
     },
@@ -78,7 +103,8 @@ export function selectComicVideoModel(models: readonly { id: string }[], preferr
 export function comicVideoProfile(modelId: string | null): ComicVideoProfile | undefined {
   const profile = comicVideoModel(modelId)?.profile;
   if (!profile) return undefined;
-  return comicVideoModel(modelId)?.label === "MiniMax H3" ? { ...profile, promptMaxChars: 7000 } : profile;
+  if (modelId?.toLowerCase() === "minimax/minimax-h3") return { ...profile, promptMaxChars: 7000 };
+  return comicVideoModel(modelId)?.label === "MiniMax H3" ? { ...profile, promptLimitUnverified: true } : profile;
 }
 
 export function comicVideoDurationSupported(durationMs: number, profile: Pick<ComicVideoProfile, "shotMaxSeconds">) {

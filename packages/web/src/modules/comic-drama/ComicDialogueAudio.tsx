@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  comicSpeechPresets, matchComicCharacters, type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
+  COMIC_SPEECH_ESTIMATE_POINTS, comicSpeechPresets, matchComicCharacters,
+  type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -32,7 +33,7 @@ export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles
     <header><h2>{t("逐句配音")}</h2><button type="button" onClick={retry}>{t("重新读取台词")}</button></header>
     {data === "error" ? <p role="alert">{t("操作失败，请重试")}</p> : data === null ? <p role="status">{t("加载中…")}</p> :
       !data.lines.length ? <p>{t("源分镜暂无台词")}</p> : <>
-        <p className="comic-generation-note">{t("试听为 AI 合成。首次合成可能由模型网关收费。")}</p>
+        <p className="comic-generation-note">{t("新合成约 {0} 积分/次，命中缓存为 0 积分。", [COMIC_SPEECH_ESTIMATE_POINTS])}</p>
         {!data.presets.length && !data.characters.length && <p>{t("暂无可用音色")}</p>}
         {data.lines.map(line => {
           const attached = local.find(entry => entry.lineId === line.id);

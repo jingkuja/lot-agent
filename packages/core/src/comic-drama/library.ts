@@ -94,7 +94,9 @@ export const comicLibrarySearch = z.object({
   query: z.string().trim().max(120).optional(), archived: z.enum(["true", "false"]).default("false"),
   page: z.coerce.number().int().min(1).max(10000).default(1),
 }).strict();
-export const comicMaterialSearch = comicLibrarySearch.extend({ kind: comicMaterialKind.optional() }).strict();
+export const comicMaterialSearch = comicLibrarySearch.extend({
+  kind: comicMaterialKind.optional(), mime: z.enum(["image", "audio", "video"]).optional(),
+}).strict();
 
 export type ComicCharacterInput = z.infer<typeof comicCharacterInput>;
 export type ComicCharacterUpload = z.infer<typeof comicCharacterUpload>;

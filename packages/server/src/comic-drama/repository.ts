@@ -53,6 +53,7 @@ type ClipMetaRow = {
   keyframeTakeState: string | null;
   keyframeTakeMediaId: string | null;
   keyframeTakeRev: number | null;
+  keyframeCandidateAvailable: boolean;
   latestImageState: string | null;
   latestVideoState: string | null;
   videoTakeCount: number;
@@ -77,7 +78,7 @@ export type EpisodeSpendRow = {
 };
 
 type MaterialRefEntry = {
-  role: "scene" | "prop" | "sfx";
+  role: ComicInvalidMaterialRef["role"];
   materialId: string;
   mediaId: string;
   name?: string;
@@ -147,8 +148,8 @@ export function summarizeEpisodeCosts(
       continue;
     }
 
-    if (row.status !== "ready") continue;
-    unbilledReadyCount += 1;
+    if (row.status !== "ready" && row.status !== "pending" && row.status !== "running") continue;
+    if (row.status === "ready") unbilledReadyCount += 1;
     if (typeof row.amountMicros === "number" && Number.isFinite(row.amountMicros) && isCurrency(row.currency)) {
       const qty = row.unit === "second" && row.durationMs ? row.durationMs / 1000 : 1;
       quotedTotals.set(row.currency, (quotedTotals.get(row.currency) ?? 0) + Math.round(row.amountMicros * qty));
@@ -162,8 +163,8 @@ export function summarizeEpisodeCosts(
   let estimatedUnverifiedCount = 0;
   for (const clip of clips) {
     const hasReadyVideo = clip.progress?.videoState === "ready";
-    const hasApprovedFrame = !!clip.progress?.keyframeApproved;
-    if (!hasApprovedFrame) {
+    const hasFrame = clip.progress?.keyframeApproved || clip.progress?.keyframeCandidateAvailable;
+    if (!hasFrame) {
       if (estimate && estimate.imageMicros !== null) {
         if (estimatedMicros !== null) estimatedMicros += estimate.imageMicros;
       } else {
@@ -212,6 +213,7 @@ export function summarizeEpisodeCosts(
 
 function collectDraftMaterialRefs(draft: ComicDramaClipDraft): MaterialRefEntry[] {
   const entries: MaterialRefEntry[] = [];
+  for (const { kind, ...ref } of draft.videoInputs?.references ?? []) entries.push({ role: kind, ...ref });
   if (draft.sceneRef) entries.push({ role: "scene", ...draft.sceneRef });
   for (const ref of draft.propRefs ?? []) entries.push({ role: "prop", ...ref });
   for (const ref of draft.sfxRefs ?? []) entries.push({ role: "sfx", ...ref });
@@ -224,13 +226,18 @@ function collectDraftMaterialRefs(draft: ComicDramaClipDraft): MaterialRefEntry[
 const materialRefKey = (entry: Pick<MaterialRefEntry, "role" | "materialId" | "mediaId">) =>
   `${entry.role}:${entry.materialId}:${entry.mediaId}`;
 
-function expectedMaterialKind(role: MaterialRefEntry["role"]): "scene" | "prop" | "sound" {
-  return role === "sfx" ? "sound" : role;
+function matchesMaterialKind(role: MaterialRefEntry["role"], kind: string) {
+  if (role === "sfx") return kind === "sound";
+  if (role === "audio") return ["sound", "music", "other"].includes(kind);
+  if (role === "video") return kind === "other";
+  if (role === "image" || role === "last_frame") return ["scene", "prop", "other"].includes(kind);
+  return role === kind;
 }
 
 function isValidMaterialMime(role: MaterialRefEntry["role"], mime: string | null): boolean {
   if (!mime) return false;
-  if (role === "sfx") return mime === "audio/mpeg" || mime === "audio/wav";
+  if (role === "sfx" || role === "audio") return mime === "audio/mpeg" || mime === "audio/wav";
+  if (role === "video") return mime === "video/mp4" || mime === "video/quicktime";
   return mime.startsWith("image/");
 }
 
@@ -272,7 +279,7 @@ async function inspectMaterialRefs(
       invalid.set(key, { ...entry, reason: "ARCHIVED" });
       continue;
     }
-    if (head.kind !== expectedMaterialKind(entry.role)) {
+    if (!matchesMaterialKind(entry.role, head.kind)) {
       invalid.set(key, { ...entry, reason: "WRONG_KIND" });
       continue;
     }
@@ -281,7 +288,7 @@ async function inspectMaterialRefs(
       invalid.set(key, { ...entry, reason: "MISSING" });
       continue;
     }
-    if (versionRow.latestVersion !== null && versionRow.version !== versionRow.latestVersion) {
+    if (entry.role !== "scene" && entry.role !== "prop" && versionRow.latestVersion !== null && versionRow.version !== versionRow.latestVersion) {
       invalid.set(key, { ...entry, reason: "OUTDATED_VERSION" });
     }
   }
@@ -342,8 +349,12 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         kt.status AS "keyframeTakeState",
         kt.media_id AS "keyframeTakeMediaId",
         (kt.input->>'clipRevision')::int AS "keyframeTakeRev",
+        EXISTS (SELECT 1 FROM lot_comic_drama.cd_takes t
+          JOIN lot_comic_drama.cd_media m ON (m.owner_id,m.id)=(t.owner_id,t.media_id)
+          WHERE t.owner_id=$1 AND t.target_id=c.id AND t.video_version IS NULL AND t.status='ready'
+            AND (t.input->>'clipRevision')::int=c.revision) AS "keyframeCandidateAvailable",
         (SELECT t.status FROM lot_comic_drama.cd_takes t
-          WHERE t.owner_id=$1 AND t.target_id=c.id AND t.video_version IS NULL
+          WHERE t.owner_id=$1 AND t.target_id=c.id AND t.video_version IS NULL AND (t.input->>'clipRevision')::int=c.revision
           ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS "latestImageState",
         (SELECT t.status FROM lot_comic_drama.cd_takes t
           WHERE t.owner_id=$1 AND t.target_id=c.id AND t.video_version IS NOT NULL
@@ -401,8 +412,10 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         keyframeState: keyframeApproved ? "ready" : asState(meta.latestImageState),
         keyframeMediaId: keyframeMediaId ?? null,
         keyframeApproved,
+        keyframeCandidateAvailable: meta.keyframeCandidateAvailable,
         keyframeStale,
         videoState: meta.adoptedVideoTakeId ? "ready" : asState(meta.latestVideoState),
+        latestVideoState: asState(meta.latestVideoState),
         videoTakeCount: meta.videoTakeCount,
         adoptedVideoTakeId: meta.adoptedVideoTakeId,
         adoptedVideoVersion: meta.adoptedVersion,

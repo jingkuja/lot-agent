@@ -106,6 +106,7 @@ export function ComicDramaWorkspace({
   const [stage, setStage] = useState<"剧本" | "选角" | "分镜" | "生成">("分镜");
   const [openVideos, setOpenVideos] = useState(false);
   const [quickAction, setQuickAction] = useState<{ mode: ComicGenerationMode; token: number } | null>(null);
+  const editStoryboardClip = (clipId: string) => { setSelected(clipId); setStage("分镜"); };
   const [selected, setSelected] = useState<string | null>(null);
   const [latest, setLatest] = useState<ComicDramaDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
@@ -700,7 +701,7 @@ export function ComicDramaWorkspace({
                   disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
               ) : stage === "生成" ? (
                 <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}
-                  choose={choose} initialMode={openVideos ? "from_keyframe" : "keyframe"} quickAction={quickAction}
+                  choose={choose} editClip={editStoryboardClip} initialMode={openVideos ? "from_keyframe" : "keyframe"} quickAction={quickAction}
                   onQuickActionHandled={() => setQuickAction(null)} onSeriesChanged={() => void reloadCurrent()}
                   disabled={locked || !!editor.issue} getSaved={async () => await flush() ? getDetail() : null} />
               ) : (
@@ -740,13 +741,13 @@ export function ComicDramaWorkspace({
                   <ClipInspectorDrawer
                     detail={detail}
                     clip={activeClip}
-                    goStoryboard={clipId => { setSelected(clipId); setStage("分镜"); }}
+                    goStoryboard={editStoryboardClip}
                     goGenerate={(clipId, videoMode) => { setSelected(clipId); setOpenVideos(videoMode); setStage("生成"); }}
                   />
                 ) : (
                   <ComicDirectorPanel key={series.id} detail={detail} locked={locked || !!editor.issue}
                     getSaved={async () => await flush() ? getDetail() : null} apply={applyProposal} applyRole={applyDirectorRole}
-                    openClip={id => openVideo(series.id, id)} onSeriesChanged={() => void reloadCurrent()}
+                    openClip={id => openVideo(series.id, id)} editClip={editStoryboardClip} onSeriesChanged={() => void reloadCurrent()}
                     selectedClipId={activeClip?.id ?? null} enhanceIntent={enhanceIntent}
                     onEnhanceIntentHandled={clearEnhanceIntent} />
                 )}

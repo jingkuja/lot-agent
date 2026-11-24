@@ -1,15 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  checkComicClipIssues, rebalanceShotDurationShares, type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip,
-  type ComicDramaClipDraft, type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialKind,
-  type ComicMaterialRef, type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
+  checkComicClipIssues, comicVideoDurationSupported, comicVideoProfile, rebalanceShotDurationShares,
+  type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip,
+  type ComicDramaClipDraft, type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialImageKind,
+  type ComicMaterialKind, type ComicMaterialRef, type ComicMedia, type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
+  type ComicVideoMaterialRef, type ComicVideoProfile,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
+import { comicGenerationApi } from "./generation-api.js";
+import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { DictionaryOptions, MediaPreview, useComicChoices } from "./LibraryParts.js";
+import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
+
+const videoInputLabels = { image: "参考图", audio: "参考音频", video: "参考视频", last_frame: "尾帧" } as const;
+const refLabels = { scene: "场景", prop: "道具", sfx: "音效", ...videoInputLabels } as const;
 
 type Props = {
-  series?: Pick<ComicDramaSeries, "videoModel">;
+  series?: Pick<ComicDramaSeries, "videoModel"> & Partial<Pick<ComicDramaSeries, "styleKey">>;
   clips: readonly ComicDramaClip[];
   cast: readonly ComicSeriesCast[];
   drafts: Readonly<Record<string, { draft: ComicDramaClipDraft }>>;
@@ -119,7 +127,8 @@ export function Storyboard({
             ?? member.snapshot.assets.find(asset => asset.kind === "slot");
           edit(clip.id, { ...activeDraft, cast: [...(activeDraft.cast ?? []), { characterId, slotKey: slot?.key ?? null, expressionKey: null }] });
         }} />}
-      <ClipFields key={clip.id} draft={activeDraft} disabled={locked} cast={cast} change={draft => edit(clip.id, draft)} />
+      <ClipFields key={clip.id} draft={activeDraft} disabled={locked} cast={cast} profile={comicVideoProfile(series?.videoModel ?? null)}
+        generateDisabled={disabled} styleKey={series?.styleKey} change={draft => edit(clip.id, draft)} />
     </section>}
   </div>;
 }
@@ -151,7 +160,7 @@ function ClipIssueBanner({ issues, cast, disabled, addCast }: {
         )}
         {issue.code === "INVALID_MATERIAL_REFERENCE" && (
           <span>{t("所绑定的{0}素材「{1}」已失效（{2}），请重新绑定或移除", [
-            t(issue.role === "scene" ? "场景" : issue.role === "prop" ? "道具" : "音效"),
+            t(refLabels[issue.role]),
             issue.name ?? issue.materialId.slice(0, 8),
             t(issue.reason === "ARCHIVED" ? "已归档" : issue.reason === "OUTDATED_VERSION" ? "已有新版"
               : issue.reason === "WRONG_KIND" ? "类别不符" : "已缺失"),
@@ -162,14 +171,17 @@ function ClipIssueBanner({ issues, cast, disabled, addCast }: {
   </div>;
 }
 
-function ClipFields({ draft, disabled, cast, change }: {
+function ClipFields({ draft, disabled, generateDisabled, cast, profile, styleKey, change }: {
   draft: ComicDramaClipDraft; disabled: boolean; cast: readonly ComicSeriesCast[]; change: (draft: ComicDramaClipDraft) => void;
+  generateDisabled: boolean; profile?: ComicVideoProfile; styleKey?: string;
 }) {
   const { t } = useI18n();
   const framing = useComicChoices("framing");
   const movement = useComicChoices("movement");
   const emotions = useComicChoices("emotion");
   const [picker, setPicker] = useState<{ kind: "scene" | "prop" | "sound"; shotIndex?: number } | null>(null);
+  const [generating, setGenerating] = useState<ComicMaterialImageKind | null>(null);
+  const [imageTask, setImageTask] = useState<{ kind: ComicMaterialImageKind; name: string; id: string } | null>(null);
   const firstFraming = framing.find(entry => !entry.inactive)?.key;
   const firstMovement = movement.find(entry => !entry.inactive)?.key;
   const update = (values: Partial<ComicDramaClipDraft>) => change({ ...draft, ...values });
@@ -182,14 +194,14 @@ function ClipFields({ draft, disabled, cast, change }: {
     const share = Math.floor(100 / shots.length);
     update({ shots: shots.map((shot, i) => ({ ...shot, durationShare: i === shots.length - 1 ? 100 - share * i : share })) });
   };
-  const pickMaterial = (target: { kind: "scene" | "prop" | "sound"; shotIndex?: number }, material: ComicMaterial) => {
-    const ref: ComicMaterialRef = { materialId: material.id, mediaId: material.media.id, name: material.name };
+  const bindMaterial = (target: { kind: "scene" | "prop" | "sound"; shotIndex?: number }, ref: ComicMaterialRef) => {
     if (target.kind === "scene") {
       update({ sceneRef: ref });
     } else if (target.kind === "prop") {
       const current = draft.propRefs ?? [];
-      if (!current.some(item => item.mediaId === ref.mediaId) && current.length < 10) {
-        update({ propRefs: [...current, ref] });
+      const index = current.findIndex(item => item.materialId === ref.materialId);
+      if (index >= 0 || current.length < 10) {
+        update({ propRefs: index >= 0 ? current.map((item, i) => i === index ? ref : item) : [...current, ref] });
       }
     } else if (typeof target.shotIndex === "number") {
       const shot = draft.shots[target.shotIndex];
@@ -208,6 +220,8 @@ function ClipFields({ draft, disabled, cast, change }: {
     }
     setPicker(null);
   };
+  const pickMaterial = (target: { kind: "scene" | "prop" | "sound"; shotIndex?: number }, material: ComicMaterial) =>
+    bindMaterial(target, { materialId: material.id, mediaId: material.media.id, name: material.name });
   const castNames = cast.map(entry => entry.snapshot.name);
   return <fieldset disabled={disabled} className="comic-clip-fields">
     <div className="comic-fields">
@@ -219,11 +233,15 @@ function ClipFields({ draft, disabled, cast, change }: {
         }} /></label>
     </div>
 
+    <ClipVideoInputs draft={draft} profile={profile} change={videoInputs => update({ videoInputs })} />
     <div className="comic-section-heading"><h3>{t("场景 / 道具 / 音效素材引用")}</h3>
       <div className="comic-actions">
         <button type="button" onClick={() => setPicker({ kind: "scene" })}>{t(draft.sceneRef ? "更换场景图" : "绑定场景图")}</button>
         <button type="button" disabled={(draft.propRefs?.length ?? 0) >= 10} onClick={() => setPicker({ kind: "prop" })}>＋ {t("绑定道具图")}</button>
         <button type="button" disabled={(draft.sfxRefs?.length ?? 0) >= 10} onClick={() => setPicker({ kind: "sound" })}>＋ {t("绑定分镜音效")}</button>
+        <button type="button" disabled={generateDisabled} onClick={() => setGenerating("scene")}>{t("生成场景图")}</button>
+        <button type="button" disabled={generateDisabled || (draft.propRefs?.length ?? 0) >= 10}
+          onClick={() => setGenerating("prop")}>{t("生成道具图")}</button>
       </div>
     </div>
     {(draft.sceneRef || (draft.propRefs?.length ?? 0) > 0 || (draft.sfxRefs?.length ?? 0) > 0) && (
@@ -247,6 +265,12 @@ function ClipFields({ draft, disabled, cast, change }: {
     {picker && picker.shotIndex === undefined && (
       <MaterialRefPicker kind={picker.kind} choose={mat => pickMaterial(picker, mat)} close={() => setPicker(null)} />
     )}
+    {generating && !generateDisabled && <MaterialImageGeneration kind={generating} styleKey={styleKey}
+      initialDescription={generating === "scene" ? draft.scene : undefined} close={() => setGenerating(null)}
+      submitted={(result, name) => setImageTask({ kind: generating, name, id: result.id })} />}
+    {imageTask && <StoryboardMaterialResult key={imageTask.id} task={imageTask}
+      disabled={generateDisabled || imageTask.kind === "prop" && (draft.propRefs?.length ?? 0) >= 10}
+      bind={ref => { bindMaterial(imageTask, ref); setImageTask(null); }} close={() => setImageTask(null)} />}
 
     <ClipCast cast={cast} current={draft.cast ?? []} change={actors => update({ cast: actors })} />
     <div className="comic-section-heading"><h3>{t("镜头")}</h3>
@@ -341,8 +365,114 @@ function ClipFields({ draft, disabled, cast, change }: {
   </fieldset>;
 }
 
-function MaterialRefPicker({ kind, choose, close }: {
-  kind: Extract<ComicMaterialKind, "scene" | "prop" | "sound">;
+function StoryboardMaterialResult({ task, disabled, bind, close }: {
+  task: { id: string; name: string }; disabled: boolean; bind: (ref: ComicMaterialRef) => void; close: () => void;
+}) {
+  const { t } = useI18n();
+  const load = useCallback((signal: AbortSignal) => comicGenerationApi.status(task.id, signal), [task.id]);
+  const { current, failed, refresh } = useGenerationHistory(load);
+  const take = current?.takes[0];
+  const mediaId = take?.state === "ready" ? take.mediaId : null;
+  return <div className="comic-track-picker">
+    <strong>{task.name}</strong>
+    {failed && <button type="button" onClick={refresh}>{t("重新读取")}</button>}
+    {take ? <ComicTakeStatus take={take} /> : !failed && <small role="status">{t("加载中…")}</small>}
+    {take && <ImageTakeActions take={take} refreshed={refresh} />}
+    {take && mediaId && <MediaPreview media={{ id: mediaId, hasThumbnail: true, durationMs: null }} title={task.name} thumbOnly />}
+    <div className="comic-actions">
+      {take && mediaId && <button type="button" disabled={disabled} onClick={() => bind({ materialId: take.targetId, mediaId, name: task.name })}>
+        {t("绑定到此分镜")}
+      </button>}
+      <button type="button" onClick={close}>{t("关闭")}</button>
+    </div>
+  </div>;
+}
+
+function ClipVideoInputs({ draft, profile, change }: {
+  draft: ComicDramaClipDraft; profile?: ComicVideoProfile; change: (value: ComicDramaClipDraft["videoInputs"]) => void;
+}) {
+  const { t } = useI18n();
+  const input = draft.videoInputs;
+  const refs = input?.references ?? [];
+  const [open, setOpen] = useState(false);
+  const [pick, setPick] = useState<ComicVideoMaterialRef["kind"] | null>(null);
+  const [media, setMedia] = useState<Record<string, ComicMedia | undefined>>({});
+  const savedRefs = useRef(refs);
+  savedRefs.current = refs;
+  const refKey = refs.map(ref => `${ref.materialId}:${ref.mediaId}`).join(",");
+  useEffect(() => {
+    if (!open || !refKey) return;
+    const controller = new AbortController();
+    void Promise.all(savedRefs.current.map(async ref => {
+      const versions = await comicLibraryApi.materialVersions(ref.materialId, controller.signal).catch(() => []);
+      return [ref.mediaId, versions.find(item => item.media.id === ref.mediaId)?.media] as const;
+    })).then(values => { if (!controller.signal.aborted) setMedia(Object.fromEntries(values)); });
+    return () => controller.abort();
+  }, [open, refKey]);
+  const seconds = (items: ComicVideoMaterialRef[]) => {
+    if (!items.every(ref => media[ref.mediaId]?.durationMs)) return t("待核实");
+    return `${items.reduce((sum, ref) => sum + (media[ref.mediaId]?.durationMs ?? 0), 0) / 1000} s`;
+  };
+  const pickMime = pick === "last_frame" ? "image" : pick;
+  const update = (value: Partial<NonNullable<ComicDramaClipDraft["videoInputs"]>>) => change({ ...input, references: refs, ...value });
+  return <details className="comic-video-references" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>{t("分镜视频输入（{0}）", [refs.length])}</summary>
+    <div className="comic-clip-fields">
+      {profile && <>
+        <small role={comicVideoDurationSupported(draft.durationMs, profile) ? undefined : "status"}>
+          {t("目标时长 {0} 秒 · 允许 4–{1} 整秒", [draft.durationMs / 1000, profile.shotMaxSeconds])}
+        </small>
+        <label>{t("输出分辨率")}<select aria-label={t("输出分辨率")} value={input?.resolution ?? ""} onChange={event => {
+          const resolution = profile.resolutions.find(value => value === event.target.value);
+          update({ resolution });
+        }}>
+          <option value="">{t("默认")} · {profile.resolution}</option>
+          {input?.resolution && !profile.resolutions.includes(input.resolution) && <option value={input.resolution}>
+            {input.resolution} · {t("超出模型限制")}
+          </option>}
+          {profile.resolutions.map(value => <option key={value} value={value}>{value}</option>)}
+        </select></label>
+        {profile.operations.includes("extend") && <label className="comic-video-replace">
+          <input type="checkbox" checked={!!input?.sourceDuration}
+            onChange={event => update({ sourceDuration: event.target.checked ? true : undefined })} />
+          {t("延长时使用自动时长")}
+        </label>}
+        <div className="comic-actions">
+          {(["image", "audio", "video"] as const).map(kind => {
+            const items = refs.filter(ref => ref.kind === kind);
+            const max = kind === "image" ? profile.referenceImages.total : profile.referenceMedia.count;
+            return <small key={kind}>{t(videoInputLabels[kind])} {items.length}/{max}
+              {kind !== "image" && ` · ${seconds(items)} / ${profile.shotMaxSeconds} s`}</small>;
+          })}
+          <small>{t("已手动绑定 {0} / {1} 个参考文件", [refs.filter(ref => ref.kind !== "last_frame").length, profile.referenceMedia.totalFiles])}</small>
+        </div>
+      </>}
+      <div className="comic-actions">
+        {(Object.keys(videoInputLabels) as ComicVideoMaterialRef["kind"][]).map(kind =>
+          <button type="button" key={kind} disabled={refs.length >= 51} onClick={() => setPick(kind)}>
+            {t("绑定{0}", [t(videoInputLabels[kind])])}
+          </button>)}
+      </div>
+      {refs.map(ref => <div className="comic-actions" key={`${ref.kind}:${ref.mediaId}`}>
+        <small>{t(videoInputLabels[ref.kind])} · {ref.name ?? ref.mediaId.slice(0, 8)}
+          {(ref.kind === "video" || ref.kind === "audio") && ` · ${seconds([ref])}`}</small>
+        <button type="button" onClick={() => update({ references: refs.filter(item => item !== ref) })}>{t("移除")}</button>
+      </div>)}
+      {pick && pickMime && <MaterialRefPicker key={pick} kind={pick === "video" ? "other" : undefined} mime={pickMime}
+        choose={item => {
+          const ref = { kind: pick, materialId: item.id, mediaId: item.media.id, name: item.name };
+          const kept = refs.filter(existing => existing.kind !== pick || (pick !== "last_frame" && existing.materialId !== item.id));
+          setMedia(current => ({ ...current, [item.media.id]: item.media }));
+          update({ references: [...kept, ref] });
+          setPick(null);
+        }} close={() => setPick(null)} />}
+    </div>
+  </details>;
+}
+
+function MaterialRefPicker({ kind, mime, choose, close }: {
+  kind?: ComicMaterialKind;
+  mime?: "image" | "audio" | "video";
   choose: (material: ComicMaterial) => void;
   close: () => void;
 }) {
@@ -353,11 +483,11 @@ function MaterialRefPicker({ kind, choose, close }: {
   useEffect(() => {
     const controller = new AbortController();
     setData(null);
-    void comicLibraryApi.materials({ kind, query, page: String(page) }, controller.signal).then(res => {
+    void comicLibraryApi.materials({ ...(kind ? { kind } : {}), ...(mime ? { mime } : {}), query, page: String(page) }, controller.signal).then(res => {
       if (!controller.signal.aborted) setData(res);
     }).catch(() => { if (!controller.signal.aborted) setData("error"); });
     return () => controller.abort();
-  }, [kind, query, page]);
+  }, [kind, mime, query, page]);
   return <div className="comic-track-picker">
     <div className="comic-actions">
       <label>{t("搜索素材")}<input value={query} maxLength={120} onChange={e => { setQuery(e.target.value); setPage(1); }} /></label>
@@ -370,6 +500,8 @@ function MaterialRefPicker({ kind, choose, close }: {
             <article key={item.id} className="comic-library-card">
               <MediaPreview media={item.media} title={item.name} thumbOnly />
               <strong>{item.name}</strong>
+              {mime && <small>{[item.media.width && item.media.height ? `${item.media.width}×${item.media.height}` : "",
+                item.media.durationMs ? `${item.media.durationMs / 1000} s` : "", `${(item.media.sizeBytes / 1e6).toFixed(1)} MB`].filter(Boolean).join(" · ")}</small>}
               <button type="button" onClick={() => choose(item)}>{t("选择此素材")}</button>
             </article>
           ))}

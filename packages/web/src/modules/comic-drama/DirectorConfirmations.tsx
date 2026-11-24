@@ -1,3 +1,4 @@
+import { comicVideoProfile } from "@lot-agent/core/comic-drama";
 import { useEffect, useState } from "react";
 import type {
   ComicDirectorRole, ComicDirectorRoleDecision, ComicDirectorRoleOutcome, ComicDirectorQuote, ComicDramaDetail, ComicGenerationMode,
@@ -58,9 +59,9 @@ export function DirectorRoleChoice({ role, outcome, disabled, submit }: {
   </fieldset>;
 }
 
-export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed, openClip }: {
+export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed, openClip, editClip }: {
   detail: ComicDramaDetail; quotes: ComicDirectorQuote[]; getSaved: () => Promise<ComicDramaDetail | null>; disabled: boolean;
-  changed: () => void; openClip: (id: string) => void;
+  changed: () => void; openClip: (id: string) => void; editClip: (id: string) => void;
 }) {
   const { t } = useI18n();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -115,6 +116,8 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
         <select value={mode} aria-label={t("生成模式")} onChange={event => setMode(event.target.value as ComicGenerationMode)}>
           <option value="keyframe">{t("生成首帧")}</option><option value="from_keyframe">{t("用已确认首帧")}</option>
           <option value="references">{t("直接生成视频")}</option>
+          {comicVideoProfile(detail.series.videoModel)?.operations.includes("edit") && <option value="edit">{t("编辑源视频")}</option>}
+          {comicVideoProfile(detail.series.videoModel)?.operations.includes("extend") && <option value="extend">{t("延长源视频")}</option>}
         </select>
         <button type="button" onClick={selectPending} disabled={!detail.clips.length}>{t("全选未完成")}</button>
       </div>
@@ -143,7 +146,7 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
         }}>{t(confirmed ? "查看分镜生成" : "查看费用确认")}</button>
       </div>;
     })}
-    {quote && <GenerationQuoteDialog quote={quote} label={labels} close={() => setQuote(undefined)}
+    {quote && <GenerationQuoteDialog quote={quote} label={labels} close={() => setQuote(undefined)} editClip={editClip}
       confirm={id => comicGenerationApi.confirm({ resource: "series", id: series }, id)}
       submitted={() => { changed(); setSelectedIds([]); if (quote.items[0]) openClip(quote.items[0].clipId); }} />}
   </details>;

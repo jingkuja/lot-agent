@@ -14,7 +14,7 @@ import { comicGenerationApi } from "./generation-api.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 
 export function ComicDirectorPanel({
-  detail, locked, getSaved, apply, applyRole, openClip, onSeriesChanged, selectedClipId, enhanceIntent, onEnhanceIntentHandled,
+  detail, locked, getSaved, apply, applyRole, openClip, editClip, onSeriesChanged, selectedClipId, enhanceIntent, onEnhanceIntentHandled,
 }: {
   detail: ComicDramaDetail; locked: boolean; getSaved: () => Promise<ComicDramaDetail | null>;
   apply: (
@@ -23,6 +23,7 @@ export function ComicDirectorPanel({
   ) => Promise<ComicDirectorProposal | undefined>;
   applyRole: (proposal: ComicDirectorProposal, index: number, input: DirectorRoleChoiceInput) => Promise<ComicDirectorRoleOutcome | undefined>;
   openClip: (id: string) => void;
+  editClip: (id: string) => void;
   onSeriesChanged?: () => void;
   selectedClipId?: string | null;
   enhanceIntent?: DirectorEnhanceIntent | null;
@@ -328,7 +329,7 @@ export function ComicDirectorPanel({
             const target = detail.clips.find(item => item.id === clipId);
             return target ? `${t("分镜 {0}", [target.ordinal])}${target.draft.scene ? " · " + target.draft.scene : ""}` : t("分镜");
           }}
-          close={() => setChatQuote(null)}
+          close={() => setChatQuote(null)} editClip={editClip}
           confirm={id => comicGenerationApi.confirm({ resource: "series", id: seriesId }, id)}
           submitted={() => {
             const firstClip = chatQuote.items[0]?.clipId;
@@ -348,7 +349,8 @@ export function ComicDirectorPanel({
             </div>
           </fieldset>
         </form>
-        <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked} changed={reload} openClip={openClip} />
+        <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked}
+          changed={reload} openClip={openClip} editClip={editClip} />
       </div>
     ) : <>
       <label className="comic-director-task-select">{t("导演任务")}<select aria-label={t("导演任务")} value={operation}
@@ -404,7 +406,8 @@ export function ComicDirectorPanel({
             })} />
         )
       )}
-      <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked} changed={reload} openClip={openClip} />
+      <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked}
+          changed={reload} openClip={openClip} editClip={editClip} />
     </>}
   </section>;
 }

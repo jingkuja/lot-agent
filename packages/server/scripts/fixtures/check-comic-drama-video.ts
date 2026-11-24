@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
@@ -20,8 +20,8 @@ import { COMIC_VIDEO_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-que
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 import { comicFixturePng } from "./check-comic-drama-library.js";
 
-export const w6Grok = "grok-imagine-video-1.5";
-export const w6Kling = "kling-video-v3-omni";
+export const w6Seedance20 = "doubao-seedance-2-0";
+export const w6Seedance25 = "doubao-seedance-2-5";
 
 export async function mountComicVideoFixture({ pool, media, owner, queue, root }: {
   pool: Pool; media: ComicMediaLibrary; owner: string; queue: BullmqJobQueue; root: string;
@@ -40,21 +40,22 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
   const provider: VideoGenerationProvider = {
     async create(req) {
       const model = req.model ?? "";
-      assert.ok([w6Grok, w6Kling].includes(model));
+      assert.ok([w6Seedance20, w6Seedance25].includes(model));
       const request = new OpenaiVideoAdapter().buildCreateBody(req, model) as Record<string, unknown>;
       const scene = /^Scene: (.+)\.$/m.exec(req.prompt)?.[1] ?? "";
       submitted.push({ model, scene, request });
-      for (const ref of [req.first_frame, ...(req.input_reference ?? [])].filter(Boolean)) {
+      for (const ref of [req.first_frame, req.last_frame, ...[req.input_reference, req.reference_audio, req.reference_video].flat()].filter(Boolean)) {
         const url = new URL(String(ref));
         assert.equal(url.origin, "https://comic-fixture.invalid");
         assert.match(url.pathname, /^\/api\/public\/comic-drama-media\//);
         assert.ok(url.searchParams.get("material_token"));
       }
       assert.equal(request.seconds, "4");
-      assert.equal(request.ratio, "9:16");
-      assert.equal(request.size, "720x1280");
+      const adaptive = model === w6Seedance25 && !!req.first_frame;
+      assert.equal(request.ratio, adaptive ? "adaptive" : "9:16");
+      assert.equal(request.size, adaptive ? undefined : "720x1280");
       assert.deepEqual(request.metadata, { resolution: "720p" });
-      assert.equal(request.generate_audio, false);
+      assert.equal(request.generate_audio, !!req.reference_audio);
       if (gatewayCreditBlocks.has(scene)) {
         throw new ProviderError("generation", "create", "HTTP_ERROR", { httpStatus: 403, vendorCode: "insufficient_user_quota" });
       }
@@ -101,7 +102,7 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
       return { body, mime: "video/mp4" };
     },
   }, job, control.signal));
-  return { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks };
+  return { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks, root };
 }
 
 type FixtureApp = Hono<{ Variables: { userId: string } }>;
@@ -136,13 +137,13 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
     await json(`/video-takes/${takeId}/recover`, "POST", {}, 202);
     return settled(run.id);
   }
-  async function makeEpisode(title: string, model: string, scenes: string[]) {
+  async function makeEpisode(title: string, model: string, scenes: string[], durationMs = 4000) {
     let detail = await json<ComicDramaDetail>("/series", "POST", { title, styleKey: "webtoon", aspectRatio: "9:16", videoModel: model }, 201);
     const path = "/series/" + detail.series.id;
     for (const scene of scenes) {
       const added = await json<ComicDramaContent>(path + "/clips", "POST", { expectedRevision: detail.series.revision }, 201);
       const clip = added.clips.at(-1)!;
-      await json(path + "/clips/" + clip.id, "PATCH", { expectedRevision: clip.revision, draft: { ...clip.draft, scene, durationMs: 4000,
+      await json(path + "/clips/" + clip.id, "PATCH", { expectedRevision: clip.revision, draft: { ...clip.draft, scene, durationMs,
         shots: [{ id: randomUUID(), framingKey: "medium", movementKey: "fixed", description: "Studio scene", durationShare: 100 }] } });
       detail = await json<ComicDramaDetail>(path);
     }
@@ -159,7 +160,7 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
     json<ComicGenerationRequest>(ep.path + "/generate", "POST", { confirmationId: quote.confirmationId }, 202);
   const receipt = (id: string) => json<ComicVideoReceipt>(`/video-takes/${id}/receipt`);
 
-  const ep = await makeEpisode("W6 video fixture", w6Grok, ["W6 ready", "W6 reject", "W6 unknown", "W6 interrupted"]);
+  const ep = await makeEpisode("W6 video fixture", w6Seedance20, ["W6 ready", "W6 reject", "W6 unknown", "W6 interrupted"]);
   const [ready, rejected, unknown, interrupted] = ep.detail.clips;
   const waitingForFrame = await preview(ep, [ready], "from_keyframe");
   assert.equal(waitingForFrame.skipped[0].reason, "KEYFRAME_NOT_CONFIRMED");
@@ -276,30 +277,30 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal(polls.filter(vendor => vendor === original.vendorId).length, 3);
   assert.equal(new Set(downloads.filter(url => url.includes(String(original.vendorId)))).size, 2);
 
-  const kling = await makeEpisode("W6 Kling fixture", w6Kling, ["W6 cancel after submit", "W6 cancel before submit"]);
-  const frame = (await settled((await confirm(kling, await preview(kling, [kling.detail.clips[0]], "keyframe"))).id)).takes[0];
-  await json(kling.path + `/clips/${kling.detail.clips[0].id}/keyframe/confirm`, "POST",
-    { keyframeTakeId: frame.id, expectedClipRevision: kling.detail.clips[0].revision,
-      expectedSelectionRevision: kling.detail.clips[0].selectionRevision ?? 1 });
+  const seedance = await makeEpisode("W6 Seedance 2.5 fixture", w6Seedance25, ["W6 cancel after submit", "W6 cancel before submit"]);
+  const frame = (await settled((await confirm(seedance, await preview(seedance, [seedance.detail.clips[0]], "keyframe"))).id)).takes[0];
+  await json(seedance.path + `/clips/${seedance.detail.clips[0].id}/keyframe/confirm`, "POST",
+    { keyframeTakeId: frame.id, expectedClipRevision: seedance.detail.clips[0].revision,
+      expectedSelectionRevision: seedance.detail.clips[0].selectionRevision ?? 1 });
   const references = { visualReferences: [{ materialId: savedFrame.id, mediaId: versions[0].media.id, kind: "scene" }] };
-  const withRefs = await preview(kling, undefined, "from_keyframe", references);
-  assert.deepEqual(withRefs.items[0].referenceVersions?.map(item => item.mediaId), [frame.mediaId, versions[0].media.id]);
-  assert.equal(withRefs.skipped[0].reason, "KEYFRAME_NOT_CONFIRMED");
-  const sibling = kling.detail.clips[1];
-  const siblingFrame = (await settled((await confirm(kling, await preview(kling, [sibling], "keyframe"))).id)).takes[0];
-  await json(kling.path + `/clips/${sibling.id}/keyframe/confirm`, "POST",
+  const withRefs = await preview(seedance, undefined, "from_keyframe", references);
+  assert.equal(withRefs.items.length, 0);
+  assert.deepEqual(withRefs.skipped.map(item => item.reason), ["REFERENCE_MODE_CONFLICT", "REFERENCE_MODE_CONFLICT"]);
+  const sibling = seedance.detail.clips[1];
+  const siblingFrame = (await settled((await confirm(seedance, await preview(seedance, [sibling], "keyframe"))).id)).takes[0];
+  await json(seedance.path + `/clips/${sibling.id}/keyframe/confirm`, "POST",
     { keyframeTakeId: siblingFrame.id, expectedClipRevision: sibling.revision, expectedSelectionRevision: sibling.selectionRevision ?? 1 });
-  const staleRefQuote = await preview(kling, [kling.detail.clips[0]], "from_keyframe", references);
+  const staleRefQuote = await preview(seedance, [seedance.detail.clips[0]], "references", references);
   const replaceMaterial = await app.request(COMIC_DRAMA_API_ROOT + `/materials/${savedFrame.id}/files`, {
     method: "POST",
     headers: { Authorization: "Bearer fixture-one", "Content-Type": "image/png" },
     body: new Uint8Array(await comicFixturePng("#405060")),
   });
   assert.equal(replaceMaterial.status, 201);
-  assert.equal((await json<{ code: string }>(kling.path + "/generate", "POST", { confirmationId: staleRefQuote.confirmationId }, 409)).code, "QUOTE_STALE");
+  assert.equal((await json<{ code: string }>(seedance.path + "/generate", "POST", { confirmationId: staleRefQuote.confirmationId }, 409)).code, "QUOTE_STALE");
   const latestVersions = await json<{ media: { id: string } }[]>(`/materials/${savedFrame.id}/versions`);
   const freshReferences = { visualReferences: [{ materialId: savedFrame.id, mediaId: latestVersions[0].media.id, kind: "scene" }] };
-  const run = await confirm(kling, await preview(kling, undefined, "from_keyframe", freshReferences));
+  const run = await confirm(seedance, await preview(seedance, undefined, "references", freshReferences));
   await until(() => state.waiting);
   const stopped = await confirm(ep, await preview(ep, [rejected]));
   await json(`/video-takes/${run.takes[1].id}/cancel`, "POST", {});
@@ -307,16 +308,44 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   await json(`/video-takes/${run.takes[0].id}/cancel`, "POST", {});
   assert.deepEqual((await settled(run.id)).takes.map(take => take.state), ["recoverable", "cancelled"]);
   assert.equal((await settled(stopped.id)).takes[0].state, "cancelled");
-  const klingCall = submitted.find(call => call.model === w6Kling)!;
-  assert.ok(klingCall.request.first_frame);
-  assert.equal((klingCall.request.input_reference as string[]).length, 1);
+  const seedanceCall = submitted.find(call => call.model === w6Seedance25)!;
+  assert.equal(seedanceCall.request.first_frame, undefined);
+  assert.equal((seedanceCall.request.input_reference as string[]).length, 1);
   state.releasePoll = true;
   assert.deepEqual((await resume(run, run.takes[0].id)).takes.map(take => take.state), ["ready", "cancelled"]);
-  assert.equal(submitted.filter(call => call.model === w6Kling).length, 1);
+  assert.equal(submitted.filter(call => call.model === w6Seedance25).length, 1);
   assert.equal(submitted.filter(call => call.scene === "W6 reject").length, 1);
   console.log("PASS W6 PG/Redis/HTTP: both video contracts, mixed batch, checkpoints, release, targeted cancel/resume, adoption, Range, frame saves");
+
+  const budgetEpisode = await makeEpisode("Budget preview", w6Seedance20, ["Eight seconds A", "Eight seconds B"], 8000);
+  const budgetEstimate = (revision: number, speechLines: number) => json<ComicEpisodeBudget>(budgetEpisode.path + "/episode-budget", "POST", {
+    expectedRevision: revision, videoMode: "from_keyframe", materialImages: 1, speechLines,
+  });
+  const [firstBudgetClip, secondBudgetClip] = budgetEpisode.detail.clips;
+  const budgetFrames = await confirm(budgetEpisode, await preview(budgetEpisode, undefined, "keyframe"));
+  assert.deepEqual((await settled(budgetFrames.id)).takes.map(item => item.state), ["ready", "ready"]);
+  const noNewSpeech = await budgetEstimate(budgetEpisode.detail.series.revision, 0);
+  assert.deepEqual(noNewSpeech.items.map(item => [item.kind, item.quantity, item.estimatedPoints]), [
+    ["video", 8, 200], ["video", 8, 200], ["material", 1, 20],
+  ]);
+  assert.equal(noNewSpeech.knownPoints, 420);
+  assert.ok(noNewSpeech.estimatedMonetaryTotals?.length);
+  const withSpeech = await budgetEstimate(budgetEpisode.detail.series.revision, 3);
+  assert.deepEqual(withSpeech.items.map(item => item.kind), ["video", "video", "material", "speech"]);
+  assert.equal(withSpeech.knownPoints, 720);
+  assert.equal(withSpeech.unverifiedCount, 0);
+  const changedDuration = await json<{ seriesRevision: number }>(budgetEpisode.path + "/clips/" + secondBudgetClip.id, "PATCH", {
+    expectedRevision: secondBudgetClip.revision, draft: { ...secondBudgetClip.draft, durationMs: 10000 },
+  });
+  const changedBudget = await budgetEstimate(changedDuration.seriesRevision, 3);
+  assert.deepEqual(changedBudget.items.filter(item => item.clipId).map(item => [item.clipId, item.kind, item.quantity, item.estimatedPoints]), [
+    [secondBudgetClip.id, "keyframe", 1, 20], [firstBudgetClip.id, "video", 8, 200], [secondBudgetClip.id, "video", 10, 250],
+  ]);
+  assert.equal(changedBudget.knownPoints, 790);
+  console.log("PASS episode budget: reusable and stale first frames, per-clip video duration, shared asset, and controlled speech credits");
+
   const scenes = ["Credits covered", "Credits low", "Credits check unavailable", "Credits need topup"];
-  const creditEp = await makeEpisode("Credit validation", w6Grok, scenes);
+  const creditEp = await makeEpisode("Credit validation", w6Seedance20, scenes);
   const startCount = submitted.length;
   const budgetInput = { expectedRevision: creditEp.detail.series.revision, videoMode: "references", materialImages: 1 };
   const budget = await json<ComicEpisodeBudget>(creditEp.path + "/episode-budget", "POST", budgetInput);
@@ -373,7 +402,7 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   console.log("PASS episode budget and credit pauses: account scope, no double submit, repeat checks, recharge, single-take override");
 
   const recoveryScenes = ["W6 interrupted", "Credits output saved", "Credits gateway rejected", "Credits queued behind rejection"];
-  const recoveryEp = await makeEpisode("Video receipt recovery during a credit pause", w6Grok, recoveryScenes);
+  const recoveryEp = await makeEpisode("Video receipt recovery during a credit pause", w6Seedance20, recoveryScenes);
   const initialCalls = submitted.length;
   state.disconnect = true;
   state.badDownload = true;
@@ -399,5 +428,65 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.deepEqual(submitted.slice(initialCalls + 3).map(call => call.scene), recoveryScenes.slice(2));
   assert.equal((await receipt(pausedTake.id)).httpStatus, null);
   console.log("PASS credit pause recovery: accepted and output receipts recover independently, gateway rejection stays paused until explicit recheck");
-  return ep.detail.series.id;
+  const referenceEp = await makeEpisode("Multimodal reference validation", w6Seedance25, ["Verified references", "Excess output duration"]);
+  const soundPath = join(fixture.root, "reference.wav");
+  const movementPath = join(fixture.root, "reference.mov");
+  await Promise.all([
+    mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=4",
+      "-c:a", "pcm_s16le", soundPath], { timeoutMs: 15_000 }),
+    mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=s=720x720:r=24:d=4",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-threads", "1", movementPath], { timeoutMs: 15_000 }),
+  ]);
+  const uploadReference = async (path: string, kind: "audio" | "video", mime: string) => {
+    const response = await app.request(COMIC_DRAMA_API_ROOT + `/materials/upload?kind=other&name=${kind}`, {
+      method: "POST", body: new Uint8Array(await readFile(path)),
+      headers: { Authorization: "Bearer fixture-one", "Content-Type": mime },
+    });
+    const result = await response.json() as { id: string; mediaId: string };
+    assert.equal(response.status, 201, JSON.stringify(result));
+    return { kind, materialId: result.id, mediaId: result.mediaId };
+  };
+  const audio = await uploadReference(soundPath, "audio", "audio/wav");
+  const motion = await uploadReference(movementPath, "video", "video/quicktime");
+  const videoMaterials = await json<{ entries: { id: string }[] }>("/materials?mime=video");
+  assert.deepEqual(videoMaterials.entries.map(material => material.id), [motion.materialId]);
+  for (const [index, clip] of referenceEp.detail.clips.entries()) {
+    await json(referenceEp.path + "/clips/" + clip.id, "PATCH", {
+      expectedRevision: clip.revision,
+      draft: {
+        ...clip.draft, durationMs: index === 0 ? 4000 : 31_000, videoInputs: { references: [audio, motion] },
+        shots: [{ ...clip.draft.shots[0], description: "Match @Audio1 with the movement in @Video1." }],
+      },
+    });
+  }
+  referenceEp.detail = await json<ComicDramaDetail>(referenceEp.path);
+  const quote = await preview(referenceEp);
+  const [validClip, invalidClip] = referenceEp.detail.clips;
+  assert.deepEqual(quote.items.map(item => item.clipId), [validClip.id]);
+  assert.deepEqual(quote.items[0].referenceVersions, [
+    { kind: "audio", mediaId: audio.mediaId, version: 1 }, { kind: "video", mediaId: motion.mediaId, version: 1 },
+  ]);
+  assert.deepEqual(quote.skipped[0].issues, [{ code: "DURATION_UNSUPPORTED", field: "outputSeconds", actual: 31, min: 4, max: 30 }]);
+  assert.equal(quote.skipped[0].clipId, invalidClip.id);
+  const brokenAudio = join(fixture.root, audio.mediaId + ".wav");
+  const previousCalls = submitted.length;
+  await rename(brokenAudio, brokenAudio + ".bak");
+  try {
+    assert.equal((await json<{ code: string }>(referenceEp.path + "/generate", "POST", { confirmationId: quote.confirmationId }, 409)).code,
+      "QUOTE_STALE");
+    const mediaMissing = await preview(referenceEp, [validClip]);
+    assert.equal(mediaMissing.skipped[0].reason, "REFERENCE_UNVERIFIED");
+    assert.equal(submitted.length, previousCalls);
+  } finally {
+    await rename(brokenAudio + ".bak", brokenAudio);
+  }
+  const multimodal = await settled((await confirm(referenceEp, await preview(referenceEp))).id);
+  assert.deepEqual(multimodal.takes.map(take => take.state), ["ready"]);
+  const requestBody = submitted.at(-1)!.request;
+  assert.equal(requestBody.omni_reference_task_type, "reference");
+  assert.match((requestBody.reference_audio as string[])[0], /\.wav\?/);
+  assert.match((requestBody.reference_video as string[])[0], /\.mov\?/);
+  assert.equal(requestBody.generate_audio, true);
+  console.log("PASS per-clip references: actual WAV and MOV metadata, partial batch, fresh verification, and frozen gateway inputs");
+  return { episode: ep.detail.series.id, referenceEpisode: referenceEp.detail.series.id };
 }

@@ -108,6 +108,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   const [versionTarget, setVersionTarget] = useState<ComicCharacterUpload | null>(null);
   const [saveMaterial, setSaveMaterial] = useState<{ mediaId: string; name: string } | null>(null);
   const [fee, setFee] = useState<{ quote: ComicGenerationQuote; label: string } | null>(null);
+  const [generationRefs, setGenerationRefs] = useState<string[]>([]);
   const [error, setError] = useState("");
   const slots = useComicChoices("slot");
   const expressions = useComicChoices("expression");
@@ -209,7 +210,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       {!character.archived && <button className="primary" disabled={kind === "slot" && !outfit}
         onClick={() => setDialog("upload")}>＋ {t("上传角色图片")}</button>}
       {!character.archived && <button disabled={kind === "slot" && !outfit}
-        onClick={() => setDialog("generate")}>{t(kind === "slot" ? "生成造型" : "生成表情")}</button>}
+        onClick={() => { setGenerationRefs([]); setDialog("generate"); }}>{t(kind === "slot" ? "生成造型" : "生成表情")}</button>}
     </div>
     {(needsAttention.length > 0 || generation.failed) && <section className="comic-edit-card comic-character-jobs">
       <header><h2>{t("角色图片任务")}</h2>
@@ -272,12 +273,11 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       close={() => setDialog(null)} save={async (form, signal) => {
         const key = String(form.get("key") ?? "");
         const styleKey = String(form.get("styleKey") ?? "") || undefined;
-        const referenceMediaIds = form.getAll("refMedia").map(String).filter(Boolean).slice(0, 4);
         const target: ComicCharacterUpload = kind === "slot" && outfit ? { kind, key, outfitId: outfit.id } : { kind: "expression", key };
         const req: ComicCharacterGenerateRequest = {
           ...target,
           ...(styleKey ? { styleKey } : {}),
-          ...(referenceMediaIds.length ? { referenceMediaIds } : {}),
+          ...(generationRefs.length ? { referenceMediaIds: generationRefs } : {}),
         };
         const quote = await comicGenerationApi.preview(generationScope, req, signal);
         if (!signal.aborted) setFee({ quote, label: takeLabel(target) });
@@ -293,8 +293,11 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
         <div className="comic-ref-checklist">
           {character.assets.map(asset => {
             const name = (asset.kind === "slot" ? slots : expressions).find(item => item.key === asset.key)?.labels[locale] ?? asset.key;
+            const mediaId = asset.media.id;
+            const selected = generationRefs.includes(mediaId);
             return <label key={asset.media.id} className="comic-video-replace">
-              <input type="checkbox" name="refMedia" value={asset.media.id} />
+              <input type="checkbox" checked={selected} disabled={!selected && generationRefs.length >= 4}
+                onChange={() => setGenerationRefs(current => selected ? current.filter(id => id !== mediaId) : [...current, mediaId])} />
               <span>{name} · {t("版本 {0}", [asset.version])}</span>
             </label>;
           })}

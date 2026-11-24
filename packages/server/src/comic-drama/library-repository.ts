@@ -231,8 +231,9 @@ export class PgComicLibrary implements ComicLibraryRepository {
         SELECT version,media_id FROM ${tables}.cd_material_versions WHERE material_id=m.id ORDER BY version DESC LIMIT 1
       ) v ON true JOIN ${tables}.cd_media f ON f.id=v.media_id WHERE m.owner_id=$1 AND (m.archived_at IS NOT NULL)=$2
       AND strpos(lower(m.name || ' ' || array_to_string(m.tags,' ')),lower($3))>0 AND ($4::text IS NULL OR m.kind=$4)
+      AND ($7::text IS NULL OR split_part(f.mime,'/',1)=$7)
       ORDER BY m.updated_at DESC,m.id LIMIT $5 OFFSET $6`,
-      [owner, input.archived === "true", input.query ?? "", input.kind ?? null, pageSize + 1, (input.page - 1) * pageSize]);
+    [owner, input.archived === "true", input.query ?? "", input.kind ?? null, pageSize + 1, (input.page - 1) * pageSize, input.mime ?? null]);
     return page(rows);
   }
 
@@ -240,6 +241,13 @@ export class PgComicLibrary implements ComicLibraryRepository {
     const { rows } = await db.query<ComicMaterialInput>(`SELECT kind,name,category_key AS "categoryKey",tags FROM ${tables}.cd_materials
       WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL ${lock ? "FOR UPDATE" : ""}`, [owner, id]);
     if (!rows[0]) libraryMissing();
+    return rows[0];
+  }
+
+  async materialImageReference(owner: string, id: string) {
+    const { rows } = await this.pool.query<StoredComicMedia & { version: number }>(`SELECT ${mediaColumns},coalesce((
+      SELECT v.version FROM ${tables}.cd_material_versions v WHERE v.owner_id=$1 AND v.media_id=$2
+    ),1) AS version FROM ${tables}.cd_media WHERE owner_id=$1 AND id=$2`, [owner, id]);
     return rows[0];
   }
 
@@ -286,7 +294,9 @@ export class PgComicLibrary implements ComicLibraryRepository {
       const isAudio = media.mime.startsWith("audio/");
       if ((kind === "scene" || kind === "prop") && !isImage) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
       if ((kind === "sound" || kind === "music") && !isAudio) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
-      if (kind === "other" && !isImage && !isAudio) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+      if (kind === "other" && !isImage && !isAudio && media.mime !== "video/mp4" && media.mime !== "video/quicktime") {
+        throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+      }
       const { rows } = await db.query<{ id: string }>(`INSERT INTO ${tables}.cd_materials(owner_id,kind,name,category_key,tags)
         VALUES($1,$2,$3,$4,$5) RETURNING id`, [owner, kind, name, categoryKey, tags]);
       const id = rows[0].id;
@@ -329,6 +339,10 @@ export class PgComicLibrary implements ComicLibraryRepository {
         [owner, id],
       );
       if (inUse.rowCount) throw new ComicLibraryError("MATERIAL_IN_USE", 409);
+      const generating = await db.query(`SELECT 1 FROM ${tables}.cd_generation_requests r
+        JOIN ${tables}.cd_takes t ON (t.owner_id,t.request_id)=(r.owner_id,r.id)
+        WHERE r.owner_id=$1 AND r.material_id=$2 AND t.status IN ('pending','running','recoverable','unknown') LIMIT 1`, [owner, id]);
+      if (generating.rowCount) throw new ComicLibraryError("BUSY", 409);
       await db.query(`DELETE FROM ${tables}.cd_materials WHERE owner_id=$1 AND id=$2`, [owner, id]);
     });
   }

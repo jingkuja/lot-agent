@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { comicVideoResolutions } from "./models.js";
 import { comicClipCastingSchema, type ComicCastChange, type ComicSeriesCast } from "./cast.js";
 
 export const COMIC_DRAMA_ROOT = "/comic-drama";
@@ -60,6 +61,17 @@ export const comicShotSfxRefSchema = comicMaterialRefSchema.extend({
 }).strict();
 export type ComicShotSfxRef = z.infer<typeof comicShotSfxRefSchema>;
 
+export const comicVideoMaterialRefSchema = comicMaterialRefSchema.extend({
+  kind: z.enum(["image", "audio", "video", "last_frame"]),
+}).strict();
+export type ComicVideoMaterialRef = z.infer<typeof comicVideoMaterialRefSchema>;
+export const comicClipVideoInputsSchema = z.object({
+  references: z.array(comicVideoMaterialRefSchema).max(51).refine(refs =>
+    new Set(refs.map(ref => `${ref.kind}:${ref.mediaId}`)).size === refs.length && refs.filter(ref => ref.kind === "last_frame").length <= 1),
+  resolution: z.enum(comicVideoResolutions).optional(),
+  sourceDuration: z.literal(true).optional(),
+}).strict();
+
 const shot = z.object({
   id,
   framingKey: dictionaryKey,
@@ -87,6 +99,7 @@ export const comicDramaClipDraftSchema = z.object({
   cast: comicClipCastingSchema.optional(),
   sceneRef: comicMaterialRefSchema.nullable().optional(),
   propRefs: z.array(comicMaterialRefSchema).max(10).optional(),
+  videoInputs: comicClipVideoInputsSchema.optional(),
   sfxRefs: z.array(comicMaterialRefSchema).max(10).optional(),
 }).strict().superRefine(({ shots, lines }, ctx) => {
   if (shots.length && shots.reduce((total, entry) => total + entry.durationShare, 0) !== 100) {
@@ -100,7 +113,7 @@ export const comicDramaClipDraftSchema = z.object({
 });
 
 export type ComicInvalidMaterialRef = {
-  role: "scene" | "prop" | "sfx";
+  role: "scene" | "prop" | "sfx" | ComicVideoMaterialRef["kind"];
   materialId: string;
   mediaId: string;
   name?: string;
@@ -111,8 +124,10 @@ export type ComicClipProgress = {
   keyframeState: "none" | "pending" | "running" | "ready" | "failed" | "recoverable" | "unknown";
   keyframeMediaId: string | null;
   keyframeApproved: boolean;
+  keyframeCandidateAvailable?: boolean;
   keyframeStale: boolean;
   videoState: "none" | "pending" | "running" | "ready" | "failed" | "recoverable" | "unknown";
+  latestVideoState?: ComicClipProgress["videoState"];
   videoTakeCount: number;
   adoptedVideoTakeId: string | null;
   adoptedVideoVersion: number | null;

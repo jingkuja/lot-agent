@@ -94,7 +94,8 @@ export function MediaOriginalDialog({ media, title, close }: {
 }
 
 export function MediaPreview({ media, title, thumbOnly = false, openOriginal = false }: {
-  media: Pick<ComicMedia, "id" | "hasThumbnail" | "durationMs">; title: string; thumbOnly?: boolean; openOriginal?: boolean;
+  media: Pick<ComicMedia, "id" | "hasThumbnail" | "durationMs"> & Partial<Pick<ComicMedia, "mime">>;
+  title: string; thumbOnly?: boolean; openOriginal?: boolean;
 }) {
   const { t } = useI18n();
   const [attempt, remake] = useState(0);
@@ -130,6 +131,10 @@ export function MediaPreview({ media, title, thumbOnly = false, openOriginal = f
       : <div className="comic-media-well">{image}</div>;
   }
   if (thumbOnly) return null;
+  if (media.mime?.startsWith("video/")) return <div className="comic-media-well">
+    <video controls playsInline preload="metadata" src={state.url} aria-label={title}
+      onLoadedMetadata={() => { recovered.current = false; }} onError={failure} />
+  </div>;
   return <div className="comic-audio">
     <audio controls preload="none" src={state.url} aria-label={title}
       onLoadedMetadata={() => { recovered.current = false; }} onError={failure} />
@@ -137,9 +142,10 @@ export function MediaPreview({ media, title, thumbOnly = false, openOriginal = f
   </div>;
 }
 
-export function LibraryDialog({ title, submitLabel, close, save, children, describeError = libraryError }: {
+export function LibraryDialog({ title, submitLabel, close, save, children, describeError = libraryError, closeOnSave = true }: {
   title: string; submitLabel: string; close: () => void;
   save: (form: FormData, signal: AbortSignal) => Promise<unknown>; children: ReactNode; describeError?: (error: unknown) => string;
+  closeOnSave?: boolean;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
@@ -155,7 +161,7 @@ export function LibraryDialog({ title, submitLabel, close, save, children, descr
     running.current = controller;
     setSaving(true);
     setFailure("");
-    try { await save(form, controller.signal); if (!controller.signal.aborted) close(); }
+    try { await save(form, controller.signal); if (closeOnSave && !controller.signal.aborted) close(); }
     catch (error) { if (!controller.signal.aborted) setFailure(describeError(error)); }
     finally { running.current = null; if (!controller.signal.aborted) setSaving(false); }
   };

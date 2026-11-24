@@ -530,7 +530,10 @@ it("validates reference video metadata and sends it with audio disabled", async 
   f.project.draft.assets = { video: videoId, voice: randomUUID() };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
   // Reference videos go to Seedance 2.5; Kling's 3–15.5 s / 700 px limits do not apply.
-  const info = { format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30, rotation: 0, transfer: undefined };
+  const info = {
+    format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30, rotation: 0, transfer: undefined,
+    videoCodec: "h264", audioCodec: undefined, sampleRate: NaN, channels: NaN, mov: false,
+  };
   vi.mocked(inspectMedia).mockResolvedValueOnce({ ...info, video: false });
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(400);
   expect(f.store.reserve).not.toHaveBeenCalled();

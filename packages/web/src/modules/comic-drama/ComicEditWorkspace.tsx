@@ -410,8 +410,8 @@ function BatchDialogueDialog({ plan, result, overrides, busy, error, updateOverr
         </div>
         <p className="comic-generation-note">
           {plan.feeStatus === "free_cached"
-            ? t("本次全部复用已有缓存，无需新增合成费用。")
-            : t("待新合成 {0} 句，由模型网关按实际用量计费（费用待核实）。", [plan.toSynthesizeCount])}
+            ? t("本次无需新增合成费用。")
+            : t("新合成预计 {0} 积分。", [plan.estimatedPoints])}
         </p>
         <ul className="comic-dialogue-batch-list">
           {plan.lines.map(line => (

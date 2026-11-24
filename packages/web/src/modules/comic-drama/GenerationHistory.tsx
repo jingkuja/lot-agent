@@ -11,7 +11,7 @@ const labels: Record<ComicImageTake["state"], string> = {
 };
 export function ComicTakeStatus({ take }: { take: ComicImageTake }) {
   const { t } = useI18n();
-  const video = take.mode === "references" || take.mode === "from_keyframe";
+  const video = take.mode !== null && take.mode !== "keyframe";
   const label = take.error === "REAL_PERSON_REJECTED" ? "模型拒绝了真人参考图"
     : take.error === "VIDEO_GATEWAY_FAILED" ? "网关返回错误，可查看回执"
     : take.error === "VIDEO_DOWNLOAD_REQUIRED" ? "视频已生成，待下载"

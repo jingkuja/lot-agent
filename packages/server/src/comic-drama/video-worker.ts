@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import { fetchPublicBinary, ProviderError, type VideoGenerationProvider, type VideoGenerationRequest } from "@lot-agent/core";
-import { COMIC_VIDEO_RESOLUTION } from "@lot-agent/core/comic-drama";
+import { COMIC_VIDEO_RESOLUTION, comicVideoModel, comicVideoProfile } from "@lot-agent/core/comic-drama";
 import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import type { createComicVideoCreditCheck } from "./credit-check.js";
 import { withComicGenerationLock } from "./generation-worker.js";
@@ -9,8 +9,12 @@ import { COMIC_VIDEO_MAX_BYTES, type ComicMediaLibrary } from "./media-library.j
 import { PgComicVideo, type ComicVideoWork } from "./video-repository.js";
 
 const sizes = {
+  "480p": { "9:16": "480x854", "16:9": "854x480", "1:1": "480x480" },
   "720p": { "9:16": "720x1280", "16:9": "1280x720", "1:1": "720x720" },
   "768P": { "9:16": "768x1360", "16:9": "1360x768", "1:1": "768x768" },
+  "1080p": { "9:16": "1080x1920", "16:9": "1920x1080", "1:1": "1080x1080" },
+  "2K": { "9:16": "1152x2048", "16:9": "2048x1152", "1:1": "1440x1440" },
+  "4k": { "9:16": "2160x3840", "16:9": "3840x2160", "1:1": "2160x2160" },
 };
 type Job = { id: string; userId: string };
 type Dependencies = {
@@ -29,16 +33,29 @@ function vendorUrl(value: string | undefined) {
   return url.href;
 }
 
-async function prepareRequest(media: ComicMediaLibrary, owner: string, { input }: ComicVideoWork): Promise<VideoGenerationRequest> {
-  const [refs, first] = await Promise.all([
+export async function prepareComicVideoRequest(
+  media: Pick<ComicMediaLibrary, "videoReference">, owner: string, { input }: ComicVideoWork,
+): Promise<VideoGenerationRequest> {
+  const timed = input.timedReferences ?? [];
+  const resolve = (kind: "audio" | "video") => Promise.all(timed.filter(ref => ref.kind === kind)
+    .map(({ mediaId }) => media.videoReference(owner, mediaId, kind)));
+  const [refs, first, last, audio, video] = await Promise.all([
     Promise.all(input.references.map(({ mediaId }) => media.videoReference(owner, mediaId))),
     input.firstFrame ? media.videoReference(owner, input.firstFrame.mediaId) : undefined,
+    input.lastFrame ? media.videoReference(owner, input.lastFrame.mediaId) : undefined,
+    resolve("audio"), resolve("video"),
   ]);
   const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
+  const operation = input.mode === "edit" || input.mode === "extend" ? input.mode : "reference";
+  const explicitTaskType = comicVideoModel(input.modelId)?.label === "Seedance 2.5";
+  const adaptiveFrame = !!first && comicVideoProfile(input.modelId)?.adaptiveFrame;
   return {
     model: input.modelId, prompt: input.prompt, durationSec: input.durationMs / 1000,
-    size: sizes[resolution][input.aspectRatio], ratio: input.aspectRatio, resolution, quality: resolution, generate_audio: false,
-    ...(refs.length ? { input_reference: refs } : {}), ...(first ? { first_frame: first } : {}),
+    ...(adaptiveFrame ? { ratio: "adaptive" } : { size: sizes[resolution][input.aspectRatio], ratio: input.aspectRatio }),
+    resolution, quality: resolution, generate_audio: !!audio.length,
+    ...(refs.length ? { input_reference: refs } : {}), ...(first ? { first_frame: first } : {}), ...(last ? { last_frame: last } : {}),
+    ...(audio.length ? { reference_audio: audio } : {}),
+    ...(video.length ? { reference_video: video, seedanceReference: { operation, followsSource: !!input.sourceDuration, explicitTaskType } } : {}),
   };
 }
 
@@ -47,7 +64,7 @@ async function submit(
   signal: AbortSignal, takeSignal: AbortSignal, creditOverride: boolean,
 ) {
   deps.media.assertAvailable();
-  const request = await prepareRequest(deps.media, owner, take);
+  const request = await prepareComicVideoRequest(deps.media, owner, take);
   takeSignal.throwIfAborted();
   const check = await deps.checkCredits(owner, take.input, takeSignal);
   takeSignal.throwIfAborted();

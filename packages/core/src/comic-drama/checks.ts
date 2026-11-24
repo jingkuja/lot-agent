@@ -40,7 +40,7 @@ export type ComicClipCheckIssue =
     code: "INVALID_MATERIAL_REFERENCE";
     clipId: string;
     clipOrdinal: number;
-    role: "scene" | "prop" | "sfx";
+    role: "scene" | "prop" | "sfx" | "image" | "audio" | "video" | "last_frame";
     materialId: string;
     mediaId: string;
     name?: string;

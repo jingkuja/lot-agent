@@ -30,6 +30,8 @@ export interface VideoGenerationRequest {
   reference_audio?: ReferenceInput;
   first_frame?: string;
   last_frame?: string;
+  /** Explicit multimodal operation for callers that validate the full Seedance request. */
+  seedanceReference?: { operation: "reference" | "edit" | "extend"; followsSource: boolean; explicitTaskType: boolean };
   media?: ReferenceMedia[];
 }
 
@@ -40,7 +42,7 @@ export interface VideoGenerationProvider {
 
 export type VideoVendorAdapter = VendorAdapter<VideoGenerationRequest>;
 
-/** Seedance requires these when a reference video is present. */
+/** Legacy Seedance video-reference requests use automatic duration and aspect ratio. */
 export const SEEDANCE_REFERENCE_VIDEO_DURATION = -1;
 export const SEEDANCE_REFERENCE_VIDEO_RATIO = "adaptive";
 
@@ -280,8 +282,8 @@ export class HappyhorseVideoAdapter implements VideoVendorAdapter {
  * /videos/{id}` poll. The create body uses `seconds` (a string) + `size` where
  * happyhorse used `duration`; `ratio` remains a tokenhub extension and must be
  * explicit for providers such as Kling when a feature video is referenced.
- * Seedance with a reference video instead sends `duration: -1` and
- * `ratio: "adaptive"`. The async task
+ * Legacy Seedance requests with a reference video send `duration: -1` and
+ * `ratio: "adaptive"`. Callers can specify an explicit Seedance operation. The async task
  * envelope (`id` with a legacy `task_id` alias, status/progress, and
  * `metadata.url` on completion) and error handling are identical, so only the
  * create path + body diverge — everything else is reused.
@@ -297,18 +299,15 @@ export class OpenaiVideoAdapter extends HappyhorseVideoAdapter {
     body.generate_audio = resolveGenerateAudio(req);
     // TokenHub reads resolution from metadata, not a top-level resolution or quality.
     if (req.resolution) body.metadata = { resolution: req.resolution };
-    if (usesSeedanceReferenceVideoAdaptive(model, req.reference_video)) {
-      // Seedance rejects a caller-chosen duration/ratio when a reference
-      // video is present — the output must match the reference clip.
-      body.duration = SEEDANCE_REFERENCE_VIDEO_DURATION;
-      body.ratio = SEEDANCE_REFERENCE_VIDEO_RATIO;
-    } else if (req.durationSec != null) {
-      body.seconds = String(req.durationSec);
-    }
-    if (!usesSeedanceReferenceVideoAdaptive(model, req.reference_video) && req.ratio) {
-      body.ratio = req.ratio;
-    }
-    if (req.size) body.size = req.size;
+    const reference = isSeedanceModel(model) ? req.seedanceReference : undefined;
+    const adaptive = reference ? reference.operation !== "reference" : usesSeedanceReferenceVideoAdaptive(model, req.reference_video);
+    const followDuration = reference ? reference.followsSource : adaptive;
+    if (followDuration) body.duration = SEEDANCE_REFERENCE_VIDEO_DURATION;
+    else if (req.durationSec != null) body.seconds = String(req.durationSec);
+    if (adaptive) body.ratio = SEEDANCE_REFERENCE_VIDEO_RATIO;
+    else if (req.ratio) body.ratio = req.ratio;
+    if (req.size && !(adaptive && reference)) body.size = req.size;
+    if (reference?.explicitTaskType) body.omni_reference_task_type = reference.operation;
     if (req.quality) body.quality = req.quality;
     // The OpenAI-compatible endpoint uses dedicated reference fields instead
     // of Happyhorse's `media` array. Keep the value shape (string|string[]) so

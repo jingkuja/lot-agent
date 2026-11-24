@@ -21,7 +21,7 @@ import { createComicLibraryRoutes } from "../src/comic-drama/library-routes.js";
 import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-drama-library.js";
 import { verifyComicCast } from "./fixtures/check-comic-drama-cast.js";
 import { mountComicGenerationFixture, verifyComicGeneration } from "./fixtures/check-comic-drama-generation.js";
-import { verifyComicVideo, w6Kling } from "./fixtures/check-comic-drama-video.js";
+import { verifyComicVideo, w6Seedance25 } from "./fixtures/check-comic-drama-video.js";
 import { mountComicEdits, verifyComicEdits } from "./fixtures/check-comic-drama-edits.js";
 import { mountComicRenderFixture, verifyComicRenders } from "./fixtures/check-comic-drama-renders.js";
 import { directorDraft, mountComicDirector, verifyComicDirector } from "./fixtures/check-comic-drama-director.js";
@@ -37,7 +37,7 @@ assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && /^\/comi
 const pool = new Pool({ connectionString: database });
 const app = new Hono<{ Variables: { userId: string } }>();
 const owner = randomUUID(), other = randomUUID();
-const model = "grok-imagine-video-1.5";
+const model = "doubao-seedance-2-0";
 const fields = { title: "雨夜便利店", styleKey: "thick_painting", aspectRatio: "9:16", videoModel: model };
 let enabled = true;
 const rolloutEnv: NodeJS.ProcessEnv = { COMIC_DRAMA_FACTORY: "1" };
@@ -55,7 +55,7 @@ app.use(`${COMIC_DRAMA_API_ROOT}/*`, async (c, next) => {
   await next();
 });
 const seriesRepo = new PgComicDramaRepository(pool);
-app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(seriesRepo, async (user, id) => user === owner && [model, w6Kling].includes(id)));
+app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(seriesRepo, async (user, id) => user === owner && [model, w6Seedance25].includes(id)));
 const fixtureMediaDir = await mkdtemp(join(tmpdir(), "lot-comic-library-"));
 const library = new PgComicLibrary(pool);
 let clockOffset = 0;
@@ -69,7 +69,7 @@ app.route(COMIC_MEDIA_PATH.slice(0, -1), files.publicRoutes({
 const fixtureUser = { id: owner, name: "Comic fixture" };
 app.get("/api/auth/me", c => c.json(fixtureUser));
 app.get("/api/auth/mode", c => c.json({ debug: true, user: fixtureUser }));
-app.get("/api/models", c => c.json({ llm: [], image: [], video: [model, w6Kling].map(id => ({ id, name: id })) }));
+app.get("/api/models", c => c.json({ llm: [], image: [], video: [model, w6Seedance25].map(id => ({ id, name: id })) }));
 app.get("/api/agents", c => c.json([{ id: "general", name: "通用助手", type: "general", installed: true }]));
 app.get("/api/conversations", c => c.json({ items: [], nextCursor: null }));
 app.get("/api/conversations/projects", c => c.json([]));
@@ -157,7 +157,8 @@ try {
   await verifyComicLibrary(app, ms => { clockOffset += ms; });
   await verifyComicCast(app);
   if (generation) await verifyComicGeneration(app, pool, generation);
-  const videoEpisode = generation ? await verifyComicVideo(app, pool, generation.video) : null;
+  const videoFixture = generation ? await verifyComicVideo(app, pool, generation.video) : null;
+  const videoEpisode = videoFixture?.episode;
   const editFixture = await verifyComicEdits(app, pool, seriesRepo, files, fixtureMediaDir, owner, other, edits);
   if (pauseRender) await verifyComicRenders(app, pool, files, fixtureMediaDir, owner, editFixture, pauseRender);
   const directorEpisode = await verifyComicDirector(app, pool, seriesRepo, owner, other, director);
@@ -191,6 +192,32 @@ try {
         const page = await context.newPage();
         page.setDefaultTimeout(12_000);
         page.on("pageerror", (error: Error) => { errors.push(error.message); console.error(error); });
+        if (videoFixture) {
+          const url = base + "/comic-drama/series/" + videoFixture.referenceEpisode;
+          await page.goto(url);
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /分镜/ }).click();
+          await page.getByText("分镜视频输入（2）", { exact: true }).click();
+          await page.getByText("参考音频 1/10 · 4 s / 30 s", { exact: true }).waitFor();
+          await page.getByRole("navigation", { name: "制作步骤" }).getByRole("button", { name: /生成/ }).click();
+          await page.getByRole("button", { name: "直接参考生成", exact: true }).click();
+          await page.getByRole("button", { name: "预览待处理费用（2）", exact: true }).click();
+          const quote = page.getByRole("dialog", { name: "生成费用预览" });
+          await quote.getByText("输出时长（秒） · 实际 31 · 允许 4–30").waitFor();
+          await quote.getByRole("button", { name: "编辑分镜", exact: true }).click();
+          await page.getByRole("heading", { name: "分镜 2", exact: true }).waitFor();
+          await page.evaluate(() => localStorage.setItem("lot:language", "en"));
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.reload();
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          const editor = page.locator("details.comic-video-references");
+          await editor.getByText("Clip video inputs (2)", { exact: true }).click();
+          await editor.getByLabel("Output resolution", { exact: true }).waitFor();
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.setViewportSize({ width: 1440, height: 900 });
+          assert.deepEqual(errors, []);
+          console.log("PASS video input Web: zh quote, correction link, English dark mobile");
+        }
         await page.goto(base + "/assistant");
         const comicTab = page.getByRole("tab", { name: "漫剧工厂", exact: true });
         await comicTab.click().catch(async (error: unknown) => {
@@ -389,8 +416,43 @@ try {
           await fee.getByRole("button", { name: "确认费用并生成" }).click();
           await page.getByRole("img", { name: "微笑" }).waitFor();
           assert.equal(generation.counts.submits, original + 3);
-          await page.goto(deepLink);
           console.log("PASS W5 Web: cancel zero submits, batch pricing, double click, private previews, durable approval and generated expression");
+
+          await page.getByRole("button", { name: "素材库", exact: true }).click();
+          await page.evaluate(() => localStorage.setItem("lot:language", "en"));
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.reload();
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          await page.getByRole("button", { name: "Generate asset image", exact: true }).click();
+          const materialPicker = page.getByRole("dialog", { name: "Generate asset image", exact: true });
+          await materialPicker.locator('input[name="name"]').fill("W5 Web Station");
+          await materialPicker.locator('textarea[name="prompt"]').fill("An empty rainy train station");
+          await materialPicker.locator('select[name="style"]').selectOption("webtoon");
+          await materialPicker.getByText(/Reference images.*4/).click();
+          await materialPicker.getByRole("checkbox", { name: /W3 夜景/ }).check();
+          assert.ok(await materialPicker.evaluate((element: HTMLElement) => element.getBoundingClientRect().width < innerWidth));
+          await materialPicker.getByRole("button", { name: "Preview cost", exact: true }).click();
+          const assetQuote = page.getByRole("dialog");
+          await assetQuote.getByText(/fixture-image/).waitFor();
+          assert.equal(generation.counts.submits, original + 3);
+          await assetQuote.getByRole("button", { name: /Confirm.*generate/i }).click();
+          await page.getByRole("img", { name: "W5 Web Station" }).waitFor();
+          assert.equal(generation.counts.submits, original + 4);
+
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.goto(deepLink);
+          await steps.getByRole("button", { name: /分镜/ }).click();
+          await page.getByRole("button", { name: "生成道具图", exact: true }).click();
+          await page.getByLabel("素材名称").fill("W5 分镜道具");
+          await page.getByLabel("画面描述").fill("一把铜钥匙");
+          await page.getByRole("dialog").getByRole("button", { name: "预览费用", exact: true }).click();
+          await fee.getByRole("button", { name: "确认费用并生成" }).click();
+          await page.getByRole("button", { name: "绑定到此分镜", exact: true }).click();
+          await page.locator(".comic-ref-chip").getByText(/W5 分镜道具/).waitFor();
+          assert.equal(generation.counts.submits, original + 5);
+          console.log("PASS image assets Web: English dark mobile material form, image reference, pricing, and storyboard result binding");
+          await page.goto(deepLink);
         }
 
         if (generation && videoEpisode) {
@@ -414,6 +476,12 @@ try {
           await page.getByRole("button", { name: "整集费用预估", exact: true }).click();
           const budget = page.getByRole("dialog", { name: "整集费用预估" });
           await budget.getByText("可估积分小计", { exact: true }).waitFor();
+          await budget.getByText("补充制作计划与重做项", { exact: true }).click();
+          await budget.getByLabel("未命中缓存的配音（句）", { exact: true }).fill("3");
+          await budget.getByRole("button", { name: "重新估算", exact: true }).click();
+          const speechBudget = budget.getByRole("listitem").filter({ hasText: "新配音" });
+          await speechBudget.getByText("100 积分/句", { exact: true }).waitFor();
+          await speechBudget.getByText("约 300 积分", { exact: true }).waitFor();
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
           await budget.getByRole("button", { name: "关闭", exact: true }).click();
           await page.setViewportSize({ width: 1440, height: 900 });

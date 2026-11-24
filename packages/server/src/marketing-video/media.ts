@@ -117,19 +117,26 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
     : signature.startsWith("ID3") || (header[0] === 0xff && (header[1] & 0xe0) === 0xe0) ? "mp3"
     : signature.startsWith("OggS") ? "ogg" : null;
   if (!format) throw new Error("素材格式或时长不支持");
-  const value = JSON.parse(await mediaProcess(ffprobe(), ["-v", "error", "-protocol_whitelist", "file,pipe", "-f", format, "-show_format", "-show_streams", "-of", "json", path], { signal, timeoutMs: 15000 }));
+  const value = JSON.parse(await mediaProcess(ffprobe(), [
+    "-v", "error", "-protocol_whitelist", "file,pipe", "-f", format,
+    ...(format === "mov" ? ["-enable_drefs", "0"] : []), "-show_format", "-show_streams", "-of", "json", path,
+  ], { signal, timeoutMs: 15_000 }));
   const duration = Number(value.format?.duration);
   // Reject playlists and other formats capable of referencing arbitrary files.
   if (!/^(mov,mp4,m4a,3gp,3g2,mj2|matroska,webm|mp3|wav|ogg)$/.test(value.format?.format_name ?? "") || !Number.isFinite(duration) || duration <= 0 || duration > 600) throw new Error("素材格式或时长不支持");
   if (value.streams?.some((s: { width?: number; height?: number }) => (s.width ?? 0) > 7680 || (s.height ?? 0) > 7680)) throw new Error("素材分辨率过大");
   const video = value.streams?.find((s: { codec_type: string }) => s.codec_type === "video");
+  const audio = value.streams?.find((s: { codec_type: string }) => s.codec_type === "audio");
   const [fpsNumerator, fpsDenominator = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
   const has = (type: string) => value.streams?.some((s: { codec_type: string }) => s.codec_type === type);
   // `width` and `height` are as coded; a phone video shot upright is coded sideways with a `rotation`
   // that FFmpeg applies before any filter. `transfer` is the transfer characteristic, e.g. HLG for HDR.
   const rotation = Number(video?.side_data_list?.find((d: { rotation?: number }) => d.rotation !== undefined)?.rotation ?? 0);
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration,
-    audio: has("audio"), video: has("video"), rotation: Number.isFinite(rotation) ? rotation : 0, transfer: video?.color_transfer as string | undefined };
+    audio: has("audio"), video: has("video"), rotation: Number.isFinite(rotation) ? rotation : 0,
+    transfer: video?.color_transfer as string | undefined, videoCodec: video?.codec_name as string | undefined,
+    audioCodec: audio?.codec_name as string | undefined, sampleRate: Number(audio?.sample_rate), channels: Number(audio?.channels),
+    mov: signature.slice(8, 12) === "qt  " };
 }
 /** Silent stretches of a narration take or a clip's own voice, from FFmpeg's silencedetect.
  * Only the first `durationSec` seconds are read. */

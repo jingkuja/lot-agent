@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { ComicDramaDetail, ComicEpisodeBudget, ComicEpisodeBudgetInput, ComicEpisodeBudgetLine } from "@lot-agent/core/comic-drama";
+import {
+  COMIC_SPEECH_ESTIMATE_POINTS, type ComicDramaDetail, type ComicEpisodeBudget, type ComicEpisodeBudgetInput, type ComicEpisodeBudgetLine,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
@@ -50,7 +52,8 @@ export function ComicEpisodeBudgetDialog({ detail, close }: { detail: ComicDrama
     <form onSubmit={event => { event.preventDefault(); setRequested({ ...plan }); }}>
       <label>{t("视频生成方式")}
         <select value={plan.videoMode ?? "from_keyframe"} onChange={e => setPlan({ ...plan, videoMode: e.target.value as typeof plan.videoMode })}>
-          <option value="from_keyframe">{t("用已确认首帧")}</option><option value="references">{t("参考图直出")}</option>
+          <option value="from_keyframe">{t("用已确认首帧")}</option><option value="references">{t("直接参考生成")}</option>
+          <option value="edit">{t("编辑源视频")}</option><option value="extend">{t("延长源视频")}</option>
         </select>
       </label>
       <details>
@@ -65,6 +68,7 @@ export function ComicEpisodeBudgetDialog({ detail, close }: { detail: ComicDrama
             }} />
         </label>)}</div>
         <p className="comic-generation-note">{t("补充计划只填尚未制作的用量；共用素材只计一次，已缓存配音不计费。")}</p>
+        <p className="comic-generation-note">{t("新合成约 {0} 积分/次，命中缓存为 0 积分。", [COMIC_SPEECH_ESTIMATE_POINTS])}</p>
         {detail.clips.filter(clip => clip.progress?.videoState === "ready").map(clip => <label key={clip.id} className="comic-budget-redo">
           <input type="checkbox" checked={plan.redoVideos?.includes(clip.id) ?? false} onChange={event => {
             const ids = plan.redoVideos ?? [];
@@ -97,6 +101,7 @@ export function ComicEpisodeBudgetDialog({ detail, close }: { detail: ComicDrama
       {result.unverifiedCount > 0 && <small>{t("{0} 项待报价，未计入小计", [result.unverifiedCount])}</small>}
       {!!result.costs?.settled.length && <p>{t("已花费 {0}", [monetary(result.costs.settled)])}</p>}
       {!!result.costs?.quotedUnbilled.length && <p>{t("未出账估算 {0}", [monetary(result.costs.quotedUnbilled)])}</p>}
+      {!!result.estimatedMonetaryTotals?.length && <p>{t("预计金额小计 {0}", [monetary(result.estimatedMonetaryTotals)])}</p>}
       {!!result.costs?.pendingReconcileCount && <p>{t("待核对 {0} 笔", [result.costs.pendingReconcileCount])}</p>}
       <p className="comic-generation-note">{t("积分预估与货币金额分开显示。实际费用以模型网关账单为准。")}</p>
     </>}

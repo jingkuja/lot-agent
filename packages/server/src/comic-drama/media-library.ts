@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { Hono } from "hono";
 import {
-  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, type ComicLibraryRepository, type ComicMaterialKind, type ComicMediaLinks, type StoredComicMedia,
+  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, type ComicGenerationImage, type ComicGenerationTimedMedia,
+  type ComicLibraryRepository, type ComicMaterialKind, type ComicMediaLinks, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { createUploadAccessGuard, privateFilesEnabled, signPrivateMaterial, type PrivateMaterialOptions } from "../generation/private-materials.js";
 import { ffmpeg, inspectMedia, mediaProcess } from "../marketing-video/media.js";
@@ -20,7 +21,16 @@ const allowedMime = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["imag
 const MiB = 1024 * 1024;
 export const COMIC_VIDEO_MAX_BYTES = 80 * MiB;
 
+type MeasuredAudio = Omit<Extract<ComicGenerationTimedMedia, { kind: "audio" }>, "mediaId" | "version" | "label">;
+type MeasuredVideo = Omit<Extract<ComicGenerationTimedMedia, { kind: "video" }>, "mediaId" | "version" | "label">;
+export type MeasuredComicReference = ({ kind: "image" } & Omit<ComicGenerationImage, "mediaId" | "version">) | MeasuredAudio | MeasuredVideo;
+
+const isGenerationMediaKey = (name: string) => /^[a-f0-9-]{36}\.(jpg|png|webp|mp3|wav|mp4|mov)$/.test(name);
+
 function limits(kind: ComicMaterialKind | "character", mime: string) {
+  if (kind === "other" && (mime === "video/mp4" || mime === "video/quicktime")) {
+    return { ext: mime === "video/mp4" ? "mp4" : "mov", maxBytes: 200_000_000, maxMs: 300_000 };
+  }
   const image = mime.startsWith("image/");
   const ext = allowedMime.get(mime);
   if (!ext || (kind !== "other" && image !== !["music", "sound"].includes(kind))) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
@@ -28,9 +38,11 @@ function limits(kind: ComicMaterialKind | "character", mime: string) {
 }
 
 async function probe(path: string, thumb: string, ext: string, maxMs: number, signal: AbortSignal) {
-  if (ext === "mp4") {
+  if (ext === "mp4" || ext === "mov") {
     const info = await inspectMedia(path, signal);
-    if (info.format !== "mov" || !info.video || !info.width || !info.height) throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+    if (info.format !== "mov" || info.mov !== (ext === "mov") || !info.video || !info.width || !info.height) {
+      throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
+    }
     if (info.duration * 1000 > maxMs) throw new ComicLibraryError("MEDIA_TOO_LONG", 400);
     const rotate = Math.abs(info.rotation % 180) === 90;
     return { width: rotate ? info.height : info.width, height: rotate ? info.width : info.height, durationMs: Math.round(info.duration * 1000) };
@@ -73,12 +85,49 @@ export class ComicMediaLibrary {
     return `data:image/jpeg;base64,${body.toString("base64")}`;
   }
 
-  async videoReference(owner: string, id: string) {
+  async videoReference(owner: string, id: string, kind: "image" | "audio" | "video" = "image") {
     const media = await this.repo.media(owner, id);
-    if (!media?.mime.startsWith("image/")) libraryMissing();
+    if (!media?.mime.startsWith(kind + "/") || !isGenerationMediaKey(media.storageKey)) libraryMissing();
     const link = this.sign(owner, id, media.storageKey, true);
     if (!/^https?:\/\//i.test(link)) throw new ComicLibraryError("VIDEO_REFERENCE_ORIGIN_REQUIRED", 503);
     return link;
+  }
+
+  async inspectVideoReference(owner: string, id: string, signal: AbortSignal): Promise<MeasuredComicReference | null> {
+    const media = await this.repo.media(owner, id);
+    if (!media || !isGenerationMediaKey(media.storageKey)) return null;
+    const path = join(this.root, media.storageKey);
+    try {
+      signal.throwIfAborted();
+      const file = await stat(path);
+      if (!file.isFile() || file.size <= 0) return null;
+      const base = { sizeBytes: file.size };
+      if (media.mime.startsWith("image/")) {
+        const image = await sharp(path, { limitInputPixels: 40_000_000 }).metadata();
+        const mime = image.format === "jpeg" ? "image/jpeg" : image.format === "png" ? "image/png" : image.format === "webp" ? "image/webp" : null;
+        if (!mime || !image.width || !image.height) return null;
+        const rotated = (image.orientation ?? 1) >= 5;
+        return { ...base, kind: "image", mime, width: rotated ? image.height : image.width, height: rotated ? image.width : image.height };
+      }
+      const info = await inspectMedia(path, signal);
+      const durationMs = info.duration * 1000;
+      if ((info.format === "mp3" || info.format === "wav") && info.audio && !info.video
+        && info.audioCodec && info.sampleRate > 0 && info.channels > 0) {
+        return { ...base, kind: "audio", mime: info.format === "mp3" ? "audio/mpeg" : "audio/wav",
+          durationMs, audioCodec: info.audioCodec, sampleRate: info.sampleRate, channels: info.channels };
+      }
+      if (info.format === "mov" && info.video && info.videoCodec && info.width && info.height && Number.isFinite(info.fps) && info.fps > 0
+        && (!info.audio || info.audioCodec)) {
+        const rotated = Math.abs(info.rotation % 180) === 90;
+        return { ...base, kind: "video", mime: info.mov ? "video/quicktime" : "video/mp4", durationMs,
+          width: rotated ? info.height : info.width, height: rotated ? info.width : info.height, fps: info.fps,
+          videoCodec: info.videoCodec, audioCodec: info.audioCodec ?? null };
+      }
+      return null;
+    } catch {
+      signal.throwIfAborted();
+      return null;
+    }
   }
 
   async renderSource(owner: string, id: string, kind: "audio" | "video") {

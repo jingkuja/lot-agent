@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
-  comicImageTakeInput, type ComicGenerationQuote, type ComicImageRequest,
-  type ComicImageTake, type ComicImageTakeInput, type ComicImageTakeState, type ComicKeyframeHistory, type ComicTakeInput, type StoredComicMedia,
+  comicImageTakeInput, comicVideoPromptNotices, type ComicFrozenGenerationInput, type ComicGenerationQuote, type ComicImageRequest,
+  type ComicImageTake, type ComicImageTakeInput, type ComicImageTakeState, type ComicKeyframeHistory, type ComicMaterialImageKind,
+  type ComicMaterialImageTake, type ComicTakeInput, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, taskQueueName } from "../jobs/task-queues.js";
 import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
@@ -13,10 +14,10 @@ import { comicQuoteCurrency } from "./pricing.js";
 
 export type ComicGenerationScope = { kind: "series" | "character" | "material"; id: string };
 export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second"; currency?: "CNY" | "USD" };
-export type FrozenVisualReference = { materialId: string | null; mediaId: string; version: number; styleKey?: string };
+export type FrozenVisualReference = { materialId: string | null; mediaId: string; version: number; styleKey?: string; pinned?: true };
 type FrozenQuote = {
   stamp: string; price: ComicPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[];
-  visualReferences?: FrozenVisualReference[];
+  visualReferences?: FrozenVisualReference[]; newMaterial?: true;
 };
 type RequestRow = { id: string; taskId: string | null; confirmed: boolean; valid: boolean; frozen: FrozenQuote };
 export type ComicWorkItem = { id: string; slot: number; input: ComicImageTakeInput };
@@ -46,7 +47,7 @@ export const comicBatchCreditPaused = `EXISTS (SELECT 1 FROM ${namespace}.cd_tak
   WHERE paused.owner_id=t.owner_id AND paused.request_id=t.request_id AND paused.credit_check IS NOT NULL)`;
 export const comicVideoCanRunDuringCreditPause = `coalesce(t.submit_state,'unsubmitted') IN ('accepted','output')`;
 export const takeColumns = `t.id,t.target_id AS "targetId",t.request_id AS "requestId",t.media_id AS "mediaId",
-  t.input->'target' AS "characterTarget",
+  CASE WHEN r.character_id IS NOT NULL THEN t.input->'target' END AS "characterTarget",
   t.input->>'mode' AS mode, t.progress, t.cancel_requested_at IS NOT NULL AS "cancelRequested",
   (${incomplete} AND NOT (${active}) AND (${canResumeReceipt})
     AND (${comicVideoCanRunDuringCreditPause} OR NOT ${comicBatchCreditPaused})) AS "canRecover",
@@ -78,7 +79,8 @@ export class PgComicGeneration {
 
   async quote(owner: string, scope: ComicGenerationScope, stamp: string, price: ComicPrice | null,
     inputs: ComicTakeInput[], skipped: ComicGenerationQuote["skipped"], replaceAdopted?: string[],
-    visualReferences?: FrozenVisualReference[], defaultCurrency: "CNY" | "USD" = comicQuoteCurrency()): Promise<ComicGenerationQuote> {
+    visualReferences?: FrozenVisualReference[], defaultCurrency: "CNY" | "USD" = comicQuoteCurrency(),
+    newMaterial?: { kind: ComicMaterialImageKind; name: string }): Promise<ComicGenerationQuote> {
     const currency = price?.currency ?? defaultCurrency;
     const busy = await this.busy(owner, inputs);
     inputs = inputs.filter(input => {
@@ -88,17 +90,34 @@ export class PgComicGeneration {
     });
     if (!inputs.length || !price) return { confirmationId: null, expiresAt: null, items: [], skipped, totalMicros: null, currency };
     const storedPrice: ComicPrice = { ...price, currency };
-    const { rows } = await this.pool.query<{ id: string; expiresAt: Date }>(`INSERT INTO ${namespace}.cd_generation_requests
+    const insertQuote = (db: ComicQuery, currentStamp: string) => db.query<{ id: string; expiresAt: Date }>(`INSERT INTO ${namespace}.cd_generation_requests
       (owner_id,series_id,character_id,material_id,frozen,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '10 minutes') RETURNING id,expires_at AS "expiresAt"`,
     [owner, scope.kind === "series" ? scope.id : null, scope.kind === "character" ? scope.id : null,
       scope.kind === "material" ? scope.id : null,
-      { stamp, price: storedPrice, inputs, replaceAdopted, ...(visualReferences?.length ? { visualReferences } : {}) } satisfies FrozenQuote]);
+      { stamp: currentStamp, price: storedPrice, inputs, replaceAdopted, ...(visualReferences?.length ? { visualReferences } : {}),
+        ...(newMaterial ? { newMaterial: true } : {}) } satisfies FrozenQuote]);
+    const { rows } = newMaterial ? await libraryTransaction(this.pool, async db => {
+      const { rows: [material] } = await db.query<{ stamp: string }>(`INSERT INTO ${namespace}.cd_materials (id,owner_id,kind,name,tags)
+        VALUES($1,$2,$3,$4,'{}') RETURNING updated_at::text AS stamp`, [scope.id, owner, newMaterial.kind, newMaterial.name]);
+      return insertQuote(db, material.stamp);
+    }) : await insertQuote(this.pool, stamp);
     const unit = storedPrice.unit ?? "image";
     const items = inputs.map(input => {
-      const quantity = unit === "second" && "durationMs" in input ? input.durationMs / 1000 : 1;
-      const references = "firstFrame" in input && input.firstFrame ? [input.firstFrame, ...input.references] : input.references;
-      return { clipId: targetId(input), modelId: storedPrice.modelId, unit, quantity, amountMicros: storedPrice.amountMicros * quantity,
-        referenceVersions: references.map(({ mediaId, version }) => ({ mediaId, version })) };
+      const video = "clipId" in input && input.mode !== "keyframe" ? input : undefined;
+      const quantity = unit === "second" && video ? video.durationMs / 1000 : 1;
+      const referenceVersions: NonNullable<ComicGenerationQuote["items"][number]["referenceVersions"]> =
+        input.references.map(({ mediaId, version }) => ({ mediaId, version, ...(video ? { kind: "image" as const } : {}) }));
+      if (video?.firstFrame) referenceVersions.unshift({ mediaId: video.firstFrame.mediaId, version: video.firstFrame.version, kind: "first_frame" });
+      if (video?.lastFrame) referenceVersions.push({ mediaId: video.lastFrame.mediaId, version: video.lastFrame.version, kind: "last_frame" });
+      for (const { kind, mediaId, version } of video?.timedReferences ?? []) referenceVersions.push({ kind, mediaId, version });
+      const source = video?.timedReferences?.find(ref => ref.kind === "video");
+      return { clipId: targetId(input), modelId: storedPrice.modelId, unit, quantity,
+        amountMicros: Math.round(storedPrice.amountMicros * quantity), referenceVersions,
+        ...(video ? { advisories: comicVideoPromptNotices(video) } : {}),
+        ...(source && (video?.mode === "edit" || video?.mode === "extend") ? {
+          sourceDurationMs: source.durationMs, followsSource: !!video.sourceDuration,
+        } : {}),
+      };
     });
     return { confirmationId: rows[0].id, expiresAt: rows[0].expiresAt.toISOString(), items, skipped, currency,
       totalMicros: items.reduce((total, item) => total + item.amountMicros, 0) };
@@ -123,11 +142,16 @@ export class PgComicGeneration {
   }
 
   async confirm(owner: string, scope: ComicGenerationScope, id: string,
-    currentPrice: (model: string, kind: "image" | "video") => Promise<ComicPrice | null>) {
+    currentPrice: (model: string, kind: "image" | "video") => Promise<ComicPrice | null>,
+    verifyVideoFiles: (inputs: ComicFrozenGenerationInput[]) => Promise<void>,
+  ) {
     const first = await this.request(owner, id, scope);
     if (first.confirmed) return { taskId: first.taskId ?? libraryMissing(), type: taskType(first.frozen.price), created: false };
     if (!first.valid) throw new ComicLibraryError("QUOTE_EXPIRED", 409);
     const price = await currentPrice(first.frozen.price.modelId, taskType(first.frozen.price) === COMIC_VIDEO_TASK ? "video" : "image");
+    if (price && taskType(first.frozen.price) === COMIC_VIDEO_TASK) {
+      await verifyVideoFiles(first.frozen.inputs.flatMap(input => "clipId" in input && input.mode !== "keyframe" ? [input] : []));
+    }
     return libraryTransaction(this.pool, async db => {
       const row = await this.request(owner, id, scope, db, true);
       if (row.confirmed) return { taskId: row.taskId ?? libraryMissing(), type: taskType(row.frozen.price), created: false };
@@ -147,13 +171,7 @@ export class PgComicGeneration {
       const type = taskType(savedPrice);
       for (const input of inputs) {
         if ("characterId" in input) await requireComicChoice(db, owner, input.target.kind, input.target.key);
-        else if ("materialId" in input) {
-          const { rows: materials } = await db.query(
-            `SELECT 1 FROM ${namespace}.cd_materials WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, input.materialId],
-          );
-          if (!materials.length) libraryMissing();
-        }
-        else if (type === COMIC_VIDEO_TASK) {
+        else if ("clipId" in input && type === COMIC_VIDEO_TASK) {
           const { rows: [clip] } = await db.query<{ frame: string | null; frameMedia: string | null; adopted: string | null }>(`SELECT
             keyframe_take_id AS frame, keyframe_media_id AS "frameMedia", adopted_video_take_id AS adopted
             FROM ${namespace}.cd_clips WHERE id=$1 AND series_id=$2 AND revision=$3`,
@@ -216,6 +234,13 @@ export class PgComicGeneration {
     const { rows } = await this.pool.query<ComicImageTake>(`SELECT ${takeColumns} ${joinTakes}
       WHERE t.owner_id=$1 AND r.character_id=$2
       ORDER BY t.created_at DESC,t.id DESC LIMIT 30`, [owner, id]);
+    return rows;
+  }
+
+  async materialHistory(owner: string) {
+    const { rows } = await this.pool.query<ComicMaterialImageTake>(`SELECT ${takeColumns},m.name AS "materialName",m.kind AS "materialKind"
+      ${joinTakes} JOIN ${namespace}.cd_materials m ON (m.owner_id,m.id)=(r.owner_id,r.material_id)
+      WHERE t.owner_id=$1 ORDER BY (${incomplete} OR t.status='unknown') DESC,t.created_at DESC,t.id DESC LIMIT 30`, [owner]);
     return rows;
   }
 
@@ -332,7 +357,7 @@ export class PgComicGeneration {
     const materialRefs = refs.filter(ref => !ref.styleKey);
     if (styleRefs.length) {
       const { rows } = await db.query<{ styleKey: string; mediaId: string }>(
-        `SELECT style_key AS "styleKey", media_id AS "mediaId" FROM ${namespace}.cd_style_presets WHERE owner_id=$1 AND style_key=ANY($2::text[])`,
+        `SELECT style_key AS "styleKey", media_id AS "mediaId" FROM ${namespace}.cd_style_presets WHERE owner_id=$1 AND style_key=ANY($2::text[]) ORDER BY style_key FOR SHARE`,
         [owner, [...new Set(styleRefs.map(ref => ref.styleKey!))]],
       );
       for (const ref of styleRefs) {
@@ -342,7 +367,11 @@ export class PgComicGeneration {
       }
     }
     if (!materialRefs.length) return;
-    const unique = new Map(materialRefs.map(ref => [`${ref.materialId ?? ""}:${ref.mediaId}`, ref]));
+    const unique = new Map(materialRefs.map(ref => [`${ref.materialId ?? ""}:${ref.mediaId}:${!!ref.pinned}`, ref]));
+    const materialIds = materialRefs.flatMap(ref => ref.materialId ? [ref.materialId] : []);
+    if (materialIds.length) {
+      await db.query(`SELECT id FROM ${namespace}.cd_materials WHERE owner_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE`, [owner, materialIds]);
+    }
     const { rows } = await db.query<{ materialId: string; mediaId: string; version: number; latestVersion: number; archived: boolean }>(
       `SELECT m.id AS "materialId", v.media_id AS "mediaId", v.version, (m.archived_at IS NOT NULL) AS archived,
         (SELECT max(all_v.version) FROM ${namespace}.cd_material_versions all_v
@@ -355,7 +384,7 @@ export class PgComicGeneration {
     );
     for (const ref of unique.values()) {
       const match = rows.find(row => row.mediaId === ref.mediaId && (!ref.materialId || row.materialId === ref.materialId));
-      if (!match || match.archived || match.version !== ref.version || match.latestVersion !== ref.version) {
+      if (!match || match.archived || match.version !== ref.version || (!ref.pinned && match.latestVersion !== ref.version)) {
         throw new ComicLibraryError("QUOTE_STALE", 409);
       }
     }
@@ -447,13 +476,16 @@ export class PgComicGeneration {
         // A result already paid for remains part of history even if the role has since been archived.
         const character = await db.query(`SELECT 1 FROM ${namespace}.cd_characters WHERE owner_id=$1 AND id=$2 FOR UPDATE`, [owner, input.characterId]);
         if (!character.rowCount) libraryMissing();
+      } else if ("materialId" in input) {
+        const material = await db.query(`SELECT 1 FROM ${namespace}.cd_materials WHERE owner_id=$1 AND id=$2 FOR UPDATE`, [owner, input.materialId]);
+        if (!material.rowCount) libraryMissing();
       }
       const row = await db.query(`SELECT 1 FROM ${namespace}.cd_takes t WHERE owner_id=$1 AND id=$2 AND ${incomplete} FOR UPDATE`, [owner, take.id]);
       if (!row.rowCount) throw new ComicLibraryError("TAKE_NOT_WRITABLE", 409);
       await insertComicMedia(db, media);
       if ("characterId" in input) {
         await insertComicCharacterVersion(db, owner, input.characterId, input.target, media.id);
-      } else if ("materialId" in input && typeof input.materialId === "string") {
+      } else if ("materialId" in input) {
         await insertComicMaterialVersion(db, owner, input.materialId, media.id);
       }
       await db.query(`UPDATE ${namespace}.cd_takes SET status='ready',media_id=$3,progress=100,error=NULL,completed_at=now() WHERE owner_id=$1 AND id=$2`,
@@ -462,8 +494,16 @@ export class PgComicGeneration {
   }
 
   async pruneExpiredQuotes() {
+    await this.pool.query(`DELETE FROM ${namespace}.cd_materials m WHERE (m.owner_id,m.id) IN (
+      SELECT q.owner_id,q.material_id FROM ${namespace}.cd_generation_requests q
+      WHERE q.frozen->>'newMaterial'='true' AND q.confirmed_at IS NULL AND q.expires_at<now()-interval '1 day'
+      AND NOT EXISTS (SELECT 1 FROM ${namespace}.cd_generation_requests other
+        WHERE (other.owner_id,other.material_id)=(q.owner_id,q.material_id) AND other.id<>q.id)
+      AND NOT EXISTS (SELECT 1 FROM ${namespace}.cd_material_versions v WHERE (v.owner_id,v.material_id)=(q.owner_id,q.material_id))
+      LIMIT 500 FOR UPDATE OF q SKIP LOCKED)`);
     await this.pool.query(`DELETE FROM ${namespace}.cd_generation_requests WHERE id IN
-      (SELECT id FROM ${namespace}.cd_generation_requests WHERE confirmed_at IS NULL AND expires_at<now()-interval '1 day' LIMIT 500 FOR UPDATE SKIP LOCKED)`);
+      (SELECT id FROM ${namespace}.cd_generation_requests WHERE confirmed_at IS NULL AND expires_at<now()-interval '1 day'
+        AND frozen->>'newMaterial' IS DISTINCT FROM 'true' LIMIT 500 FOR UPDATE SKIP LOCKED)`);
   }
 
   private async tryTaskLock(db: ComicQuery, taskId: string) {

@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 import {
   comicDramaIdSchema, comicVideoTakeInput, type ComicFrozenGenerationInput, type ComicGenerationPreviewRequest, type ComicGenerationReference,
   type ComicTakeState, type ComicVideoCreditCheck, type ComicVideoCreditPause, type ComicVideoHistory, type ComicVideoReceipt,
-  type ComicVideoTake, type StoredComicMedia,
+  type ComicVideoTake, type ComicVideoMaterialRef, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_VIDEO_TASK } from "../jobs/task-queues.js";
 import {
@@ -32,8 +32,9 @@ export type ResolvedVisualReference = ComicGenerationReference & {
   materialId: string;
 };
 export type VisualReferenceInvalidReason = "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
-export const visualReferenceKey = (ref: { kind: "style" | "scene" | "prop"; materialId: string; mediaId: string }) =>
-  `${ref.kind}:${ref.materialId}:${ref.mediaId}`;
+type VisualReferenceSpec = NonNullable<ComicGenerationPreviewRequest["visualReferences"]>[number] & { pinned?: true };
+export const visualReferenceKey = (ref: VisualReferenceSpec) =>
+  `${ref.kind}:${ref.materialId}:${ref.mediaId}${ref.pinned ? ":pinned" : ""}`;
 
 export class PgComicVideo {
   constructor(private readonly pool: Pool) {}
@@ -59,7 +60,7 @@ export class PgComicVideo {
 
   async inspectReferences(
     owner: string,
-    refs: NonNullable<ComicGenerationPreviewRequest["visualReferences"]>,
+    refs: VisualReferenceSpec[],
   ): Promise<{ resolved: Map<string, ResolvedVisualReference>; invalid: Map<string, VisualReferenceInvalidReason> }> {
     const resolved = new Map<string, ResolvedVisualReference>();
     const invalid = new Map<string, VisualReferenceInvalidReason>();
@@ -118,7 +119,7 @@ export class PgComicVideo {
         invalid.set(key, "MISSING");
         continue;
       }
-      if (match.latestVersion !== null && match.version !== match.latestVersion) {
+      if (!ref.pinned && match.latestVersion !== null && match.version !== match.latestVersion) {
         invalid.set(key, "OUTDATED_VERSION");
         continue;
       }
@@ -141,16 +142,19 @@ export class PgComicVideo {
     return { resolved, invalid };
   }
 
-  async references(owner: string, refs: NonNullable<ComicGenerationPreviewRequest["visualReferences"]>):
-  Promise<ResolvedVisualReference[]> {
+  async generationReferences(owner: string, refs: readonly ComicVideoMaterialRef[]) {
+    type Row = { materialId: string; mediaId: string; version: number; mime: string; label: string };
     if (!refs.length) return [];
-    const { resolved, invalid } = await this.inspectReferences(owner, refs);
-    if (invalid.size > 0) throw new ComicLibraryError("INVALID_REFERENCE", 400);
-    return refs.map(ref => {
-      const item = resolved.get(visualReferenceKey(ref));
-      if (!item) throw new ComicLibraryError("INVALID_REFERENCE", 400);
-      return item;
-    });
+    const { rows } = await this.pool.query<Row>(`
+      SELECT m.id AS "materialId", v.media_id AS "mediaId", v.version, f.mime, m.name AS label
+      FROM ${tables}.cd_materials m
+      CROSS JOIN LATERAL (
+        SELECT mv.media_id, mv.version FROM ${tables}.cd_material_versions mv
+        WHERE (mv.owner_id,mv.material_id)=(m.owner_id,m.id) ORDER BY mv.version DESC LIMIT 1
+      ) v JOIN ${tables}.cd_media f ON (f.owner_id,f.id)=(m.owner_id,v.media_id)
+      WHERE m.owner_id=$1 AND m.archived_at IS NULL AND m.id=ANY($2::uuid[])`,
+    [owner, [...new Set(refs.map(item => item.materialId))]]);
+    return rows;
   }
 
   async clip(owner: string, seriesId: string, clipId: string): Promise<ComicVideoTake[]> {

@@ -1,21 +1,33 @@
 import {
-  COMIC_VIDEO_RESOLUTION, type ComicFrozenGenerationInput, type ComicVideoCreditCheck,
+  COMIC_VIDEO_RESOLUTION, comicVideoProfile, type ComicFrozenGenerationInput, type ComicVideoCreditCheck,
 } from "@lot-agent/core/comic-drama";
 import { predictModelCost } from "../billing/model-estimate.js";
 import type { StoredUser } from "../db/database.js";
 import type { ModelEstimateRequest, TokenhubClient } from "../tokenhub/client.js";
 
-export function comicVideoEstimateUsage(input: Pick<ComicFrozenGenerationInput, "modelId" | "resolution" | "durationMs" | "aspectRatio">,
+export function comicVideoEstimateUsage(
+  input: Pick<ComicFrozenGenerationInput, "modelId" | "resolution" | "durationMs" | "aspectRatio" | "timedReferences"> &
+    Partial<Pick<ComicFrozenGenerationInput, "mode" | "sourceDuration">>,
   imageCount: number,
 ): ModelEstimateRequest {
   const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
+  const media = input.timedReferences ?? [];
+  const videos = media.filter(ref => ref.kind === "video");
+  const audio = media.filter(ref => ref.kind === "audio");
+  const adaptive = input.mode === "edit" || input.mode === "extend"
+    || input.mode === "from_keyframe" && comicVideoProfile(input.modelId)?.adaptiveFrame;
   return {
     model: input.modelId,
     video: {
-      resolution, seconds: input.durationMs / 1000, has_video_input: false,
+      resolution, seconds: input.durationMs / 1000, has_video_input: !!videos.length,
       input_image_count: imageCount,
     },
-    request_parameters: { resolution, generate_audio: false, ratio: input.aspectRatio },
+    request_parameters: {
+      resolution, generate_audio: !!audio.length, ratio: adaptive ? "adaptive" : input.aspectRatio,
+      ...(videos.length ? { reference_video_seconds: videos.reduce((sum, ref) => sum + ref.durationMs / 1000, 0) } : {}),
+      ...(audio.length ? { reference_audio_seconds: audio.reduce((sum, ref) => sum + ref.durationMs / 1000, 0) } : {}),
+      ...(input.sourceDuration ? { duration: -1 } : {}),
+    },
   };
 }
 
@@ -43,7 +55,7 @@ export function createComicVideoCreditCheck(db: CreditDb, tokenhub: CreditGatewa
       deadline.throwIfAborted();
       if (allowBalanceFallback === true) return null;
       if (allowBalanceFallback !== false || !Number.isFinite(amount)) return { reason: "unavailable" };
-      const usage = comicVideoEstimateUsage(input, input.references.length + Number(!!input.firstFrame));
+      const usage = comicVideoEstimateUsage(input, input.references.length + Number(!!input.firstFrame) + Number(!!input.lastFrame));
       const { estimatedPoints: requiredPoints } = await predictModelCost(tokenhub, key, usage, deadline);
       deadline.throwIfAborted();
       if (!Number.isFinite(requiredPoints) || requiredPoints < 0) return { reason: "unavailable" };

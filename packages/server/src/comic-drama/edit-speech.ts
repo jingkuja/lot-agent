@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResult } from "@lot-agent/core";
 import {
-  COMIC_SPEECH_PRESET_CATALOG, comicDramaClipDraftSchema, comicSpeechPresets, comicVoiceBindSchema, estimateComicDialogueMs, matchComicCharacters,
+  COMIC_SPEECH_ESTIMATE_POINTS, COMIC_SPEECH_PRESET_CATALOG, comicDramaClipDraftSchema, comicSpeechPresets, comicVoiceBindSchema,
+  estimateComicDialogueMs, matchComicCharacters,
   type ComicAutoDialogueItemOutcome, type ComicAutoDialoguePlan, type ComicAutoDialoguePlanLine, type ComicAutoDialogueResult,
   type ComicEditAutoDialogue, type ComicEditAutoDialogueOverride, type ComicEditAutoDialoguePreview, type ComicSpeechLines,
   type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
@@ -390,6 +391,7 @@ export class ComicEditSpeech {
       (fields.overrides ?? []).map(entry => [`${entry.videoItemId}:${entry.lineId}`, entry]),
     );
     const lines: ComicAutoDialoguePlanLine[] = [];
+    const newSyntheses = new Set<string>();
     let alreadyPlacedCount = 0;
     let cachedCount = 0;
     let toSynthesizeCount = 0;
@@ -476,6 +478,7 @@ export class ComicEditSpeech {
           });
         } else {
           toSynthesizeCount += 1;
+          newSyntheses.add(fingerprint);
           const est = Math.max(800, estimateComicDialogueMs([{ ...line, text, speed }]));
           lines.push({ ...base, status: "to_synthesize" });
           cursorMs = Math.max(cursorMs, startOffset + Math.min(remainingMs, est));
@@ -491,7 +494,8 @@ export class ComicEditSpeech {
       blockedCount,
       skippedCount,
       overflowCount,
-      feeStatus: toSynthesizeCount > 0 ? "unverified_gateway" : "free_cached",
+      feeStatus: newSyntheses.size > 0 ? "fixed_points" : "free_cached",
+      estimatedPoints: newSyntheses.size * COMIC_SPEECH_ESTIMATE_POINTS,
       lines,
     };
   }

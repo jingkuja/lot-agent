@@ -26,10 +26,11 @@ type Props = {
   onQuickActionHandled?: () => void;
   onSeriesChanged?: () => void;
   choose: (id: string) => void;
+  editClip: (id: string) => void;
 };
 
 export function ComicImageGeneration({
-  detail, selected, select, getSaved, disabled, choose, initialMode = "keyframe", quickAction, onQuickActionHandled, onSeriesChanged,
+  detail, selected, select, getSaved, disabled, choose, editClip, initialMode = "keyframe", quickAction, onQuickActionHandled, onSeriesChanged,
 }: Props) {
   const { t } = useI18n();
   const [checked, setChecked] = useState<string[]>([]);
@@ -45,6 +46,11 @@ export function ComicImageGeneration({
   const lastQuickToken = useRef(0);
   const isVideo = mode !== "keyframe";
   const videoModel = comicVideoModel(detail.series.videoModel);
+  const supportedModes: ReadonlyArray<readonly [ComicGenerationMode, string]> = [
+    ["keyframe", "首帧图片"], ["from_keyframe", "用已确认首帧"], ["references", "直接参考生成"],
+    ...(videoModel?.profile.operations.some(value => value === "edit") ? [["edit", "编辑源视频"]] as const : []),
+    ...(videoModel?.profile.operations.some(value => value === "extend") ? [["extend", "延长源视频"]] as const : []),
+  ];
   const pending = useRef(false);
   const clip = detail.clips.find(item => item.id === selected) ?? detail.clips[0];
   const selection = detail.clips.filter(item => checked.includes(item.id)).map(item => item.id);
@@ -58,6 +64,7 @@ export function ComicImageGeneration({
     const targetMode = overrideMode ?? mode;
     const targetIsVideo = targetMode !== "keyframe";
     if (pending.current || !ids.length) return;
+    setQuote(null);
     pending.current = true;
     setQuoting(true);
     setError("");
@@ -69,7 +76,7 @@ export function ComicImageGeneration({
       }));
       if (targets.length !== ids.length) { setError("素材或分镜已更新，请重新询价"); return; }
       setQuote(await comicGenerationApi.preview(scope, { mode: targetMode, expectedSeriesRevision: saved.series.revision, targets,
-        ...(targetMode === "references" && visual.length
+        ...(targetIsVideo && targetMode !== "from_keyframe" && visual.length
           ? { visualReferences: visual.map(({ kind, materialId, mediaId }) => ({ kind, materialId, mediaId })) } : {}),
       }));
     } catch (reason) { setError(comicGenerationError(reason)); }
@@ -105,7 +112,7 @@ export function ComicImageGeneration({
     <section className="comic-edit-card comic-generation-picker">
       <header><h2>{t(isVideo ? "生成视频" : "生成首帧")}</h2></header>
       <div className="comic-actions comic-generation-modes" role="group" aria-label={t("生成模式")}>
-        {([["keyframe", "首帧图片"], ["from_keyframe", "用已确认首帧"], ["references", "直接参考生成"]] as const).map(([value, label]) =>
+        {supportedModes.map(([value, label]) =>
           <button type="button" key={value} aria-pressed={mode === value} disabled={quoting} onClick={() => {
             setMode(value); setBatchNotice("");
           }}>{t(label)}</button>)}
@@ -167,10 +174,14 @@ export function ComicImageGeneration({
       {detail.clips.length > 0 && !disabled && <>
         {isVideo && <>
           <p className="comic-generation-note">{videoModel ? t(videoModel.label) : t("请先在剧集设置中选择支持的视频模型")}</p>
-          {videoModel && <p className="comic-generation-note">{t("视频时长须为 4 至 {0} 整秒", [videoModel.profile.shotMaxSeconds])}</p>}
-          {videoModel && (mode === "references"
+          {videoModel && mode !== "edit" && <p className="comic-generation-note">
+            {t("视频时长须为 4 至 {0} 整秒", [videoModel.profile.shotMaxSeconds])}</p>}
+          {(mode === "edit" || mode === "extend") && <p className="comic-generation-note">
+            {t(mode === "edit" ? "在分镜中绑定一段 4 秒以上的源视频，输出时长和画幅跟随源视频。"
+              : "在分镜中绑定一段源视频，输出画幅跟随源视频。")}</p>}
+          {videoModel && (mode !== "from_keyframe"
             ? <ComicVideoReferences references={visual} change={setVisual} limit={videoModel.profile.referenceImages.total} />
-            : <p className="comic-generation-note">{t("首帧模式只发送已确认的首帧，其他素材可用于直接参考生成。")}</p>)}
+            : <p className="comic-generation-note">{t("首帧模式使用已确认的首帧和在分镜中选定的尾帧。")}</p>)}
           <label className="comic-video-replace"><input type="checkbox" checked={replaceAdopted}
             onChange={event => setReplaceAdopted(event.target.checked)} />{t("为已采用的分镜生成新版")}</label>
         </>}
@@ -189,7 +200,7 @@ export function ComicImageGeneration({
       {batch && batch.takes.length > 1 && <BatchStatus key={batch.id} request={batch} label={label} select={select}
         refreshed={() => { setRefresh(value => value + 1); onSeriesChanged?.(); }} />}
     </div>
-    {quote && <GenerationQuoteDialog quote={quote} label={label} close={() => setQuote(null)}
+    {quote && <GenerationQuoteDialog quote={quote} label={label} close={() => setQuote(null)} editClip={editClip}
       confirm={id => comicGenerationApi.confirm(scope, id)} submitted={result => {
         setBatch(result);
         setRefresh(value => value + 1);

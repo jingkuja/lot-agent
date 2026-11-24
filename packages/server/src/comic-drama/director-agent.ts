@@ -3,10 +3,10 @@ import { complete, LLMIncompleteError, type ChatOptions, type LLMProvider, type 
 import {
   checkComicSeriesIssues, COMIC_DIRECTOR_AGENT_ID, COMIC_DIRECTOR_TOOL_NAMES, comicDirectorBreakdownSchema,
   comicDirectorClipEnhanceModelSchema, comicDirectorDefinition, comicDirectorModelSchema, comicDirectorScriptEnhanceModelSchema,
-  comicDramaClipDraftSchema, comicDramaIdSchema, comicMaterialKind, comicVideoProfile, splitComicScriptSegments,
+  comicDramaClipDraftSchema, comicDramaIdSchema, comicGenerationModeSchema, comicMaterialKind, comicVideoProfile, splitComicScriptSegments,
   type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorEnhanceTarget, type ComicDirectorProposal,
   type ComicDirectorToolCallSummary, type ComicDramaClip, type ComicDramaClipDraft, type ComicDramaDetail,
-  type ComicDramaRepository, type ComicGenerationMode, type ComicGenerationPreviewRequest, type ComicGenerationQuote,
+  type ComicDramaRepository, type ComicGenerationPreviewRequest, type ComicGenerationQuote,
   type ComicLibraryRepository,
 } from "@lot-agent/core/comic-drama";
 import { AgentConversationError, type AgentExtension } from "../services/agent-extensions.js";
@@ -382,7 +382,7 @@ export function createComicDirectorTools(
         type: "object",
         required: ["mode"],
         properties: {
-          mode: { type: "string", enum: ["keyframe", "from_keyframe", "references"] },
+          mode: { type: "string", enum: comicGenerationModeSchema.options },
           clipIds: { type: "array", items: { type: "string" }, description: "Optional clip UUIDs (max 10); defaults to pending clips" },
           replaceAdopted: { type: "boolean" },
         },
@@ -611,7 +611,7 @@ export function createComicDirectorTools(
       }
       if (name === "request_generation" && deps.previewGeneration) {
         const detail = await ensureRevisionMatch();
-        const mode: ComicGenerationMode = args.mode === "from_keyframe" || args.mode === "references" ? args.mode : "keyframe";
+        const mode = comicGenerationModeSchema.parse(args.mode);
         const replaceAdopted = args.replaceAdopted === true;
         const requestedIds = Array.isArray(args.clipIds)
           ? [...new Set(args.clipIds.filter((item): item is string => typeof item === "string"))]

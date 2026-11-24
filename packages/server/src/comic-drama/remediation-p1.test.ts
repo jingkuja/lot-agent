@@ -9,6 +9,7 @@ import {
 import { PgComicEdits } from "./edit-repository.js";
 import { createComicEditRoutes } from "./edit-routes.js";
 import { ComicEditSpeech } from "./edit-speech.js";
+import { createComicBudgetPredictionCache, estimateComicEpisode, type EpisodeBudgetPricing } from "./episode-budget.js";
 import { PgComicGeneration, type FrozenVisualReference } from "./generation-repository.js";
 import { createComicGenerationRoutes, createComicSeriesPreviewer } from "./generation-routes.js";
 import { ComicSelectionConflictError } from "./library-db.js";
@@ -67,6 +68,7 @@ describe("P1 #1: settled vs estimated vs pending-reconcile episode costs by curr
       // 5. Unknown submission & gateway 502 failure -> pending reconcile
       { amountMicros: 1_000_000, unit: "image", durationMs: 6000, status: "unknown", currency: "CNY" },
       { amountMicros: 1_000_000, unit: "second", durationMs: 4000, status: "failed", error: "VIDEO_GATEWAY_FAILED", gatewayHttpStatus: 502, currency: "USD" },
+      { amountMicros: 200_000, unit: "second", durationMs: 4000, status: "running", currency: "CNY" },
     ];
     const clips = [makeClip(clipA, 1)];
     // Current catalog switched to USD
@@ -77,7 +79,7 @@ describe("P1 #1: settled vs estimated vs pending-reconcile episode costs by curr
     ]);
     expect(summary.costs.settledTakeCount).toBe(2);
     expect(summary.costs.quotedUnbilled).toEqual([
-      { currency: "CNY", amountMicros: 1_000_000 },
+      { currency: "CNY", amountMicros: 1_800_000 },
       { currency: "USD", amountMicros: 800_000 },
     ]);
     expect(summary.costs.unbilledReadyCount).toBe(2);
@@ -93,6 +95,49 @@ describe("P1 #1: settled vs estimated vs pending-reconcile episode costs by curr
     expect(unbilledOnly.costs.settled).toEqual([]);
     expect(unbilledOnly.spentMicros).toBe(0);
     expect(unbilledOnly.costs.quotedUnbilled).toEqual([{ currency: "CNY", amountMicros: 1_000_000 }]);
+  });
+});
+
+describe("episode budget predictions", () => {
+  it("estimates each new speech request at 100 credits without an audio gateway estimate", async () => {
+    const detail: ComicDramaDetail = { clips: [], cast: [], script: null, series: {
+      id: seriesId, parentId: null, title: "Budget", logline: "", seriesGroup: null, episodeNo: 1,
+      styleKey: "webtoon", aspectRatio: "9:16", videoModel: null, revision: 1, archivedAt: null,
+    } };
+    const predict = vi.fn().mockRejectedValue(new Error("Price unavailable"));
+    const pricing = { imageModel: "image-test", textModel: null, speechModel: null, predict };
+    const resolve = vi.fn().mockResolvedValue({ inputs: [] });
+    const signal = new AbortController().signal;
+    const estimate = (speechLines: number) => estimateComicEpisode(detail, {
+      expectedRevision: 1, speechLines, materialImages: 1,
+    }, pricing, resolve, signal);
+    const withSpeech = await estimate(3);
+    expect(withSpeech).toMatchObject({ knownPoints: 300, unverifiedCount: 1, items: [
+      { kind: "material", estimatedPoints: null }, { kind: "speech", quantity: 3, estimatedPoints: 300 },
+    ] });
+    expect(predict).toHaveBeenCalledTimes(1);
+    expect(predict).toHaveBeenCalledWith({ model: "image-test", image: { size: "1024x1024", count: 1, reference_count: 0 } },
+      expect.any(AbortSignal));
+    const withoutSpeech = await estimate(0);
+    expect(withoutSpeech.knownPoints).toBe(0);
+    expect(withoutSpeech.items).toHaveLength(1);
+  });
+
+  it("reuses only unchanged, recent usage within the same account, episode and credential", async () => {
+    const predict = vi.fn<EpisodeBudgetPricing["predict"]>().mockResolvedValue({ estimatedPoints: 200, pricingScheme: "fixture" });
+    const cached = createComicBudgetPredictionCache();
+    const pricing = { imageModel: null, textModel: null, speechModel: null, predictionScope: "credential", predict };
+    const get = (account: string, episode: string, credential: string, seconds: number) => cached(account, episode,
+      { ...pricing, predictionScope: credential }).predict({ model: "doubao-seedance-2-0", video: { resolution: "720p", seconds } },
+      new AbortController().signal);
+    await get(ownerId, seriesId, "credential", 8);
+    await get(ownerId, seriesId, "credential", 8);
+    await get(ownerId, seriesId, "credential", 10);
+    expect(predict.mock.calls.map(([usage]) => usage.video?.seconds)).toEqual([8, 10]);
+    await get(uuid(3), seriesId, "credential", 8);
+    await get(ownerId, uuid(3), "credential", 8);
+    await get(ownerId, seriesId, "new-credential", 8);
+    expect(predict).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -198,20 +243,20 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
     let capturedInputs: ComicTakeInput[] = [];
     let capturedFrozen: FrozenVisualReference[] | undefined;
     const inspectReferences = vi.fn(async () => ({
-      resolved: new Map([[visualReferenceKey({ kind: "scene", materialId: matScene, mediaId: mediaScene }), {
+      resolved: new Map([[visualReferenceKey({ kind: "scene", materialId: matScene, mediaId: mediaScene, pinned: true }), {
         kind: "scene" as const, materialId: matScene, mediaId: mediaScene, version: 3,
         mime: "image/png" as const, sizeBytes: 4096, width: 720, height: 1280, label: "雨夜街道",
       }]]),
-      invalid: new Map([[visualReferenceKey({ kind: "prop", materialId: matProp, mediaId: mediaProp }), "ARCHIVED" as const]]),
+      invalid: new Map([[visualReferenceKey({ kind: "prop", materialId: matProp, mediaId: mediaProp, pinned: true }), "ARCHIVED" as const]]),
     }));
     const previewSeries = createComicSeriesPreviewer({
       pool: {} as Pool,
       series: { get: vi.fn(async () => detail) },
-      media: { assertAvailable: () => {}, assertVideoReferenceOrigin: () => {} },
+      media: { assertAvailable: () => {}, assertVideoReferenceOrigin: () => {}, inspectVideoReference: vi.fn() },
       quotePrice: async () => ({ modelId: "gpt-image-2", amountMicros: 50_000, unit: "image", currency: "CNY" }),
       settings: { getStylePreset: async () => null },
       readStyleDictionary: async () => [],
-      video: { frames: vi.fn(), references: vi.fn(async () => []), inspectReferences },
+      video: { frames: vi.fn(), generationReferences: vi.fn(), inspectReferences },
       repo: {
         quote: vi.fn(async (
           _owner: string, _scope: unknown, _stamp: string,
@@ -256,7 +301,7 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
     expect("clipId" in capturedInputs[0] && capturedInputs[0].references[0]).toMatchObject({
       kind: "scene", mediaId: mediaScene, version: 3,
     });
-    expect(capturedFrozen).toEqual([{ materialId: matScene, mediaId: mediaScene, version: 3 }]);
+    expect(capturedFrozen).toEqual([{ materialId: matScene, mediaId: mediaScene, version: 3, pinned: true }]);
 
     // Transient DB error in inspectReferences must NOT be swallowed via .catch(() => [])
     inspectReferences.mockRejectedValueOnce(new Error("PG_CONNECTION_RESET"));
@@ -631,7 +676,12 @@ describe("P1 #5 & P1 #6: audition release, per-attempt stale callback guard, and
     });
     expect(plan.cachedCount).toBe(1);
     expect(plan.toSynthesizeCount).toBe(2);
-    expect(plan.feeStatus).toBe("unverified_gateway");
+    expect(plan.feeStatus).toBe("fixed_points");
+    expect(plan.estimatedPoints).toBe(200);
+    const withoutVoice = await speech.previewAutoDialogue(ownerId, editId, {
+      expectedRevision: 1, includeVoice: false, includeSubtitles: true,
+    });
+    expect(withoutVoice.estimatedPoints).toBe(0);
     expect(env.getSynthCount()).toBe(1);
 
     // 2. Execute batch with overflowMode="ask": line 1 persists, line 2 reports overflow (NOT truncated), line 3 reports failure

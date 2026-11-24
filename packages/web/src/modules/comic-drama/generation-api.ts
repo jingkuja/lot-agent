@@ -2,6 +2,7 @@ import type {
   ComicCharacterGenerateRequest, ComicCharacterUpload, ComicGenerationPreviewRequest, ComicGenerationQuote, ComicImageRequest, ComicImageTake,
   ComicKeyframeHistory, ComicVideoHistory, ComicVideoTake, ComicVideoReceipt, ComicFrameSaveRequest,
   ComicEpisodeBudget, ComicEpisodeBudgetInput, ComicVideoCreditPause, ComicMaterialGenerateRequest,
+  ComicMaterialImageTake, ComicNewMaterialGenerateRequest,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -24,6 +25,9 @@ export const comicGenerationApi = {
     post<ComicGenerationQuote>(`/${scope.resource}/${scope.id}/generation-preview`, input, signal),
   materialPreview: (id: string, input: ComicMaterialGenerateRequest, signal?: AbortSignal) =>
     post<ComicGenerationQuote>(`/materials/${id}/generation-preview`, input, signal),
+  newMaterialPreview: (input: ComicNewMaterialGenerateRequest, signal?: AbortSignal) =>
+    post<ComicGenerationQuote>("/materials/generation-preview", input, signal),
+  materialTakes: (signal?: AbortSignal) => request<ComicMaterialImageTake[]>(root + "/material-generations", { signal }),
   confirm: (scope: GenerationScope, confirmationId: string) =>
     post<ComicImageRequest>(`/${scope.resource}/${scope.id}/generate`, { confirmationId }),
   status: (id: string, signal?: AbortSignal) => request<ComicImageRequest>(root + `/generation-requests/${id}`, { signal }),

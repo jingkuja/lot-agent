@@ -82,6 +82,24 @@ describe("OpenaiVideoAdapter", () => {
     expect(body.metadata).toEqual({ resolution });
     expect(body.ratio).toBe("1:1");
   });
+  it("maps explicitly validated Seedance reference, edit, and extension requests", () => {
+    const reference_video = ["https://x/clip.mov"];
+    const model = "doubao-seedance-2-5";
+    const base = { prompt: "p", reference_video, durationSec: 8, ratio: "9:16", size: "720x1280" };
+    const reference = a.buildCreateBody({
+      ...base, seedanceReference: { operation: "reference", followsSource: false, explicitTaskType: true },
+    }, model);
+    expect(reference).toMatchObject({ reference_video, omni_reference_task_type: "reference", seconds: "8", ratio: "9:16" });
+    const edit = a.buildCreateBody({ ...base, seedanceReference: { operation: "edit", followsSource: true, explicitTaskType: true } }, model);
+    expect(edit).toMatchObject({ reference_video, omni_reference_task_type: "edit", duration: -1, ratio: "adaptive" });
+    expect(edit).not.toHaveProperty("seconds");
+    expect(edit).not.toHaveProperty("size");
+    const extend = a.buildCreateBody({
+      ...base, seedanceReference: { operation: "extend", followsSource: false, explicitTaskType: true },
+    }, model);
+    expect(extend).toMatchObject({ reference_video, omni_reference_task_type: "extend", seconds: "8", ratio: "adaptive" });
+  });
+
   it("seedance + reference video forces duration -1 and ratio adaptive", () => {
     const body = a.buildCreateBody(
       {

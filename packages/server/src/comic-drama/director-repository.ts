@@ -422,6 +422,7 @@ export class PgComicDirector {
         ...(orig.sceneRef !== undefined ? { sceneRef: orig.sceneRef } : {}),
         ...(orig.propRefs !== undefined ? { propRefs: orig.propRefs } : {}),
         ...(orig.sfxRefs !== undefined ? { sfxRefs: orig.sfxRefs } : {}),
+        ...(orig.videoInputs ? { videoInputs: orig.videoInputs } : {}),
       });
       return {
         index: target.index,

@@ -6,6 +6,7 @@ import {
   comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema,
   estimateComicDialogueMs, extractComicScriptExcerptSegments, layoutComicTimeline, matchComicCharacters, normalizeShotDurationShares,
   planClipSfxPlacements, rebalanceShotDurationShares, selectComicImageModel, selectComicVideoModel, splitComicScriptSegments,
+  validateComicVideoInput, type ComicGenerationTimedMedia,
   type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
@@ -60,7 +61,8 @@ describe("comic generation contracts", () => {
     expect(selectComicVideoModel(videos, "minimax-video-h3")).toBe("minimax-video-h3");
     expect(selectComicVideoModel(videos, "grok-imagine-video-1.5")).toBe("doubao-seedance-2-0-260128");
     expect(selectComicVideoModel(catalog("doubao-seedance-2-5"))).toBe("doubao-seedance-2-5");
-    expect(comicVideoProfile("MiniMax-H3")?.promptMaxChars).toBe(7000);
+    expect(comicVideoProfile("MiniMax/MiniMax-H3")?.promptMaxChars).toBe(7000);
+    expect(comicVideoProfile("MiniMax-H3")?.promptLimitUnverified).toBe(true);
     expect(comicVideoProfile("kling-video-v3-omni")).toBeUndefined();
     expect(comicUserPreferencesSchema.parse({ defaultImageModel: "gpt-image-2.5-flare", defaultTextModel: "legacy" })).toEqual({
       defaultImageModel: "gpt-image-2.5-flare",
@@ -89,6 +91,71 @@ describe("comic generation contracts", () => {
       ok: false, issues: [{ code: "PROMPT_REFERENCE_UNBOUND" }],
     });
   });
+  const audio = (n: number, durationMs = 4000): Extract<ComicGenerationTimedMedia, { kind: "audio" }> => ({
+    kind: "audio", mime: "audio/wav", mediaId: uuid(n), version: 2, label: "voice",
+    sizeBytes: 120_000, durationMs, audioCodec: "pcm_s16le", channels: 1, sampleRate: 16000,
+  });
+  const video = (n: number, durationMs = 4000): Extract<ComicGenerationTimedMedia, { kind: "video" }> => ({
+    kind: "video", mime: "video/mp4", mediaId: uuid(n), version: 1, label: "motion",
+    sizeBytes: 800_000, durationMs, width: 720, height: 1280, fps: 24, videoCodec: "h264", audioCodec: null,
+  });
+
+  it("checks the H3 shared limit and the BaiLian final prompt limit independently", () => {
+    const input = freeze(buildComicGenerationInput({
+      ...base, mode: "references", modelId: "MiniMax/MiniMax-H3",
+      visualReferences: Array.from({ length: 7 }, (_, i) =>
+        ({ ...image(20 + i), mediaId: uuid(20 + i), kind: "image", label: "setting", version: 1 })),
+      timedReferences: [audio(40), audio(41), video(42)],
+    }));
+    expect(input.references).toHaveLength(9);
+    const prompt = input.prompt + "景".repeat(7000 - [...input.prompt].length);
+    expect(validateComicVideoInput({ ...input, prompt })).toEqual([]);
+    expect(validateComicVideoInput({ ...input, prompt: prompt + "景", timedReferences: [...input.timedReferences!, audio(43)] }))
+      .toMatchObject([{ code: "REFERENCE_LIMIT", field: "files", actual: 13, max: 12 },
+        { code: "PROMPT_TOO_LONG", field: "prompt", actual: 7001, max: 7000 }]);
+    expect(validateComicVideoInput({ ...input, references: [], timedReferences: [audio(40)] }))
+      .toContainEqual({ code: "REFERENCE_MODE_CONFLICT" });
+  });
+
+  it("freezes the last frame only in strict frame mode", () => {
+    const lastFrame = { ...image(11), mediaId: uuid(11), version: 3 };
+    const strict = freeze(buildComicGenerationInput({ ...base, mode: "from_keyframe", firstFrame: keyframe, lastFrame }));
+    expect(comicFrozenGenerationSchema.parse(strict)).toMatchObject({
+      firstFrame: { mediaId: keyframe.mediaId }, lastFrame: { mediaId: uuid(11), version: 3 }, references: [],
+    });
+    expect(buildComicGenerationInput({ ...base, mode: "references", lastFrame, timedReferences: [audio(40)] })).toMatchObject({
+      ok: false, issues: expect.arrayContaining([{ code: "REFERENCE_MODE_CONFLICT" }]),
+    });
+  });
+
+  it("checks media durations separately, uses matching prompt indices, and validates the edit source", () => {
+    const input = freeze(buildComicGenerationInput({
+      ...base, mode: "references", timedReferences: [audio(40, 15_000), video(42, 15_000), audio(41, 15_000), video(43, 15_000)],
+      clip: { ...clip, draft: { ...clip.draft, durationMs: 30_000, scene: "@音频2和@Video2" } },
+    }));
+    expect(comicFrozenGenerationSchema.parse(input).timedReferences).toHaveLength(4);
+    expect(input.prompt).toContain("@Audio2 is the audio reference");
+    const exceeded = validateComicVideoInput({
+      ...input, durationMs: 31_000, timedReferences: [audio(40, 15_001), audio(41, 15_000), video(42, 15_000), video(43, 15_001)],
+      prompt: input.prompt + " @Video3 @图片0",
+    });
+    expect(exceeded).toMatchObject([
+      { field: "outputSeconds", actual: 31, min: 4, max: 30 },
+      { field: "audioSeconds", actual: 30.001, max: 30 }, { field: "videoSeconds", actual: 30.001, max: 30 },
+      { code: "PROMPT_REFERENCE_UNBOUND", actual: "@Video3" }, { code: "PROMPT_REFERENCE_UNBOUND", actual: "@图片0" },
+    ]);
+    expect(validateComicVideoInput({ ...input, modelId: "doubao-seedance-2-0", durationMs: 15_000, timedReferences: [] })
+      .some(issue => issue.code === "DURATION_UNSUPPORTED")).toBe(false);
+    expect(validateComicVideoInput({ ...input, modelId: "doubao-seedance-2-0", durationMs: 16_000 })[0])
+      .toMatchObject({ field: "outputSeconds", actual: 16, max: 15 });
+    expect(buildComicGenerationInput({ ...base, mode: "edit", timedReferences: [video(42, 3999)] })).toMatchObject({
+      ok: false, issues: [{ code: "REFERENCE_UNSUPPORTED", field: "seconds", min: 4 }],
+    });
+    expect(freeze(buildComicGenerationInput({ ...base, mode: "edit", timedReferences: [video(42, 4500)] }))).toMatchObject({
+      sourceDuration: true, durationMs: 4500,
+    });
+  });
+
   it("binds media versions from the episode snapshot in provider order, even when the library has updates", () => {
     const scene = { ...image(10), mediaId: uuid(10), version: 1, kind: "scene" as const, label: "shop interior" };
     const result = freeze(buildComicGenerationInput({ ...base, mode: "references", visualReferences: [scene] }));

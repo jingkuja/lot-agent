@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { comicMaterialKinds, type ComicGenerationQuote, type ComicMaterial, type ComicMaterialKind } from "@lot-agent/core/comic-drama";
+import { comicMaterialKinds, type ComicMaterial, type ComicMaterialImageKind, type ComicMaterialKind } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
 import { ChoiceSelect, comicListWords, LibraryDialog, libraryError, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
 import { comicGenerationApi } from "./generation-api.js";
-import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
+import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
+import { comicGenerationError } from "./GenerationQuoteDialog.js";
+import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
 
 export const comicMaterialLabels = { scene: "场景", prop: "道具", sound: "音效", music: "背景音乐", other: "其他" } as const;
 const images = "image/jpeg,image/png,image/webp";
@@ -14,10 +16,13 @@ const options = {
   prop: { accept: images, hint: "JPG、PNG 或 WebP，最多 20 MB" },
   sound: { accept: audio, hint: "MP3 或 WAV，最多 15 MB / 30 秒" },
   music: { accept: audio, hint: "MP3 或 WAV，最多 30 MB / 5 分钟" },
-  other: { accept: images + "," + audio, hint: "图片最多 20 MB，音频最多 30 MB / 5 分钟" },
+  other: {
+    accept: `${images},${audio},.mp4,.mov,video/mp4,video/quicktime`,
+    hint: "图片最多 20 MB，音频最多 30 MB / 5 分钟，MP4 或 MOV 最多 200 MB / 5 分钟",
+  },
 };
-type GeneratedMaterial = ComicMaterial & { kind: "scene" | "prop" };
-const isGeneratedMaterial = (material: ComicMaterial): material is GeneratedMaterial => material.kind === "scene" || material.kind === "prop";
+const isImageKind = (kind: ComicMaterialKind): kind is ComicMaterialImageKind => kind === "scene" || kind === "prop";
+const isImageMaterial = (material: ComicMaterial): material is ComicMaterial & { kind: ComicMaterialImageKind } => isImageKind(material.kind);
 
 export function MaterialLibrary() {
   const { locale, t } = useI18n();
@@ -30,11 +35,13 @@ export function MaterialLibrary() {
   const [uploading, setUploading] = useState<"new" | ComicMaterial | null>(null);
   const [editing, setEditing] = useState<ComicMaterial | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
-  const [generating, setGenerating] = useState<GeneratedMaterial | null>(null);
-  const [quote, setQuote] = useState<{ quote: ComicGenerationQuote; materialId: string } | null>(null);
+  const [generating, setGenerating] = useState<{ kind: ComicMaterialImageKind; material?: ComicMaterial } | null>(null);
   const [error, setError] = useState("");
   const choices = useComicChoices(kind);
   const reload = () => setRefresh(i => i + 1);
+  const generation = useGenerationHistory(comicGenerationApi.materialTakes);
+  const readyKey = generation.current?.filter(take => take.state === "ready").map(take => take.id).join(",");
+  useEffect(() => { if (readyKey) setRefresh(value => value + 1); }, [readyKey]);
   useEffect(() => {
     const controller = new AbortController();
     setList(null);
@@ -48,7 +55,10 @@ export function MaterialLibrary() {
 
   return <>
     <header className="comic-heading"><h1>{t("素材库")}</h1>
-      <button className="primary" onClick={() => setUploading("new")}>＋ {t("上传素材")}</button>
+      <div className="comic-actions">
+        {isImageKind(kind) && !archived && <button type="button" onClick={() => setGenerating({ kind })}>{t("生成素材图片")}</button>}
+        <button className="primary" onClick={() => setUploading("new")}>＋ {t("上传素材")}</button>
+      </div>
     </header>
     <nav className="comic-steps" aria-label={t("素材分类")}>
       {comicMaterialKinds.map(value => <button key={value} aria-pressed={kind === value} onClick={() => { setKind(value); setPage(1); }}>
@@ -56,6 +66,14 @@ export function MaterialLibrary() {
     </nav>
     <LibrarySearch query={query} search={value => { setQuery(value); setPage(1); }} archived={archived}
       onArchived={value => { setArchived(value); setPage(1); }} />
+    {(!!generation.current?.length || generation.failed) && <details className="comic-edit-card">
+      <summary>{t("素材图片任务")}</summary>
+      {generation.failed && <button type="button" onClick={generation.refresh}>{t("重新读取")}</button>}
+      <ul className="comic-generation-status-list">{generation.current?.map(take => <li key={take.id}>
+        <strong>{take.materialName}</strong><ComicTakeStatus take={take} />
+        <ImageTakeActions take={take} refreshed={generation.refresh} />
+      </li>)}</ul>
+    </details>}
     {error && <p className="comic-error" role="alert">{t(error)}</p>}
     {list === "error" ? <button onClick={reload}>{t("重新读取")}</button> : list ? <>
       {list.entries.length === 0 && <div className="comic-empty">{t("暂无匹配的素材")}</div>}
@@ -77,10 +95,12 @@ export function MaterialLibrary() {
             <button type="button" onClick={() => void comicLibraryApi.unarchiveMaterial(material.id)
               .then(reload).catch(reason => setError(libraryError(reason)))}>{t("取消归档")}</button>
           )}
-          {!material.archived && isGeneratedMaterial(material) && <button type="button" onClick={() => setGenerating(material)}>{t("生成图片")}</button>}
+          {!material.archived && isImageMaterial(material) && <button type="button" onClick={() => {
+            setGenerating({ kind: material.kind, material });
+          }}>{t("生成图片")}</button>}
           <button type="button" onClick={() => {
             if (window.confirm(t("彻底删除此素材？已被剪辑或画风参考使用的素材无法删除。"))) void comicLibraryApi.deleteMaterial(material.id)
-              .then(reload).catch(reason => setError(libraryError(reason)));
+              .then(reload).catch(reason => setError(comicGenerationError(reason)));
           }}>{t("删除")}</button>
         </div>
       </article>)}</div>
@@ -105,31 +125,8 @@ export function MaterialLibrary() {
         reload();
       }} />}
     {versionId && <MediaVersions list={versions} close={() => setVersionId(null)} />}
-    {generating && <MaterialGenerateDialog material={generating} close={() => setGenerating(null)}
-      quoted={next => setQuote({ quote: next, materialId: generating.id })} />}
-    {quote && <GenerationQuoteDialog quote={quote.quote} label={() => t("素材图片")} close={() => setQuote(null)}
-      confirm={confirmationId => comicGenerationApi.confirm({ resource: "materials", id: quote.materialId }, confirmationId)} submitted={() => {
-        setQuote(null);
-        reload();
-      }} />}
+    {generating && <MaterialImageGeneration {...generating} close={() => setGenerating(null)} submitted={generation.refresh} />}
   </>;
-}
-
-function MaterialGenerateDialog({ material, close, quoted }: {
-  material: ComicMaterial & { kind: "scene" | "prop" }; close: () => void; quoted: (quote: ComicGenerationQuote) => void;
-}) {
-  const { t } = useI18n();
-  return <LibraryDialog title={t("生成素材图片")} submitLabel={t("预览费用")} close={close} save={async form => {
-    const quote = await comicGenerationApi.materialPreview(material.id, {
-      materialId: material.id, kind: material.kind as "scene" | "prop",
-      prompt: String(form.get("prompt") ?? "").trim(),
-    });
-    quoted(quote);
-  }}>
-    <p className="comic-generation-note">{t("将使用设置中的默认图片档位，并把当前素材名称和描述发送给模型。")}</p>
-    <label>{t("画面描述")}<textarea name="prompt" required minLength={1} maxLength={4000} rows={6}
-      placeholder={t("描述场景、背景或道具的构图、光线和细节")} /></label>
-  </LibraryDialog>;
 }
 
 function MaterialUpload({ initialKind, material, close, done }: {

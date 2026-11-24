@@ -152,6 +152,8 @@ export type ComicAutoDialoguePlanLine = {
   suggestedSpeed?: number;
   errorCode?: string;
 };
+export const COMIC_SPEECH_ESTIMATE_POINTS = 100;
+
 export type ComicAutoDialoguePlan = {
   totalLines: number;
   alreadyPlacedCount: number;
@@ -160,7 +162,8 @@ export type ComicAutoDialoguePlan = {
   blockedCount: number;
   skippedCount: number;
   overflowCount: number;
-  feeStatus: "free_cached" | "unverified_gateway";
+  feeStatus: "free_cached" | "fixed_points";
+  estimatedPoints: number;
   lines: ComicAutoDialoguePlanLine[];
 };
 export type ComicAutoDialogueItemOutcome = {

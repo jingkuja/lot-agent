@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  COMIC_SPEECH_PRESET_CATALOG,
+  COMIC_SPEECH_ESTIMATE_POINTS, COMIC_SPEECH_PRESET_CATALOG,
   comicSpeechPresets,
   type ComicSpeechPresetMeta,
   type ComicSpeechTake,
@@ -160,6 +160,7 @@ export function ComicCharacterVoice({ id, close }: { id: string; close: () => vo
       {kind !== "none" && (
         <section className="comic-subcard comic-voice-audition">
           <strong>{t("音色试听")}</strong>
+          <small>{t("新合成约 {0} 积分/次，命中缓存为 0 积分。", [COMIC_SPEECH_ESTIMATE_POINTS])}</small>
           <label>{t("试听台词")}<input maxLength={300} value={sampleText} placeholder={defaultSample}
             onChange={event => setSampleText(event.target.value)} /></label>
           <div className="comic-fields">

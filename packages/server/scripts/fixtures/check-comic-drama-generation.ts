@@ -6,7 +6,7 @@ import type { Pool } from "pg";
 import type { ImageGenerationProvider } from "@lot-agent/core";
 import {
   COMIC_DRAMA_API_ROOT, type ComicCharacterDetail, type ComicDramaClip, type ComicDramaContent, type ComicDramaDetail,
-  type ComicGenerationQuote, type ComicImageRequest, type ComicKeyframeHistory,
+  type ComicGenerationQuote, type ComicImageRequest, type ComicKeyframeHistory, type ComicMaterialImageTake, type ComicMediaVersion,
 } from "@lot-agent/core/comic-drama";
 import { createComicGenerationRoutes } from "../../src/comic-drama/generation-routes.js";
 import { PgComicGeneration } from "../../src/comic-drama/generation-repository.js";
@@ -18,7 +18,7 @@ import { DB } from "../../src/db/database.js";
 import { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
 import { COMIC_IMAGE_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-queues.js";
 import { comicFixturePng } from "./check-comic-drama-library.js";
-import { mountComicVideoFixture, w6Grok, w6Kling } from "./check-comic-drama-video.js";
+import { mountComicVideoFixture, w6Seedance20, w6Seedance25 } from "./check-comic-drama-video.js";
 
 type FixtureApp = Hono<{ Variables: { userId: string } }>;
 
@@ -74,7 +74,7 @@ export async function mountComicGenerationFixture(deps: {
   deps.app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
     ...deps,
     quotePrice: async owner => owner === deps.owner ? { modelId: "fixture-image", amountMicros: state.price } : null,
-    quoteVideoPrice: async (owner, modelId) => owner === deps.owner && [w6Grok, w6Kling].includes(modelId) ?
+    quoteVideoPrice: async (owner, modelId) => owner === deps.owner && [w6Seedance20, w6Seedance25].includes(modelId) ?
       { modelId, amountMicros: 500_000, unit: "second" } : null,
     budgetPricing: async () => ({
       imageModel: "fixture-image", textModel: null, speechModel: null,
@@ -243,4 +243,63 @@ export async function verifyComicGeneration(app: FixtureApp, pool: Pool, fixture
   assert.ok((await json<ComicGenerationQuote>(character + "/generation-preview", "POST", { kind: "expression", key: "angry" })).confirmationId);
   assert.equal(counts.submits, 4);
   console.log("PASS W5 PG/Redis/HTTP: no submit on preview, quote CAS/expiry, one confirmation, media queue, poll/download recovery, keyframe review, character assets");
+
+  const side = await generate({ kind: "slot", key: "side", outfitId, referenceMediaIds: [slot.takes[0].mediaId] });
+  assert.ok(side.takes[0].mediaId);
+  assert.deepEqual((await json<ComicCharacterDetail>(character)).assets.filter(asset => asset.kind === "slot").map(asset => asset.key), ["front", "side"]);
+  const materialInput = { kind: "scene", name: "W5 station", prompt: "Empty station after rain", styleKey: "webtoon",
+    referenceMediaIds: [slot.takes[0].mediaId] };
+  const newMaterial = () => json<ComicGenerationQuote>("/materials/generation-preview", "POST", materialInput);
+  const beforeMaterial = counts.submits;
+  assert.equal((await request("/materials/generation-preview", "POST", materialInput, "fixture-two")).status, 400);
+  const expiredMaterial = await newMaterial();
+  await pool.query("UPDATE lot_comic_drama.cd_generation_requests SET expires_at=now()-interval '2 days' WHERE id=$1", [expiredMaterial.confirmationId]);
+  await new PgComicGeneration(pool).pruneExpiredQuotes();
+  assert.equal((await pool.query("SELECT 1 FROM lot_comic_drama.cd_materials WHERE id=$1", [expiredMaterial.items[0].clipId])).rowCount, 0);
+  const materialQuote = await newMaterial();
+  const { clipId: materialId, referenceVersions } = materialQuote.items[0];
+  assert.equal(materialQuote.totalMicros, 40_000);
+  assert.equal(materialQuote.items[0].quantity, 1);
+  assert.deepEqual(referenceVersions, [{ mediaId: slot.takes[0].mediaId, version: 1 }]);
+  assert.equal(counts.submits, beforeMaterial);
+  const material = `/materials/${materialId}`;
+  const payload = { confirmationId: materialQuote.confirmationId };
+  assert.equal((await request(material + "/generate", "POST", payload, "fixture-two")).status, 404);
+  state.next = "async";
+  state.failDownload = true;
+  const materialRun = await json<ComicImageRequest>(material + "/generate", "POST", payload, 202);
+  assert.equal((await json<ComicImageRequest>(material + "/generate", "POST", payload, 202)).taskId, materialRun.taskId);
+  assert.equal((await settled(materialRun.id)).takes[0].state, "recoverable");
+  await recover(materialRun);
+  const generated = (await settled(materialRun.id)).takes[0];
+  const oldMediaId = generated.mediaId;
+  assert.ok(oldMediaId);
+  assert.equal(counts.submits, beforeMaterial + 1);
+  const versions = () => json<ComicMediaVersion[]>(material + "/versions");
+  assert.deepEqual((await versions()).map(v => [v.version, v.media.id]), [[1, oldMediaId]]);
+  assert.equal((await json<ComicMaterialImageTake[]>("/material-generations"))[0].materialName, materialInput.name);
+  assert.deepEqual(await (await request("/material-generations", "GET", undefined, "fixture-two")).json(), []);
+
+  const bindScene = (clip: ComicDramaClip, mediaId: string) => json<{ clip: ComicDramaClip }>(`${scope}/clips/${clip.id}`, "PATCH", {
+    expectedRevision: clip.revision, draft: { ...clip.draft, shots: saved.clip.draft.shots, sceneRef: { materialId, mediaId, name: materialInput.name } },
+  });
+  const [sceneA, sceneB] = [(await bindScene(saved.clip, oldMediaId)).clip, (await bindScene(blank, oldMediaId)).clip];
+  const materialUpdate = await json<ComicGenerationQuote>(material + "/generation-preview", "POST", {
+    materialId, kind: "scene", prompt: "Same station the following morning", referenceMediaIds: [oldMediaId], styleKey: "webtoon",
+  });
+  const versionRun = await json<ComicImageRequest>(material + "/generate", "POST", { confirmationId: materialUpdate.confirmationId }, 202);
+  const newMediaId = (await settled(versionRun.id)).takes[0].mediaId;
+  assert.ok(newMediaId);
+  assert.deepEqual((await versions()).map(v => [v.version, v.media.id]), [[2, newMediaId], [1, oldMediaId]]);
+  await bindScene(sceneA, newMediaId);
+  const pinned = await json<ComicDramaDetail>(scope);
+  assert.deepEqual(pinned.clips.map(clip => clip.draft.sceneRef?.mediaId), [newMediaId, oldMediaId]);
+  assert.equal(pinned.clips[1].revision, sceneB.revision);
+  const pinnedQuote = await json<ComicGenerationQuote>(scope + "/generation-preview", "POST", { mode: "keyframe",
+    expectedSeriesRevision: pinned.series.revision, targets: pinned.clips.map(clip => ({ clipId: clip.id, expectedRevision: clip.revision })),
+  });
+  assert.deepEqual(pinnedQuote.items.map(item => item.referenceVersions), [[{ mediaId: newMediaId, version: 2 }], [{ mediaId: oldMediaId, version: 1 }]]);
+  assert.equal((await settled((await confirm(pinnedQuote)).id)).takes.filter(take => take.state === "ready").length, 2);
+  assert.equal(counts.submits, beforeMaterial + 4);
+  console.log("PASS image assets: front and side, private scene, quote replay, receipt recovery, and both pinned versions reusable");
 }

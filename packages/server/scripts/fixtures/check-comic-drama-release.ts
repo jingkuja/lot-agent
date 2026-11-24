@@ -10,7 +10,7 @@ import {
   type ComicSpeechLines, type ComicSpeechTake,
 } from "@lot-agent/core/comic-drama";
 import type { mountComicGenerationFixture } from "./check-comic-drama-generation.js";
-import { w6Grok } from "./check-comic-drama-video.js";
+import { w6Seedance20 } from "./check-comic-drama-video.js";
 
 export async function verifyComicRelease(app: Hono<{ Variables: { userId: string } }>, pool: Pool, seriesId: string,
   generation: Awaited<ReturnType<typeof mountComicGenerationFixture>> | undefined, config: NodeJS.ProcessEnv, owner: string,
@@ -134,7 +134,7 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   const frame = (await settled(queued.id)).takes[0];
   assert.equal(frame.state, "ready");
   const { id: _id, parentId: _parent, archivedAt: _archive, revision, ...fields } = (await current()).series;
-  await request(series, "PATCH", { ...fields, expectedRevision: revision, videoModel: w6Grok });
+  await request(series, "PATCH", { ...fields, expectedRevision: revision, videoModel: w6Seedance20 });
   const clip = live.clips[0], clipPath = series + "/clips/" + clip.id;
   const approved = await request<{ ok: true; selectionRevision: number }>(clipPath + "/keyframe/confirm", "POST", {
     expectedClipRevision: clip.revision, expectedSelectionRevision: clip.selectionRevision ?? 1, keyframeTakeId: frame.id,
