@@ -4860,6 +4860,18 @@ export const messages: Record<string, { en: string; id: string }> = {
   "视频创作模式": {"en": "Video creation mode", "id": "Mode pembuatan video"},
   "快速生成": {"en": "Quick generate", "id": "Buat cepat"},
   "视频换脸": {"en": "Video face swap", "id": "Tukar wajah video"},
+  "建议上传{0}的人物照片，尽量完整展示身体，避免遮挡或裁切。": {
+    "en": "Upload {0}. Show as much of the body as possible without obstructions or cropping.",
+    "id": "Unggah {0}. Tampilkan tubuh selengkap mungkin, tanpa bagian yang tertutup atau terpotong.",
+  },
+  "单人、清晰、光线均匀": {
+    "en": "a clear, evenly lit photo of one person",
+    "id": "foto satu orang yang jelas dengan pencahayaan merata",
+  },
+  "人物姿态、拍摄角度和身材比例越接近原视频，生成效果通常越好。": {
+    "en": "Results are usually better when the pose, camera angle, and body proportions closely match the original video.",
+    "id": "Hasil biasanya lebih baik jika pose, sudut pengambilan gambar, dan proporsi tubuh mirip dengan video asli.",
+  },
   "人物图片": {"en": "Character image", "id": "Gambar karakter"},
   "原始视频": {"en": "Original video", "id": "Video asli"},
   "必传": {"en": "Required", "id": "Wajib"},

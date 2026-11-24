@@ -240,6 +240,7 @@ export function ChatPanel({
       : mode === "video"
         ? modelCatalog?.video
         : modelCatalog?.llm;
+  const [photoHintStart, photoHintEnd] = t("建议上传{0}的人物照片，尽量完整展示身体，避免遮挡或裁切。").split("{0}");
 
   const inputEl = readOnly ? <p className="feishu-transcript-hint">{t("飞书任务与结果会自动同步到此处。请在飞书私聊机器人发送任务，输入 /cancel 可取消任务。")}</p> : (
     <>
@@ -272,15 +273,21 @@ export function ChatPanel({
         </div>
       )}
       {mode === "video" && videoTab === "face_swap" ? (
-        <VideoFaceSwapComposer
-          key={imageDraftRevision}
-          disabled={isStreaming}
-          attachment={attachment}
-          onAttachmentConsumed={onAttachmentConsumed}
-          onDraftChange={onDraftChange}
-          onSend={onSend}
-          onStop={onStop}
-        />
+        <>
+          <div className="face-swap-photo-hint" role="note">
+            <p>{photoHintStart}<strong>{t("单人、清晰、光线均匀")}</strong>{photoHintEnd}</p>
+            <p><strong>{t("人物姿态、拍摄角度和身材比例越接近原视频，生成效果通常越好。")}</strong></p>
+          </div>
+          <VideoFaceSwapComposer
+            key={imageDraftRevision}
+            disabled={isStreaming}
+            attachment={attachment}
+            onAttachmentConsumed={onAttachmentConsumed}
+            onDraftChange={onDraftChange}
+            onSend={onSend}
+            onStop={onStop}
+          />
+        </>
       ) : (
         <InputBox
           key={mode === "image" || mode === "video" ? imageDraftRevision : undefined}

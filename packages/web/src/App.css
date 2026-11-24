@@ -1807,6 +1807,20 @@ html:not([lang="zh-CN"]) .input-area:not(.input-area--centered) .scene-dock-tab 
   cursor: default;
 }
 
+.face-swap-photo-hint {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 46%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--bg-tool);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.face-swap-photo-hint p { margin: 0; }
+.face-swap-photo-hint p + p { margin-top: 2px; }
+.face-swap-photo-hint strong { color: var(--text); font-weight: 600; }
+
 .input-box--face-swap {
   padding: 14px 16px 12px;
   gap: 12px;

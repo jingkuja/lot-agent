@@ -61,6 +61,7 @@ describe("video mode tabs and face-swap composer", () => {
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
     expect(tabs[1].getAttribute("aria-selected")).toBe("false");
     expect(document.querySelector("textarea")).not.toBeNull();
+    expect(document.querySelector(".face-swap-photo-hint")).toBeNull();
   });
 
   it("switches to 视频换脸 with two required inputs and 默认(720p) / 质量(1080p) setting", async () => {
@@ -74,6 +75,10 @@ describe("video mode tabs and face-swap composer", () => {
     act(() => faceSwapTab.click());
 
     expect(document.querySelector("textarea")).toBeNull();
+    const photoHint = document.querySelector(".face-swap-photo-hint");
+    expect(photoHint?.nextElementSibling?.classList.contains("input-box--face-swap")).toBe(true);
+    expect(photoHint?.textContent).toContain("建议上传单人、清晰、光线均匀的人物照片，尽量完整展示身体，避免遮挡或裁切。");
+    expect(photoHint?.textContent).toContain("人物姿态、拍摄角度和身材比例越接近原视频，生成效果通常越好。");
     const imageInput = document.querySelector<HTMLInputElement>('input[aria-label="人物图片"]')!;
     const videoInput = document.querySelector<HTMLInputElement>('input[aria-label="原始视频"]')!;
     expect(imageInput).not.toBeNull();
