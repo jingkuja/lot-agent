@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { mkdtemp, writeFile, rm, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,10 @@ import {
   listFilesTool,
   executeCommandTool,
   searchFilesTool,
+  registerBuiltinTools,
 } from "./builtins.js";
+import * as netFetch from "./net-fetch.js";
+import { ToolRegistry } from "./registry.js";
 import type { ToolContext } from "../types/index.js";
 
 const ctx: ToolContext = { workingDirectory: process.cwd() };
@@ -32,6 +35,43 @@ describe("web_fetch SSRF guard", () => {
   it("rejects a non-http(s) URL before attempting any resolution", async () => {
     const result = await webFetchTool.execute({ url: "file:///etc/passwd" }, ctx);
     expect(result.isError).toBe(true);
+  });
+});
+
+describe("web_fetch response text", () => {
+  const url = "https://example.com/announcement";
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["Application/PDF; charset=binary", "application/octet-stream"])("extracts a PDF served as %s", async (mime) => {
+    const body = Buffer.from("%PDF-1.7\n\0binary");
+    vi.spyOn(netFetch, "fetchPublicBinary").mockResolvedValue({ body, mime });
+    const extractPdfText = vi.fn().mockResolvedValue("公告正文");
+    const registry = new ToolRegistry();
+    registerBuiltinTools(registry, { includeHostTools: false, extractPdfText });
+
+    await expect(registry.execute("web_fetch", { url }, ctx)).resolves.toEqual({ content: "公告正文" });
+    expect(extractPdfText).toHaveBeenCalledWith(body, expect.any(AbortSignal));
+  });
+
+  it("returns a tool error when a PDF cannot be parsed", async () => {
+    vi.spyOn(netFetch, "fetchPublicBinary").mockResolvedValue({ body: Buffer.from("broken\0"), mime: "application/pdf" });
+    const registry = new ToolRegistry();
+    const extractPdfText = vi.fn().mockRejectedValue(new Error("PARSER_FAILED"));
+    registerBuiltinTools(registry, { includeHostTools: false, extractPdfText });
+
+    await expect(registry.execute("web_fetch", { url }, ctx)).resolves.toEqual({
+      content: "Could not extract readable PDF text; try another source", isError: true, errorKind: "validation",
+    });
+    expect(extractPdfText).toHaveBeenCalledTimes(1);
+    await expect(webFetchTool.execute({ url }, ctx)).resolves.toMatchObject({ isError: true, errorKind: "validation" });
+  });
+
+  it("strips NUL and does not split a Unicode character when truncating", async () => {
+    vi.spyOn(netFetch, "fetchPublicBinary").mockResolvedValue({ body: Buffer.from("字\0😀尾"), mime: "text/plain" });
+
+    await expect(webFetchTool.execute({ url }, ctx)).resolves.toEqual({ content: "字😀尾" });
+    await expect(webFetchTool.execute({ url, maxChars: 2 }, ctx)).resolves.toEqual({ content: "字\n\n... (truncated, 4 chars total)" });
   });
 });
 

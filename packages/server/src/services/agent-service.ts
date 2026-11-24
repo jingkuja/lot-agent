@@ -18,6 +18,7 @@ import { createLocalKnowledgeService } from "../knowledge/local-service.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
 import { createKnowledgeModule, type KnowledgeConfig, type KnowledgeModule } from "../knowledge/module.js";
+import { extractWebPdfText } from "../knowledge/ingestion/parser-process.js";
 import { KnowledgeError } from "../knowledge/errors.js";
 import type { KnowledgeService } from "@lot-agent/core";
 import {
@@ -360,7 +361,7 @@ export class AgentService {
     // Initialize session store
     this.sessions = new SessionStore(this.db);
 
-    registerBuiltinTools(this.toolRegistry, { includeHostTools: false });
+    registerBuiltinTools(this.toolRegistry, { includeHostTools: false, extractPdfText: extractWebPdfText });
 
     // Register the document-generation tool. It generates documents in-process
     // (no Python runtime) and persists output to its own storage

@@ -1,8 +1,16 @@
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type { RecognizeImage } from "./ocr.js";
 import type { ParseInput, ParsedArtifact } from "./parsers.js";
+
+export async function extractWebPdfText(bytes: Uint8Array, signal?: AbortSignal): Promise<string> {
+  // tsup puts the shared parser code at the dist root and preserves the worker entry path.
+  const workerEntry = import.meta.url.endsWith(".ts") ? "../../workers/knowledge-parser.ts" : "./workers/knowledge-parser.js";
+  const workerPath = fileURLToPath(new URL(workerEntry, import.meta.url));
+  const parsed = await parseIsolated(workerPath, { mime: "application/pdf", bytes: new Uint8Array(bytes) }, signal, 12_000);
+  return parsed.blocks.map((block) => block.text).join("\n\n");
+}
 
 export function parseIsolated(workerPath: string, input: ParseInput & { path?: string }, signal?: AbortSignal, timeoutMs = 30000, ocr?: RecognizeImage): Promise<ParsedArtifact> {
   return new Promise((resolve, reject) => {

@@ -376,12 +376,60 @@ function networkFailure(error: unknown, prefix: string, signal?: AbortSignal): T
     ...(retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}) };
 }
 
+type ExtractPdfText = (bytes: Uint8Array, signal?: AbortSignal) => Promise<string>;
+
+async function fetchWebText(input: unknown, context: ToolContext, extractPdfText?: ExtractPdfText): Promise<ToolResult> {
+  const { url, maxChars = 20000 } = input as { url: string; maxChars?: number };
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return { content: "URL must start with http:// or https://", isError: true };
+  }
+
+  const signal = context?.signal;
+  if (signal?.aborted) return { content: "Fetch aborted", isError: true, errorKind: "cancelled" };
+
+  try {
+    const { body, mime } = await fetchPublicBinary(url, {
+      maxBytes: 2 * 1024 * 1024, timeoutMs: 15_000, signal, allowHosts: webFetchAllowHosts(),
+    });
+    const contentType = mime.split(";", 1)[0].trim().toLowerCase();
+    const isPdf = contentType === "application/pdf" || body.subarray(0, 5).toString("latin1") === "%PDF-";
+    let text: string;
+    if (isPdf) {
+      if (!extractPdfText) return { content: "PDF text extraction is unavailable", isError: true, errorKind: "validation" };
+      try {
+        text = await extractPdfText(body, signal);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        return { content: "Could not extract readable PDF text; try another source", isError: true, errorKind: "validation" };
+      }
+      signal?.throwIfAborted();
+    } else {
+      text = body.toString("utf8");
+      if (contentType.includes("json")) {
+        try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Keep the original response. */ }
+      } else if (contentType.includes("html")) {
+        text = htmlToText(text);
+      }
+    }
+
+    // PostgreSQL text and JSONB reject NUL, and JSONB also rejects unpaired surrogates.
+    text = text.replace(/\0/g, "").replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
+    if (text.length > maxChars) {
+      const prefix = text.slice(0, maxChars).replace(/[\uD800-\uDBFF]$/u, "");
+      text = `${prefix}\n\n... (truncated, ${text.length} chars total)`;
+    }
+    return { content: text || "(empty response)" };
+  } catch (error) {
+    return networkFailure(error, "Failed to fetch URL", signal);
+  }
+}
+
 export const webFetchTool: Tool = {
   name: "web_fetch",
   effect: "read",
   parallelSafe: true,
   description:
-    "Fetch a URL and return its text content. Useful for reading web pages, APIs, or documents.",
+    "Fetch a URL and return its text content. Useful for reading web pages, APIs, and PDFs with selectable text.",
   // Pure external read — the same URL within a run yields the same content, so
   // an identical repeat call is reused instead of re-fetched.
   cacheable: true,
@@ -404,53 +452,7 @@ export const webFetchTool: Tool = {
     },
     required: ["url"],
   },
-  async execute(input, context): Promise<ToolResult> {
-    const { url, maxChars = 20000 } = input as {
-      url: string;
-      maxChars?: number;
-    };
-
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      return { content: "URL must start with http:// or https://", isError: true };
-    }
-
-    // Consistent with execute_command/web_search: a run that's already
-    // cancelled by the time this tool starts must not fire any request at all.
-    if (context?.signal?.aborted) {
-      return { content: "Fetch aborted", isError: true };
-    }
-
-    try {
-      const downloaded = await fetchPublicBinary(url, {
-        maxBytes: 2 * 1024 * 1024, timeoutMs: 15_000, signal: context?.signal,
-        allowHosts: webFetchAllowHosts(),
-      });
-      const contentType = downloaded.mime;
-      const body = downloaded.body.toString("utf8");
-
-      let text: string;
-      if (contentType.includes("json")) {
-        try {
-          const parsed = JSON.parse(body);
-          text = JSON.stringify(parsed, null, 2);
-        } catch {
-          text = body;
-        }
-      } else if (contentType.includes("html")) {
-        text = htmlToText(body);
-      } else {
-        text = body;
-      }
-
-      if (text.length > maxChars) {
-        text = text.slice(0, maxChars) + `\n\n... (truncated, ${text.length} chars total)`;
-      }
-
-      return { content: text || "(empty response)" };
-    } catch (error) {
-      return networkFailure(error, "Failed to fetch URL", context.signal);
-    }
-  },
+  execute: fetchWebText,
 };
 
 export const webSearchTool: Tool = {
@@ -560,7 +562,7 @@ export const webSearchTool: Tool = {
 
 export function registerBuiltinTools(registry: {
   register(tool: Tool): void;
-}, options: { includeHostTools?: boolean } = {}): void {
+}, options: { includeHostTools?: boolean; extractPdfText?: ExtractPdfText } = {}): void {
   if (options.includeHostTools !== false) {
   registry.register(readFileTool);
   registry.register(writeFileTool);
@@ -568,7 +570,11 @@ export function registerBuiltinTools(registry: {
   registry.register(executeCommandTool);
   registry.register(searchFilesTool);
   }
-  registry.register(webFetchTool);
+  const { extractPdfText } = options;
+  registry.register(extractPdfText ? {
+    ...webFetchTool,
+    execute: (input, context) => fetchWebText(input, context, extractPdfText),
+  } : webFetchTool);
   registry.register(webSearchTool);
   registry.register(askUserTool);
 }

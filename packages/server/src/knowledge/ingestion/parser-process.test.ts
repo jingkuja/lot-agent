@@ -3,12 +3,35 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseIsolated } from "./parser-process.js";
+import PDFDocument from "pdfkit";
+import { extractWebPdfText, parseIsolated } from "./parser-process.js";
 it("runs the real parser in isolation with a source locator", async () => {
   const path = fileURLToPath(new URL("../../workers/knowledge-parser.ts", import.meta.url));
   const result = await parseIsolated(path, { mime: "text/plain", content: "正文\n最后一行" });
   expect(result.blocks.at(-1)?.citation).toEqual({ kind: "text", startLine: 2, endLine: 2 });
 });
+
+it("extracts searchable PDF text in the isolated worker and rejects a text-free PDF", async () => {
+  async function pdf(text?: string): Promise<Buffer> {
+    const document = new PDFDocument({ compress: false });
+    const chunks: Buffer[] = [];
+    document.on("data", (chunk: Buffer) => chunks.push(chunk));
+    const bytes = new Promise<Buffer>((resolve, reject) => {
+      document.once("end", () => resolve(Buffer.concat(chunks)));
+      document.once("error", reject);
+    });
+    if (text) document.text(text);
+    document.ref({}).end(Buffer.from([0]));
+    document.end();
+    return bytes;
+  }
+
+  const searchable = await pdf("Quarterly announcement");
+  expect(searchable.includes(0)).toBe(true);
+  await expect(extractWebPdfText(searchable)).resolves.toBe("Quarterly announcement");
+  await expect(extractWebPdfText(await pdf())).rejects.toThrow("OCR_REQUIRED");
+});
+
 it("terminates a stuck parser on timeout and cancellation", async () => {
   const dir = await mkdtemp(join(tmpdir(), "rag-parser-test-"));
   try {
