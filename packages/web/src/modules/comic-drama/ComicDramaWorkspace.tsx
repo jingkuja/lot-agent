@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkComicClipIssues, COMIC_DRAMA_ROOT,
-  type ComicCurrencyAmount, type ComicDirectorDecision, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDramaContent,
-  type ComicDramaDetail, type ComicDramaEpisodeSummary, type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicGenerationMode,
+  type ComicCurrencyAmount, type ComicDirectorApplyInput, type ComicDirectorDecision, type ComicDirectorProposal,
+  type ComicDirectorRoleOutcome, type ComicDramaContent, type ComicDramaDetail, type ComicDramaEpisodeSummary,
+  type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicGenerationMode,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, type User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
@@ -23,6 +24,7 @@ import { ComicEditorSource } from "./ComicEditorSource.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
 import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
 import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
+import type { DirectorEnhanceIntent } from "./ComicEnhanceProposal.js";
 import type { DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
 import { ComicStudioLanding } from "./ComicStudioLanding.js";
@@ -108,6 +110,9 @@ export function ComicDramaWorkspace({
   const [latest, setLatest] = useState<ComicDramaDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [drawerTab, setDrawerTab] = useState<"detail" | "director">("director");
+  const [enhanceIntent, setEnhanceIntent] = useState<DirectorEnhanceIntent | null>(null);
+  const [scriptSelection, setScriptSelection] = useState<{ start: number; end: number } | null>(null);
+  const clearEnhanceIntent = useCallback(() => setEnhanceIntent(null), []);
   const [pendingAutoDialogueEditId, setPendingAutoDialogueEditId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -153,6 +158,10 @@ export function ComicDramaWorkspace({
   }, [detail?.series.archivedAt, detail?.summary]);
 
   useEffect(() => {
+    setScriptSelection(null);
+  }, [series?.id]);
+
+  useEffect(() => {
     if (!active) return;
     let live = true;
     const controller = new AbortController();
@@ -194,6 +203,7 @@ export function ComicDramaWorkspace({
   };
   const handleError = (error: unknown) => {
     if (error instanceof ApiClientError && error.code === "MODEL_UNAVAILABLE") return t("视频模型不可用，请重新选择");
+    if (error instanceof ApiClientError && error.code === "DIRECTOR_PROPOSAL_STALE") return t("剧集已更新，请基于最新修订生成提案");
     if (error instanceof ApiClientError && error.status === 409) return t("剧集已更新，请读取最新版本");
     return t("操作失败，请重试");
   };
@@ -276,15 +286,29 @@ export function ComicDramaWorkspace({
   });
   const choose = (id: string) => void leave(() => navigate(editorSourcePrefix + id));
   const openEdit = (id: string) => navigate(editorPath + "/" + id);
-  const applyProposal = async (proposal: ComicDirectorProposal, decision?: ComicDirectorDecision) => {
+  const applyProposal = async (
+    proposal: ComicDirectorProposal,
+    decision?: ComicDirectorDecision | Omit<ComicDirectorApplyInput, "expectedRevision">,
+  ) => {
     let result: ComicDirectorProposal | undefined;
     await run(async () => {
       const current = getDetail();
-      if (!current || current.series.revision !== proposal.baseRevision) {
+      const expectedRevision = proposal.input.action === "enhance"
+        ? (proposal.appliedRevision ?? proposal.baseRevision)
+        : proposal.baseRevision;
+      if (!current || current.series.revision !== expectedRevision) {
         setNotice(t("剧集已更新，请基于最新修订生成提案"));
+        if (current) load(await comicDramaApi.get(current.series.id));
         return;
       }
-      result = await comicDirectorApi.apply(current.series.id, proposal.id, proposal.baseRevision, decision);
+      try {
+        result = await comicDirectorApi.apply(current.series.id, proposal.id, expectedRevision, decision);
+      } catch (error) {
+        if (error instanceof ApiClientError && (error.code === "DIRECTOR_PROPOSAL_STALE" || error.code === "REVISION_CONFLICT")) {
+          load(await comicDramaApi.get(current.series.id));
+        }
+        throw error;
+      }
       if (result.sequelId) saved(await comicDramaApi.get(result.sequelId));
       else load(await comicDramaApi.get(current.series.id));
     });
@@ -625,16 +649,53 @@ export function ComicDramaWorkspace({
 
           <div className={`comic-workbench-body${drawerOpen ? "" : " drawer-collapsed"}`}>
             <div className="comic-workbench-main">
-              {stage === "剧本" ? (
-                <section className="comic-edit-card comic-script">
-                  <label>{t("剧本正文")}<textarea aria-label={t("剧本正文")} rows={16} maxLength={20000} disabled={locked}
-                    value={editor.script?.content ?? detail.script?.content ?? ""} onChange={event => editScript(event.target.value)} /></label>
-                  <div className="comic-actions">
-                    {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
-                  </div>
-                  <ScriptVersionViewer seriesId={series.id} currentVersion={detail.script?.version ?? 0} />
-                </section>
-              ) : stage === "选角" ? (
+              {stage === "剧本" ? (() => {
+                const scriptText = editor.script?.content ?? detail.script?.content ?? "";
+                const hasSelection = !!scriptSelection
+                  && scriptSelection.end > scriptSelection.start
+                  && scriptSelection.end <= scriptText.length
+                  && scriptText.slice(scriptSelection.start, scriptSelection.end).trim().length > 0;
+                return (
+                  <section className="comic-edit-card comic-script">
+                    <label>{t("剧本正文")}<textarea aria-label={t("剧本正文")} rows={16} maxLength={20000} disabled={locked}
+                      value={scriptText}
+                      onChange={event => { setScriptSelection(null); editScript(event.target.value); }}
+                      onSelect={event => {
+                        const { selectionStart, selectionEnd } = event.currentTarget;
+                        setScriptSelection(selectionEnd > selectionStart ? { start: selectionStart, end: selectionEnd } : null);
+                      }} /></label>
+                    <div className="comic-actions">
+                      {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
+                      <button
+                        type="button"
+                        disabled={locked || !scriptText.trim()}
+                        onClick={() => void leave(() => {
+                          setDrawerOpen(true);
+                          setDrawerTab("director");
+                          setEnhanceIntent({ token: Date.now(), target: { scope: "script_full" } });
+                        })}
+                      >
+                        {t("AI 增强整篇剧本")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={locked || !scriptText.trim()}
+                        onClick={() => void leave(() => {
+                          setDrawerOpen(true);
+                          setDrawerTab("director");
+                          setEnhanceIntent({
+                            token: Date.now(),
+                            target: { scope: "script_excerpt", ...(hasSelection ? { ranges: [scriptSelection!] } : {}) },
+                          });
+                        })}
+                      >
+                        {t(hasSelection ? "AI 增强选中原文" : "AI 增强段落")}
+                      </button>
+                    </div>
+                    <ScriptVersionViewer seriesId={series.id} currentVersion={detail.script?.version ?? 0} />
+                  </section>
+                );
+              })() : stage === "选角" ? (
                 <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
                   disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
               ) : stage === "生成" ? (
@@ -655,7 +716,13 @@ export function ComicDramaWorkspace({
                   remove={id => {
                     if (window.confirm(t("删除此分镜？"))) changeContent((sid, revision) => comicDramaApi.removeClip(sid, id, revision));
                   }}
-                  reorder={ids => changeContent((id, revision) => comicDramaApi.reorder(id, ids, revision))} />
+                  reorder={ids => changeContent((id, revision) => comicDramaApi.reorder(id, ids, revision))}
+                  onEnhanceClip={clipId => void leave(() => {
+                    setSelected(clipId);
+                    setDrawerOpen(true);
+                    setDrawerTab("director");
+                    setEnhanceIntent({ token: Date.now(), target: { scope: "clips", clipIds: [clipId] } });
+                  })} />
               )}
             </div>
 
@@ -679,7 +746,9 @@ export function ComicDramaWorkspace({
                 ) : (
                   <ComicDirectorPanel key={series.id} detail={detail} locked={locked || !!editor.issue}
                     getSaved={async () => await flush() ? getDetail() : null} apply={applyProposal} applyRole={applyDirectorRole}
-                    openClip={id => openVideo(series.id, id)} onSeriesChanged={() => void reloadCurrent()} />
+                    openClip={id => openVideo(series.id, id)} onSeriesChanged={() => void reloadCurrent()}
+                    selectedClipId={activeClip?.id ?? null} enhanceIntent={enhanceIntent}
+                    onEnhanceIntentHandled={clearEnhanceIntent} />
                 )}
               </aside>
             )}

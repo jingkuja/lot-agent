@@ -24,6 +24,8 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       .toBe("所选场景、道具或音效素材不可用，请重新选择");
     expect(comicDirectorError(new ApiClientError("rev", 409, "REVISION_CONFLICT")))
       .toBe("剧集已被其他窗口更新，请刷新后重试");
+    expect(comicDirectorError(new ApiClientError("empty", 400, "DIRECTOR_EMPTY_SCRIPT")))
+      .toBe("当前剧集暂无剧本内容，请先编写或生成剧本");
     expect(comicRenderError("RENDER_LIMIT")).toBe("导出最多支持 5 分钟、60 段视频及 240 条音频");
 
     const requiredKeys = [
@@ -79,6 +81,26 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       "重新检查积分",
       "继续生成",
       "视频默认模型用于新建剧集，图片档位用于角色造型、分镜首帧和图片素材。导演文字模型由系统自动选择。",
+      "AI 增强",
+      "AI 增强整篇剧本",
+      "AI 增强选中原文",
+      "AI 增强段落",
+      "增强范围",
+      "整篇剧本",
+      "一段原文",
+      "分镜卡",
+      "当前剧集暂无剧本内容，请先编写或生成剧本",
+      "分镜增强建议",
+      "剧本增强建议",
+      "原稿已更新，请重新核对",
+      "基于最新草稿重新生成",
+      "采用本段",
+      "舍弃本段",
+      "恢复建议",
+      "全部采用",
+      "部分已采用",
+      "原稿",
+      "建议",
     ];
     for (const key of requiredKeys) {
       expect(messages[key]?.en).toBeTruthy();

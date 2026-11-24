@@ -1,6 +1,7 @@
 import {
-  COMIC_SCRIPT_DOCX, type ComicClipCheckIssue, type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorDecision,
-  type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleDecision, type ComicDirectorRoleOutcome, type ComicDirectorState,
+  COMIC_SCRIPT_DOCX, type ComicClipCheckIssue, type ComicDirectorApplyInput, type ComicDirectorChatInput,
+  type ComicDirectorChatResponse, type ComicDirectorDecision, type ComicDirectorInput, type ComicDirectorProposal,
+  type ComicDirectorRoleDecision, type ComicDirectorRoleOutcome, type ComicDirectorState,
   type ComicGenerationPreviewRequest, type ComicGenerationQuote, type ComicScriptImport,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
@@ -20,8 +21,16 @@ export const comicDirectorApi = {
   }),
   propose: (series: string, input: ComicDirectorInput, signal?: AbortSignal) => request<ComicDirectorProposal>(root(series) + "/proposals",
     { method: "POST", body: JSON.stringify(input), signal }),
-  apply: (series: string, id: string, expectedRevision: number, decision?: ComicDirectorDecision) => action(series, id, "apply", { expectedRevision, decision }),
-  dismiss: (series: string, id: string) => action(series, id, "dismiss", {}),
+  apply: (
+    series: string,
+    id: string,
+    expectedRevision: number,
+    decisionOrInput?: ComicDirectorDecision | Omit<ComicDirectorApplyInput, "expectedRevision">,
+  ) => action(series, id, "apply", typeof decisionOrInput === "string"
+    ? { expectedRevision, decision: decisionOrInput }
+    : { expectedRevision, ...decisionOrInput }),
+  dismiss: (series: string, id: string, itemIndex?: number) =>
+    action(series, id, "dismiss", itemIndex !== undefined ? { itemIndex } : {}),
   role: (series: string, id: string, index: number, input: ComicDirectorRoleDecision) => request<ComicDirectorRoleOutcome>(
     root(series) + "/proposals/" + encodeURIComponent(id) + "/roles/" + index, { method: "POST", body: JSON.stringify(input) }),
   quote: (series: string, input: ComicGenerationPreviewRequest, signal: AbortSignal) => request<ComicGenerationQuote>(
@@ -35,6 +44,7 @@ const errors: Record<string, string> = {
   DIRECTOR_FILE_TOO_LARGE: "剧本文件最大为 2 MB",
   DIRECTOR_FILE_TYPE: "请选择 TXT 或 DOCX 剧本文件",
   DIRECTOR_FILE_INVALID: "无法读取剧本，请检查文件格式和正文",
+  DIRECTOR_EMPTY_SCRIPT: "当前剧集暂无剧本内容，请先编写或生成剧本",
   DIRECTOR_BUSY: "本集已有剧本提案正在生成",
   DIRECTOR_ARCHIVED: "归档剧集仅可查看提案",
   DIRECTOR_PROPOSAL_STALE: "剧集已更新，请基于最新修订生成提案",

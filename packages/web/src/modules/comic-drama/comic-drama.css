@@ -2759,3 +2759,73 @@
   display: grid;
   gap: 8px;
 }
+
+.comic-director-task-select {
+  margin-bottom: 12px;
+}
+
+.comic-enhance-selection {
+  display: grid;
+  gap: 8px;
+}
+
+.comic-enhance-excerpt-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--overlay-sink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.comic-enhance-segment {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+.comic-enhance-segment[data-status="dismissed"] {
+  opacity: 0.72;
+}
+
+.comic-enhance-segment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comic-enhance-note {
+  display: block;
+  color: var(--text-secondary);
+}
+
+.comic-enhance-clip-editor {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.comic-enhance-subrow {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 86%, var(--bg));
+}
+
+.comic-enhance-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}

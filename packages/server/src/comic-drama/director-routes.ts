@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   checkComicSeriesIssues, COMIC_SCRIPT_DOCX, COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, comicDirectorApplySchema,
-  comicDirectorChatInputSchema, comicDirectorInputSchema, comicDirectorRoleDecisionSchema, comicDramaIdSchema,
+  comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema, comicDirectorRoleDecisionSchema, comicDramaIdSchema,
 } from "@lot-agent/core/comic-drama";
 import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
 import type { ComicDirector, ComicDirectorToolsDeps } from "./director-agent.js";
@@ -67,7 +67,7 @@ export function createComicDirectorRoutes(
   app.post("/series/:id/director/proposals/:proposalId/apply", limit, async c => {
     const fields = comicDirectorApplySchema.safeParse(await c.req.json().catch(() => null));
     if (!fields.success) throw new ComicLibraryError("INVALID_INPUT", 400);
-    return c.json(await repo.decide(c.get("userId"), id(c.req.param("id")), id(c.req.param("proposalId")), fields.data.expectedRevision, fields.data.decision));
+    return c.json(await repo.decide(c.get("userId"), id(c.req.param("id")), id(c.req.param("proposalId")), fields.data));
   });
   app.post("/series/:id/director/proposals/:proposalId/roles/:index", limit, async c => {
     const raw = c.req.param("index");
@@ -75,7 +75,16 @@ export function createComicDirectorRoutes(
     if (!fields.success || !/^(?:[0-9]|1[0-9]|2[0-3])$/.test(raw)) throw new ComicLibraryError("INVALID_INPUT", 400);
     return c.json(await repo.role(c.get("userId"), id(c.req.param("id")), id(c.req.param("proposalId")), Number(raw), fields.data));
   });
-  app.post("/series/:id/director/proposals/:proposalId/dismiss", async c =>
-    c.json(await repo.decide(c.get("userId"), id(c.req.param("id")), id(c.req.param("proposalId")))));
+  app.post("/series/:id/director/proposals/:proposalId/dismiss", limit, async c => {
+    const raw = await c.req.text();
+    let body: unknown = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); }
+      catch { throw new ComicLibraryError("INVALID_INPUT", 400); }
+    }
+    const fields = comicDirectorDismissSchema.safeParse(body);
+    if (!fields.success) throw new ComicLibraryError("INVALID_INPUT", 400);
+    return c.json(await repo.decide(c.get("userId"), id(c.req.param("id")), id(c.req.param("proposalId")), undefined, fields.data.itemIndex));
+  });
   return app;
 }

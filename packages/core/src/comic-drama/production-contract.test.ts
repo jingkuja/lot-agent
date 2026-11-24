@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG, comicDirectorChatInputSchema,
-  comicDramaClipDraftSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions, comicRenderIssue, comicSpeechReleaseSchema,
-  comicTimelineSchema, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, estimateComicDialogueMs, layoutComicTimeline,
-  comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, matchComicCharacters, planClipSfxPlacements, selectComicImageModel,
-  selectComicVideoModel,
+  applyComicScriptEnhancements, buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG,
+  comicDirectorApplySchema, comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema, comicDramaClipDraftSchema,
+  comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions, comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema,
+  comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema,
+  estimateComicDialogueMs, extractComicScriptExcerptSegments, layoutComicTimeline, matchComicCharacters, normalizeShotDurationShares,
+  planClipSfxPlacements, rebalanceShotDurationShares, selectComicImageModel, selectComicVideoModel, splitComicScriptSegments,
   type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
@@ -323,5 +324,80 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
     });
     const layout = layoutComicTimeline(reordered);
     expect(layout.sfx.map(item => item.startMs)).toEqual([4000, 10800, 4000]);
+  });
+
+  it("splits scripts, extracts excerpts, applies partial script enhancements without offset drift, and normalizes shot shares", () => {
+    const script = "第一段：雨夜推门。\n\n第二段：柜台交锋。\n\n第三段：留下纸条。";
+    const segments = splitComicScriptSegments(script);
+    expect(segments).toHaveLength(3);
+    expect(segments.map(s => script.slice(s.start, s.end))).toEqual([
+      "第一段：雨夜推门。",
+      "第二段：柜台交锋。",
+      "第三段：留下纸条。",
+    ]);
+
+    const mergedCap = splitComicScriptSegments("甲\n\n乙\n\n丙\n\n丁", 2);
+    expect(mergedCap).toHaveLength(2);
+
+    const excerpt = extractComicScriptExcerptSegments(script, [
+      { start: 0, end: 11 },
+      { start: 21, end: 31 },
+    ]);
+    expect(excerpt?.map(s => s.original)).toEqual(["第一段：雨夜推门。", "第三段：留下纸条。"]);
+    expect(extractComicScriptExcerptSegments(script, [
+      { start: 0, end: 15 },
+      { start: 10, end: 25 },
+    ])).toBeNull();
+
+    // Adopt only segment 2 (index 1); segment 1 & 3 retain original verbatim
+    const twoSegs = splitComicScriptSegments("第一段原稿\n\n第二段原稿");
+    const afterSeg2 = applyComicScriptEnhancements("第一段原稿\n\n第二段原稿", [
+      { ...twoSegs[0]!, suggested: "第一段增强", status: "pending" },
+      { ...twoSegs[1]!, suggested: "第二段增强", status: "applied", appliedText: "第二段精修" },
+    ]);
+    expect(afterSeg2).toBe("第一段原稿\n\n第二段精修");
+
+    // Subsequent adoption of segment 1 still uses original offsets without drift
+    const afterBoth = applyComicScriptEnhancements("第一段原稿\n\n第二段原稿", [
+      { ...twoSegs[0]!, suggested: "第一段增强", status: "applied" },
+      { ...twoSegs[1]!, suggested: "第二段增强", status: "applied", appliedText: "第二段精修" },
+    ]);
+    expect(afterBoth).toBe("第一段增强\n\n第二段精修");
+
+    // Shot durationShare normalization & rebalancing always yield positive integers summing to 100
+    for (const input of [[50, 50], [33, 33, 33], [1, 1, 98], [0, 0, 0], [80]]) {
+      const normalized = normalizeShotDurationShares(input);
+      expect(normalized.every(v => Number.isInteger(v) && v >= 1)).toBe(true);
+      expect(normalized.reduce((a, b) => a + b, 0)).toBe(100);
+    }
+    const shots = [
+      { id: uuid(1), framingKey: "wide", movementKey: "fixed", description: "A", durationShare: 34 },
+      { id: uuid(2), framingKey: "medium", movementKey: "push", description: "B", durationShare: 33 },
+      { id: uuid(3), framingKey: "close_up", movementKey: "fixed", description: "C", durationShare: 33 },
+    ];
+    const rebalanced = rebalanceShotDurationShares(shots, 1, 60);
+    expect(rebalanced[1]?.durationShare).toBe(60);
+    expect(rebalanced.every(s => Number.isInteger(s.durationShare) && s.durationShare >= 1)).toBe(true);
+    expect(rebalanced.reduce((sum, s) => sum + s.durationShare, 0)).toBe(100);
+
+    // Director enhance input/apply/dismiss schemas
+    expect(comicDirectorInputSchema.safeParse({
+      requestId: uuid(10), expectedRevision: 1, language: "zh", action: "enhance", enhance: { scope: "script_full" },
+    }).success).toBe(true);
+    expect(comicDirectorInputSchema.safeParse({
+      requestId: uuid(11), expectedRevision: 1, language: "zh", action: "enhance",
+      enhance: { scope: "clips", clipIds: [uuid(20), uuid(21)] },
+    }).success).toBe(true);
+    expect(comicDirectorInputSchema.safeParse({
+      requestId: uuid(12), expectedRevision: 1, language: "zh", action: "enhance",
+    }).success).toBe(false);
+    expect(comicDirectorInputSchema.safeParse({
+      requestId: uuid(13), expectedRevision: 1, language: "zh", action: "script", text: "",
+    }).success).toBe(false);
+    expect(comicDirectorApplySchema.safeParse({
+      expectedRevision: 2, decision: "enhance", scriptItems: [{ index: 1, text: "已修改段" }],
+    }).success).toBe(true);
+    expect(comicDirectorDismissSchema.safeParse({ itemIndex: 0 }).success).toBe(true);
+    expect(comicDirectorDismissSchema.safeParse({}).success).toBe(true);
   });
 });

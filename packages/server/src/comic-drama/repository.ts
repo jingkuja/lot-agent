@@ -762,35 +762,62 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return comicDramaClipSchema.parse(rows[0]);
   }
 
+  private async updateClipOn(
+    client: PoolClient,
+    owner: string,
+    id: string,
+    clipId: string,
+    expectedRevision: number,
+    draft: ComicDramaClipDraft,
+  ): Promise<ComicDramaClip> {
+    const existing = await this.clip(client, id, clipId);
+    requireRevision(existing.revision, expectedRevision);
+    const existingFramings = new Set(existing.draft.shots.map(shot => shot.framingKey));
+    const existingMovements = new Set(existing.draft.shots.map(shot => shot.movementKey));
+    const existingEmotions = new Set(existing.draft.lines.map(line => line.emotionKey).filter((key): key is string => Boolean(key)));
+    for (const key of new Set(draft.shots.map(shot => shot.framingKey))) {
+      if (!existingFramings.has(key)) await requireComicChoice(client, owner, "framing", key);
+    }
+    for (const key of new Set(draft.shots.map(shot => shot.movementKey))) {
+      if (!existingMovements.has(key)) await requireComicChoice(client, owner, "movement", key);
+    }
+    for (const key of new Set(draft.lines.map(line => line.emotionKey).filter((value): value is string => Boolean(value)))) {
+      if (!existingEmotions.has(key)) await requireComicChoice(client, owner, "emotion", key);
+    }
+    await requireClipCast(client, id, draft.cast);
+    const existingMatKeys = new Set(collectDraftMaterialRefs(existing.draft).map(materialRefKey));
+    const addedMats = collectDraftMaterialRefs(draft).filter(entry => !existingMatKeys.has(materialRefKey(entry)));
+    if (addedMats.length) {
+      const invalidMats = await inspectMaterialRefs(client, owner, addedMats);
+      if (invalidMats.size > 0) throw new ComicDramaError("INVALID_MATERIAL_REFERENCE");
+    }
+    const { rows } = await client.query(`UPDATE lot_comic_drama.cd_clips SET draft=$2,revision=revision+1,updated_at=clock_timestamp()
+      WHERE id=$1 RETURNING ${clipFields}`, [clipId, draft]);
+    return comicDramaClipSchema.parse(rows[0]);
+  }
+
   saveClip(owner: string, id: string, clipId: string, { expectedRevision, expectedSeriesRevision, draft }: ComicDramaClipUpdate) {
     return this.transaction(async client => {
       const series = await this.series(client, owner, id, true);
       if (expectedSeriesRevision !== undefined) requireRevision(series.revision, expectedSeriesRevision);
-      const existing = await this.clip(client, id, clipId);
-      requireRevision(existing.revision, expectedRevision);
-      const existingFramings = new Set(existing.draft.shots.map(shot => shot.framingKey));
-      const existingMovements = new Set(existing.draft.shots.map(shot => shot.movementKey));
-      const existingEmotions = new Set(existing.draft.lines.map(line => line.emotionKey).filter((key): key is string => Boolean(key)));
-      for (const key of new Set(draft.shots.map(shot => shot.framingKey))) {
-        if (!existingFramings.has(key)) await requireComicChoice(client, owner, "framing", key);
-      }
-      for (const key of new Set(draft.shots.map(shot => shot.movementKey))) {
-        if (!existingMovements.has(key)) await requireComicChoice(client, owner, "movement", key);
-      }
-      for (const key of new Set(draft.lines.map(line => line.emotionKey).filter((value): value is string => Boolean(value)))) {
-        if (!existingEmotions.has(key)) await requireComicChoice(client, owner, "emotion", key);
-      }
-      await requireClipCast(client, id, draft.cast);
-      const existingMatKeys = new Set(collectDraftMaterialRefs(existing.draft).map(materialRefKey));
-      const addedMats = collectDraftMaterialRefs(draft).filter(entry => !existingMatKeys.has(materialRefKey(entry)));
-      if (addedMats.length) {
-        const invalidMats = await inspectMaterialRefs(client, owner, addedMats);
-        if (invalidMats.size > 0) throw new ComicDramaError("INVALID_MATERIAL_REFERENCE");
-      }
-      const { rows } = await client.query(`UPDATE lot_comic_drama.cd_clips SET draft=$2,revision=revision+1,updated_at=clock_timestamp()
-        WHERE id=$1 RETURNING ${clipFields}`, [clipId, draft]);
-      return { clip: comicDramaClipSchema.parse(rows[0]), seriesRevision: await this.bump(client, id) };
+      const clip = await this.updateClipOn(client, owner, id, clipId, expectedRevision, draft);
+      return { clip, seriesRevision: await this.bump(client, id) };
     });
+  }
+
+  async writeEnhancedClips(
+    client: PoolClient,
+    owner: string,
+    id: string,
+    expected: number,
+    updates: ReadonlyArray<{ clipId: string; expectedClipRevision: number; draft: ComicDramaClipDraft }>,
+  ): Promise<number> {
+    const series = await this.series(client, owner, id, true);
+    requireRevision(series.revision, expected);
+    for (const update of updates) {
+      await this.updateClipOn(client, owner, id, update.clipId, update.expectedClipRevision, update.draft);
+    }
+    return this.bump(client, id);
   }
 
   copyClip(owner: string, id: string, clipId: string, expected: number) {

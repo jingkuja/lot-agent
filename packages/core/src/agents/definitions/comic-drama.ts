@@ -7,6 +7,7 @@ export const COMIC_DIRECTOR_TOOL_NAMES = [
   "write_script",
   "breakdown_script",
   "continue_series",
+  "propose_enhancement",
   "update_clip",
   "reorder_clips",
   "search_characters",

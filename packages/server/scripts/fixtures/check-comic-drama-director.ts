@@ -62,6 +62,29 @@ export function mountComicDirector(app: App, pool: Pool, owner: string, acceptin
   const llm: LLMProvider = {
     async *chat(messages, tools) {
       const input = JSON.parse(String(messages.at(-1)!.content));
+      if (tools?.[0]?.name === "enhance_script") {
+        const segs = (input.segments as Array<{ index: number; original: string }>).map(seg => ({
+          index: seg.index,
+          suggested: `${seg.original}（AI增强）`,
+        }));
+        yield* openAiToolStream("fixture-enhance-script", "enhance_script", { segments: segs });
+        return;
+      }
+      if (tools?.[0]?.name === "enhance_clips") {
+        const clips = (input.targets as Array<{ index: number; clipId: string; current: { scene: string; durationMs: number } }>).map(t => ({
+          index: t.index,
+          clipId: t.clipId,
+          scene: `${t.current.scene}（增强）`,
+          durationMs: t.current.durationMs,
+          shots: [
+            { framingKey: "wide", movementKey: "push", description: "推进镜头", durationShare: 40 },
+            { framingKey: "close_up", movementKey: "fixed", description: "特写镜头", durationShare: 60 },
+          ],
+          lines: [{ speaker: null, text: "增强旁白", emotionKey: "calm", speed: 1 }],
+        }));
+        yield* openAiToolStream("fixture-enhance-clips", "enhance_clips", { clips });
+        return;
+      }
       calls.push(input.source);
       if (input.source === "fixture disconnect") throw new Error("fixture disconnected");
       const characters = [
@@ -203,6 +226,32 @@ export async function verifyComicDirector(app: App, pool: Pool, episodes: PgComi
   const state = await json<ComicDirectorState>(route);
   assert.equal(state.conversationId, proposal.conversationId);
   assert.equal(state.proposals.length, 5);
+
+  // Verify AI enhancement (adjacent clips partial adoption + stale conflict) on an isolated episode
+  const enhSeries = await episodes.create(owner, { title: "W10 AI 增强", styleKey: "webtoon", aspectRatio: "9:16", videoModel: null });
+  const c1 = await episodes.addClip(owner, enhSeries.series.id, enhSeries.series.revision);
+  const c2 = await episodes.addClip(owner, enhSeries.series.id, c1.seriesRevision);
+  const clipIds = c2.clips.map(c => c.id);
+  const enhProp = await json<ComicDirectorProposal>(`/series/${enhSeries.series.id}/director/proposals`, "POST", {
+    requestId: randomUUID(), expectedRevision: c2.seriesRevision, language: "zh", action: "enhance",
+    enhance: { scope: "clips", clipIds },
+  });
+  assert.equal(enhProp.status, "ready");
+  assert.equal(enhProp.proposal?.clipEnhancements?.length, 2);
+  const partialApplied = await json<ComicDirectorProposal>(
+    `/series/${enhSeries.series.id}/director/proposals/${enhProp.id}/apply`,
+    "POST",
+    { expectedRevision: c2.seriesRevision, decision: "enhance", clipItems: [{ index: 1 }] },
+  );
+  assert.equal(partialApplied.status, "ready");
+  const afterPartial = await episodes.get(owner, enhSeries.series.id);
+  assert.equal(afterPartial.clips[0]!.draft.scene, "");
+  assert.equal(afterPartial.clips[1]!.draft.shots.reduce((s, x) => s + x.durationShare, 0), 100);
+  await episodes.saveScript(owner, enhSeries.series.id, afterPartial.series.revision, "并发改稿");
+  await json(`/series/${enhSeries.series.id}/director/proposals/${enhProp.id}/apply`, "POST", {
+    expectedRevision: partialApplied.appliedRevision!, decision: "enhance", clipItems: [{ index: 0 }],
+  }, 409);
+
   console.log("PASS W10 director PG/HTTP: real TXT/DOCX extraction, owner and session isolation, replay, role ambiguity, revision CAS and persisted decisions");
   return series.id;
 }

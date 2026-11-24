@@ -1,22 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, type ComicClipCheckIssue, type ComicDirectorChatMessage, type ComicDirectorDecision,
-  type ComicDirectorInput, type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicDramaDetail,
+  COMIC_SCRIPT_FILE_BYTES, COMIC_SCRIPT_MAX_CHARS, type ComicClipCheckIssue, type ComicDirectorApplyInput,
+  type ComicDirectorChatMessage, type ComicDirectorDecision, type ComicDirectorEnhanceTarget, type ComicDirectorInput,
+  type ComicDirectorProposal, type ComicDirectorRoleOutcome, type ComicDirectorState, type ComicDramaDetail,
   type ComicGenerationQuote,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
+import { ComicEnhanceForm, EnhanceProposalCard, type DirectorEnhanceIntent } from "./ComicEnhanceProposal.js";
 import { comicDirectorApi, comicDirectorError } from "./director-api.js";
 import { DirectorGeneration, DirectorRoleChoice, type DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 
-export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole, openClip, onSeriesChanged }: {
+export function ComicDirectorPanel({
+  detail, locked, getSaved, apply, applyRole, openClip, onSeriesChanged, selectedClipId, enhanceIntent, onEnhanceIntentHandled,
+}: {
   detail: ComicDramaDetail; locked: boolean; getSaved: () => Promise<ComicDramaDetail | null>;
-  apply: (proposal: ComicDirectorProposal, decision?: ComicDirectorDecision) => Promise<ComicDirectorProposal | undefined>;
+  apply: (
+    proposal: ComicDirectorProposal,
+    decision?: ComicDirectorDecision | Omit<ComicDirectorApplyInput, "expectedRevision">,
+  ) => Promise<ComicDirectorProposal | undefined>;
   applyRole: (proposal: ComicDirectorProposal, index: number, input: DirectorRoleChoiceInput) => Promise<ComicDirectorRoleOutcome | undefined>;
   openClip: (id: string) => void;
   onSeriesChanged?: () => void;
+  selectedClipId?: string | null;
+  enhanceIntent?: DirectorEnhanceIntent | null;
+  onEnhanceIntentHandled?: () => void;
 }) {
   const { t, locale } = useI18n();
   const [panelTab, setPanelTab] = useState<"chat" | "proposals">("chat");
@@ -39,6 +49,11 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
   const pending = useRef<AbortController>(null);
   const reload = () => setRefresh(value => value + 1);
   useEffect(() => () => pending.current?.abort(), []);
+  useEffect(() => {
+    if (!enhanceIntent) return;
+    setOperation("enhance");
+    setPanelTab("proposals");
+  }, [enhanceIntent]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -100,6 +115,37 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
       throw error;
     }
   });
+  const enhance = (target: ComicDirectorEnhanceTarget, instruction: string) => void action("write", async signal => {
+    const savedDetail = await getSaved();
+    if (!savedDetail || signal.aborted) return;
+    const expectedRevision = savedDetail.series.revision;
+    const language = locale === "en" || locale === "id" ? locale : "zh";
+    const same = attempt.current;
+    const replay = same && same.action === "enhance" && same.expectedRevision === expectedRevision
+      && same.language === language && same.text === instruction
+      && JSON.stringify(same.enhance) === JSON.stringify(target);
+    const fields: ComicDirectorInput = replay ? same : {
+      requestId: crypto.randomUUID(),
+      expectedRevision,
+      mode: "paste",
+      language,
+      text: instruction,
+      action: "enhance",
+      enhance: target,
+    };
+    attempt.current = fields;
+    try {
+      const result = await comicDirectorApi.propose(seriesId, fields, signal);
+      if (signal.aborted) return;
+      attempt.current = null;
+      record(result);
+      onSeriesChanged?.();
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status < 500) attempt.current = null;
+      reload();
+      throw error;
+    }
+  });
   const sendChat = (overrideMessage?: string) => void action("chat", async signal => {
     const msg = (overrideMessage ?? chatInput).trim();
     if (!msg) return;
@@ -150,6 +196,15 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
     const applied = await apply(proposal, decision === "apply" ? undefined : decision);
     if (applied) record(applied);
   });
+  const applyEnhance = (proposal: ComicDirectorProposal, input: Omit<ComicDirectorApplyInput, "expectedRevision">) =>
+    void action("decision", async () => {
+      const applied = await apply(proposal, input);
+      if (applied) record(applied);
+    });
+  const dismissEnhance = (proposal: ComicDirectorProposal, itemIndex?: number) =>
+    void action("decision", async () => {
+      record(await comicDirectorApi.dismiss(seriesId, proposal.id, itemIndex));
+    });
   const proposals = state?.proposals ?? [];
   const messages = state?.messages ?? [];
   const shown = proposals.find(item => item.id === selected) ?? proposals[0];
@@ -208,6 +263,9 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
           <button type="button" disabled={busy || locked} onClick={() => { setOperation("sequel"); setPanelTab("proposals"); }}>
             {t("续写下一集")}
           </button>
+          <button type="button" disabled={busy || locked} onClick={() => { setOperation("enhance"); setPanelTab("proposals"); }}>
+            {t("AI 增强")}
+          </button>
         </div>
         <div className="comic-chat-log" aria-live="polite">
           {messages.length === 0 && <p className="comic-generation-note">
@@ -227,13 +285,23 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
                 </ul>
               )}
               {linkedProposal && (
-                <ProposalCard key={linkedProposal.id} proposal={linkedProposal} busy={busy || locked}
-                  stale={linkedProposal.baseRevision !== revision}
-                  decide={decision => decide(linkedProposal, decision)}
-                  role={(index, input) => void action("decision", async () => {
-                    const outcome = await applyRole(linkedProposal, index, input);
-                    if (outcome) record({ ...linkedProposal, roleDecisions: { ...linkedProposal.roleDecisions, [index]: outcome } });
-                  })} />
+                linkedProposal.input.action === "enhance" ? (
+                  <EnhanceProposalCard key={linkedProposal.id} proposal={linkedProposal} detail={detail}
+                    currentRevision={revision} busy={busy} locked={locked}
+                    onApply={input => applyEnhance(linkedProposal, input)}
+                    onDismiss={itemIndex => dismissEnhance(linkedProposal, itemIndex)}
+                    onRegenerate={linkedProposal.input.enhance
+                      ? () => enhance(linkedProposal.input.enhance!, linkedProposal.input.text)
+                      : undefined} />
+                ) : (
+                  <ProposalCard key={linkedProposal.id} proposal={linkedProposal} busy={busy || locked}
+                    stale={linkedProposal.baseRevision !== revision}
+                    decide={decision => decide(linkedProposal, decision)}
+                    role={(index, input) => void action("decision", async () => {
+                      const outcome = await applyRole(linkedProposal, index, input);
+                      if (outcome) record({ ...linkedProposal, roleDecisions: { ...linkedProposal.roleDecisions, [index]: outcome } });
+                    })} />
+                )
               )}
               {linkedQuote && (
                 <div className="comic-director-proposal">
@@ -283,40 +351,59 @@ export function ComicDirectorPanel({ detail, locked, getSaved, apply, applyRole,
         <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked} changed={reload} openClip={openClip} />
       </div>
     ) : <>
-      <form onSubmit={event => { event.preventDefault(); write(); }}>
-        <fieldset disabled={busy || locked || writing}>
-          <label>{t("导演任务")}<select aria-label={t("导演任务")} value={operation} onChange={event => {
-            const next = event.target.value as typeof operation;
-            setOperation(next);
-            if (!text.trim() && next !== "script" && detail.script?.content) { setText(detail.script.content); setMode("paste"); }
-          }}>
-            <option value="script">{t("写剧本")}</option><option value="breakdown">{t("拆分镜")}</option><option value="sequel">{t("续写下一集")}</option>
-          </select></label>
-          <label>{t("剧本输入方式")}<select value={mode} aria-label={t("剧本输入方式")} onChange={event => {
-            setMode(event.target.value as typeof mode); setFileNote("");
-          }}>
-            <option value="outline">{t("故事梗概")}</option><option value="paste">{t("粘贴原稿")}</option><option value="file">{t("导入 TXT 或 DOCX")}</option>
-          </select></label>
-          {mode === "file" && <label>{t("上传剧本文件")}<input type="file" accept=".txt,.docx,text/plain"
-            onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) importFile(file); }} /></label>}
-          {fileNote && <small role="status">{t(fileNote)}</small>}
-          <label>{t("导演输入")}<textarea rows={6} value={text} onChange={event => setText(event.target.value)} maxLength={COMIC_SCRIPT_MAX_CHARS}
-            required placeholder={t(mode === "outline" ? "写下人物、场景和冲突" : "输入或检查剧本原文")} /></label>
-          <div className="comic-actions"><button type="submit" className="primary" disabled={!text.trim()}>
-            {t(writing || working === "write" ? "正在生成提案…" : operation === "breakdown" ? "生成拆分镜提案" :
-              operation === "sequel" ? "生成续集提案" : "生成剧本提案")}
-          </button></div>
-        </fieldset>
-      </form>
+      <label className="comic-director-task-select">{t("导演任务")}<select aria-label={t("导演任务")} value={operation}
+        disabled={busy || locked || writing}
+        onChange={event => {
+          const next = event.target.value as typeof operation;
+          setOperation(next);
+          if (!text.trim() && next !== "script" && next !== "enhance" && detail.script?.content) {
+            setText(detail.script.content); setMode("paste");
+          }
+        }}>
+        <option value="script">{t("写剧本")}</option><option value="breakdown">{t("拆分镜")}</option>
+        <option value="sequel">{t("续写下一集")}</option><option value="enhance">{t("AI 增强")}</option>
+      </select></label>
+      {operation === "enhance" ? (
+        <ComicEnhanceForm detail={detail} selectedClipId={selectedClipId} intent={enhanceIntent}
+          onIntentConsumed={onEnhanceIntentHandled} busy={busy} locked={locked} writing={writing} onSubmit={enhance} />
+      ) : (
+        <form onSubmit={event => { event.preventDefault(); write(); }}>
+          <fieldset disabled={busy || locked || writing}>
+            <label>{t("剧本输入方式")}<select value={mode} aria-label={t("剧本输入方式")} onChange={event => {
+              setMode(event.target.value as typeof mode); setFileNote("");
+            }}>
+              <option value="outline">{t("故事梗概")}</option><option value="paste">{t("粘贴原稿")}</option><option value="file">{t("导入 TXT 或 DOCX")}</option>
+            </select></label>
+            {mode === "file" && <label>{t("上传剧本文件")}<input type="file" accept=".txt,.docx,text/plain"
+              onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) importFile(file); }} /></label>}
+            {fileNote && <small role="status">{t(fileNote)}</small>}
+            <label>{t("导演输入")}<textarea rows={6} value={text} onChange={event => setText(event.target.value)} maxLength={COMIC_SCRIPT_MAX_CHARS}
+              required placeholder={t(mode === "outline" ? "写下人物、场景和冲突" : "输入或检查剧本原文")} /></label>
+            <div className="comic-actions"><button type="submit" className="primary" disabled={!text.trim()}>
+              {t(writing || working === "write" ? "正在生成提案…" : operation === "breakdown" ? "生成拆分镜提案" :
+                operation === "sequel" ? "生成续集提案" : "生成剧本提案")}
+            </button></div>
+          </fieldset>
+        </form>
+      )}
       {proposals.length > 1 && <label>{t("剧本提案记录")}<select value={shown?.id} aria-label={t("剧本提案记录")} onChange={event => setSelected(event.target.value)}>
         {proposals.map(item => <option value={item.id} key={item.id}>{new Date(item.createdAt).toLocaleString(locale)} · {t("基于修订 {0}", [item.baseRevision])}
         </option>)}
       </select></label>}
-      {shown && <ProposalCard key={shown.id} proposal={shown} busy={busy || locked} stale={shown.baseRevision !== revision}
-        decide={decision => decide(shown, decision)} role={(index, input) => void action("decision", async () => {
-          const outcome = await applyRole(shown, index, input);
-          if (outcome) record({ ...shown, roleDecisions: { ...shown.roleDecisions, [index]: outcome } });
-        })} />}
+      {shown && (
+        shown.input.action === "enhance" ? (
+          <EnhanceProposalCard key={shown.id} proposal={shown} detail={detail} currentRevision={revision} busy={busy} locked={locked}
+            onApply={input => applyEnhance(shown, input)}
+            onDismiss={itemIndex => dismissEnhance(shown, itemIndex)}
+            onRegenerate={shown.input.enhance ? () => enhance(shown.input.enhance!, shown.input.text) : undefined} />
+        ) : (
+          <ProposalCard key={shown.id} proposal={shown} busy={busy || locked} stale={shown.baseRevision !== revision}
+            decide={decision => decide(shown, decision)} role={(index, input) => void action("decision", async () => {
+              const outcome = await applyRole(shown, index, input);
+              if (outcome) record({ ...shown, roleDecisions: { ...shown.roleDecisions, [index]: outcome } });
+            })} />
+        )
+      )}
       <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked} changed={reload} openClip={openClip} />
     </>}
   </section>;

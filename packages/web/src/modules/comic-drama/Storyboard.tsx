@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  checkComicClipIssues, type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip, type ComicDramaClipDraft,
-  type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialKind, type ComicMaterialRef,
-  type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
+  checkComicClipIssues, rebalanceShotDurationShares, type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip,
+  type ComicDramaClipDraft, type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialKind,
+  type ComicMaterialRef, type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -22,6 +22,7 @@ type Props = {
   copy: (id: string) => void;
   remove: (id: string) => void;
   reorder: (ids: string[]) => void;
+  onEnhanceClip?: (id: string) => void;
 };
 
 function clipProgressLabel(clip: ComicDramaClip): { stage: string; tone: string } {
@@ -40,7 +41,9 @@ function clipProgressLabel(clip: ComicDramaClip): { stage: string; tone: string 
   return { stage: "草稿", tone: "idle" };
 }
 
-export function Storyboard({ series, clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder }: Props) {
+export function Storyboard({
+  series, clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder, onEnhanceClip,
+}: Props) {
   const { t } = useI18n();
   const dragging = useRef<string | null>(null);
   const clip = clips.find(entry => entry.id === selected) ?? clips[0];
@@ -100,6 +103,7 @@ export function Storyboard({ series, clips, cast, drafts, disabled, locked, sele
           </div>
         </div>
         <div className="comic-actions">
+          {onEnhanceClip && <button type="button" disabled={disabled} onClick={() => onEnhanceClip(clip.id)}>{t("AI 增强")}</button>}
           <button type="button" disabled={disabled || clip.ordinal === 1} onClick={() => move(clip.id, clip.ordinal - 2)}>{t("上移")}</button>
           <button type="button" disabled={disabled || clip.ordinal === clips.length} onClick={() => move(clip.id, clip.ordinal)}>{t("下移")}</button>
           <button type="button" disabled={disabled} onClick={() => add(clip.id)}>{t("在后面插入")}</button>
@@ -156,25 +160,6 @@ function ClipIssueBanner({ issues, cast, disabled, addCast }: {
       </li>
     ))}</ul>
   </div>;
-}
-
-function rebalanceShares(shots: ComicDramaClipDraft["shots"], changedIndex: number, nextShare: number): ComicDramaClipDraft["shots"] {
-  if (shots.length <= 1) return shots.map(shot => ({ ...shot, durationShare: 100 }));
-  const maxAllowed = 100 - (shots.length - 1);
-  const clamped = Math.min(maxAllowed, Math.max(1, Math.round(nextShare)));
-  const remaining = 100 - clamped;
-  const others = shots.filter((_, idx) => idx !== changedIndex);
-  const otherTotal = others.reduce((sum, s) => sum + s.durationShare, 0) || others.length;
-  let assigned = 0;
-  let seen = 0;
-  return shots.map((shot, idx) => {
-    if (idx === changedIndex) return { ...shot, durationShare: clamped };
-    seen += 1;
-    if (seen === others.length) return { ...shot, durationShare: Math.max(1, remaining - assigned) };
-    const share = Math.max(1, Math.min(remaining - (others.length - seen) - assigned, Math.round((shot.durationShare / otherTotal) * remaining)));
-    assigned += share;
-    return { ...shot, durationShare: share };
-  });
 }
 
 function ClipFields({ draft, disabled, cast, change }: {
@@ -281,7 +266,7 @@ function ClipFields({ draft, disabled, cast, change }: {
           <input type="number" min={1} max={100} value={shot.durationShare} disabled={draft.shots.length <= 1}
             onChange={event => {
               const value = event.currentTarget.valueAsNumber;
-              if (Number.isFinite(value)) update({ shots: rebalanceShares(draft.shots, index, value) });
+              if (Number.isFinite(value)) update({ shots: rebalanceShotDurationShares(draft.shots, index, value) });
             }} />
         </label>
         <button type="button" disabled={(shot.sfxRefs?.length ?? 0) >= 5} onClick={() => setPicker({ kind: "sound", shotIndex: index })}>

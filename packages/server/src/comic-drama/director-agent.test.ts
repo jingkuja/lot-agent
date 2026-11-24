@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
+import type { Pool, PoolClient } from "pg";
 import {
   LLMIncompleteError, mapAnthropicStream, mapOpenAIStream, mapResponsesStream, type LLMProvider,
 } from "@lot-agent/core";
-import type { ComicDramaDetail } from "@lot-agent/core/comic-drama";
-import { ComicDirector, collectProposal, createComicDirectorTools, proposalTool } from "./director-agent.js";
+import type { ComicDirectorProposal, ComicDramaDetail } from "@lot-agent/core/comic-drama";
+import { ComicDirector, collectProposal, createComicDirectorTools, enhanceProposalTool, proposalTool } from "./director-agent.js";
 import { createComicDirectorLlmResolver } from "./director-model.js";
-import type { PgComicDirector } from "./director-repository.js";
-import { ComicDramaError } from "./repository.js";
+import { PgComicDirector } from "./director-repository.js";
+import { createComicDirectorRoutes } from "./director-routes.js";
+import { ComicDramaError, PgComicDramaRepository } from "./repository.js";
 
 async function* streamOf<T>(items: T[]): AsyncIterable<T> {
   for (const item of items) yield item;
@@ -478,5 +481,487 @@ describe("comic director §8.5 tools and default text model resolver", () => {
     expect(previewGeneration).toHaveBeenCalledTimes(1);
     expect(r2.quote?.confirmationId).toBe("11111111-1111-4111-8111-111111111111");
     expect(recordedCards[1]).toEqual({ proposalId: undefined, confirmationId: "11111111-1111-4111-8111-111111111111" });
+  });
+});
+
+describe("comic director AI enhancement (script & storyboard clips)", () => {
+  const ownerId = "11111111-1111-4111-8111-111111111111";
+  const seriesId = "22222222-2222-4222-8222-222222222222";
+  const clipA = "33333333-3333-4333-8333-333333333333";
+  const clipB = "44444444-4444-4444-8444-444444444444";
+  const shot1 = "55555555-5555-4555-8555-555555555551";
+  const shot2 = "55555555-5555-4555-8555-555555555552";
+  const charA = "66666666-6666-4666-8666-666666666666";
+  const outfitA = "77777777-7777-4777-8777-777777777777";
+  const mediaA = "88888888-8888-4888-8888-888888888888";
+  const convId = "99999999-9999-4999-8999-999999999999";
+
+  it("collects enhance_script and enhance_clips proposals via tool calls", async () => {
+    const scriptTool = enhanceProposalTool("script");
+    const scriptPayload = { segments: [{ index: 0, suggested: "第一段增强版", notes: "强化动作" }] };
+    const scriptLlm = providerFrom(() => mapOpenAIStream(streamOf([
+      {
+        choices: [{
+          delta: { tool_calls: [{ index: 0, id: "es_1", function: { name: scriptTool.name, arguments: JSON.stringify(scriptPayload) } }] },
+          finish_reason: null,
+        }],
+      },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ] as never[])));
+    expect(JSON.parse(await collectProposal(scriptLlm, [{ role: "user", content: "go" }], {}, scriptTool))).toEqual(scriptPayload);
+
+    const clipTool = enhanceProposalTool("clips");
+    const clipPayload = {
+      clips: [{
+        index: 0,
+        clipId: clipA,
+        scene: "雨夜便利店门口",
+        durationMs: 6000,
+        shots: [
+          { framingKey: "wide", movementKey: "push", description: "远景推进，霓虹映在雨衣上", durationShare: 45 },
+          { framingKey: "close_up", movementKey: "fixed", description: "门铃特写晃动", durationShare: 55 },
+        ],
+        lines: [{ speaker: "林夏", text: "还开着吗？", emotionKey: "calm", speed: 1 }],
+      }],
+    };
+    const clipLlm = providerFrom(() => mapOpenAIStream(streamOf([
+      {
+        choices: [{
+          delta: { tool_calls: [{ index: 0, id: "ec_1", function: { name: clipTool.name, arguments: JSON.stringify(clipPayload) } }] },
+          finish_reason: null,
+        }],
+      },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ] as never[])));
+    expect(JSON.parse(await collectProposal(clipLlm, [{ role: "user", content: "go" }], {}, clipTool))).toEqual(clipPayload);
+  });
+
+  function makeEnhanceHarness() {
+    const state = {
+      series: {
+        id: seriesId, ownerId, parentId: null as string | null, title: "雨夜便利店", logline: "雨夜重逢",
+        seriesGroup: null as string | null, episodeNo: 1, styleKey: "thick_painting", aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-5", revision: 1, archived: false,
+      },
+      scriptVersion: 1,
+      script: "第一段：林夏独自站在雨夜街头。\n\n第二段：推门进入便利店，老板抬头看她。",
+      clips: [
+        {
+          id: clipA, revision: 1, selectionRevision: 1, ordinal: 1,
+          draft: {
+            schemaVersion: 1 as const, durationMs: 4000, scene: "原场景一：雨夜街头",
+            shots: [{ id: shot1, framingKey: "wide", movementKey: "fixed", description: "原镜头一", durationShare: 100 }],
+            lines: [{ id: "10000000-0000-4000-8000-000000000001", speaker: null, text: "原旁白一", emotionKey: null, speed: 1 }],
+          },
+        },
+        {
+          id: clipB, revision: 1, selectionRevision: 1, ordinal: 2,
+          draft: {
+            schemaVersion: 1 as const, durationMs: 6000, scene: "原场景二：便利店柜台",
+            shots: [{ id: shot2, framingKey: "medium", movementKey: "fixed", description: "原镜头二", durationShare: 100 }],
+            lines: [{ id: "10000000-0000-4000-8000-000000000002", speaker: "林夏", text: "原台词二", emotionKey: null, speed: 1 }],
+            cast: [{ characterId: charA, slotKey: "front", expressionKey: null }],
+          },
+        },
+      ],
+      proposals: new Map<string, ComicDirectorProposal>(),
+      sessionCreated: false,
+      seq: 0,
+    };
+
+    const client: PoolClient = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
+        if (sql.includes("FROM lot_comic_drama.cd_series WHERE owner_id=$1 AND id=$2")) {
+          if (sql.includes("archived_at IS NOT NULL AS archived")) {
+            return {
+              rows: [{
+                title: state.series.title, logline: state.series.logline, styleKey: state.series.styleKey,
+                aspectRatio: state.series.aspectRatio, videoModel: state.series.videoModel, revision: state.series.revision,
+                archived: state.series.archived,
+              }],
+              rowCount: 1,
+            };
+          }
+          return {
+            rows: [{
+              id: state.series.id, parentId: state.series.parentId, title: state.series.title, logline: state.series.logline,
+              seriesGroup: state.series.seriesGroup, episodeNo: state.series.episodeNo, styleKey: state.series.styleKey,
+              aspectRatio: state.series.aspectRatio, videoModel: state.series.videoModel, revision: state.series.revision,
+              archivedAt: null,
+            }],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_director_proposals") && sql.includes("request_id=$3")) {
+          const hit = [...state.proposals.values()].find(p => p.input.requestId === params[2]);
+          return { rows: hit ? [{ ...hit, createdAt: new Date(hit.createdAt) }] : [], rowCount: hit ? 1 : 0 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_director_proposals") && sql.includes("WHERE owner_id=$1 AND series_id=$2 AND id=$3")) {
+          const hit = state.proposals.get(String(params[2]));
+          return { rows: hit ? [{ ...hit, createdAt: new Date(hit.createdAt) }] : [], rowCount: hit ? 1 : 0 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_director_proposals") && sql.includes("status='writing'")) {
+          if (sql.startsWith("UPDATE")) return { rows: [], rowCount: 0 };
+          const active = [...state.proposals.values()].some(p => p.status === "writing");
+          return { rows: active ? [{ 1: 1 }] : [], rowCount: active ? 1 : 0 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_director_sessions")) {
+          return { rows: state.sessionCreated ? [{ conversation_id: convId }] : [], rowCount: state.sessionCreated ? 1 : 0 };
+        }
+        if (sql.startsWith("INSERT INTO lot_comic_drama.cd_director_sessions")) {
+          state.sessionCreated = true;
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes("SELECT content FROM lot_comic_drama.cd_scripts")) {
+          return { rows: [{ content: state.script }], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO lot_comic_drama.cd_scripts")) {
+          state.scriptVersion += 1;
+          state.script = String(params[1]);
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_series_cast")) {
+          if (sql.includes("character_id = ANY")) return { rows: [{ character_id: charA }], rowCount: 1 };
+          return {
+            rows: [{
+              archived: false, hasUpdates: false,
+              snapshot: {
+                schemaVersion: 1, characterId: charA, name: "林夏", aliases: ["小夏"], age: "22", personality: "冷静",
+                appearance: "短发雨衣", roleKey: "lead", outfitId: outfitA, outfitName: "雨衣",
+                assets: [{
+                  kind: "slot", key: "front", version: 1,
+                  media: { id: mediaA, mime: "image/png", sizeBytes: 1024, width: 720, height: 1280, durationMs: null, hasThumbnail: true },
+                }],
+              },
+            }],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_dictionary")) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_clips WHERE series_id=$1 ORDER BY ordinal")) {
+          return { rows: state.clips.map(c => ({ ...c })), rowCount: state.clips.length };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_clips WHERE series_id=$1 AND id=$2")) {
+          const hit = state.clips.find(c => c.id === params[1]);
+          return { rows: hit ? [{ ...hit }] : [], rowCount: hit ? 1 : 0 };
+        }
+        if (sql.startsWith("UPDATE lot_comic_drama.cd_clips SET draft=$2")) {
+          const hit = state.clips.find(c => c.id === params[0]);
+          if (hit) {
+            hit.draft = params[1] as typeof hit.draft;
+            hit.revision += 1;
+            return { rows: [{ ...hit }], rowCount: 1 };
+          }
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.startsWith("UPDATE lot_comic_drama.cd_series SET revision=revision+1")) {
+          state.series.revision += 1;
+          return { rows: [{ revision: state.series.revision }], rowCount: 1 };
+        }
+        if (sql.startsWith("INSERT INTO lot_comic_drama.cd_director_proposals")) {
+          const id = `aaaaaaaa-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
+          const row: ComicDirectorProposal = {
+            id,
+            conversationId: String(params[2]),
+            baseRevision: Number(params[4]),
+            createdAt: new Date().toISOString(),
+            input: params[5] as ComicDirectorProposal["input"],
+            original: String(params[6]),
+            status: "writing",
+            appliedRevision: null,
+            proposal: null,
+            decision: null,
+            sequelId: null,
+            roleDecisions: {},
+          };
+          state.proposals.set(id, row);
+          return { rows: [{ ...row, createdAt: new Date(row.createdAt) }], rowCount: 1 };
+        }
+        if (sql.startsWith("UPDATE lot_comic_drama.cd_director_proposals SET status=$4,proposal=$5,model=$6")) {
+          const row = state.proposals.get(String(params[2]))!;
+          row.status = params[3] as ComicDirectorProposal["status"];
+          row.proposal = params[4] as ComicDirectorProposal["proposal"];
+          return { rows: [{ ...row, createdAt: new Date(row.createdAt) }], rowCount: 1 };
+        }
+        if (sql.startsWith("UPDATE lot_comic_drama.cd_director_proposals SET status=$4,applied_revision=$5")) {
+          const row = state.proposals.get(String(params[2]))!;
+          row.status = params[3] as ComicDirectorProposal["status"];
+          row.appliedRevision = Number(params[4]);
+          row.decision = "enhance";
+          row.proposal = params[5] as ComicDirectorProposal["proposal"];
+          return { rows: [{ ...row, createdAt: new Date(row.createdAt) }], rowCount: 1 };
+        }
+        if (sql.startsWith("UPDATE lot_comic_drama.cd_director_proposals SET status=$4,proposal=$5")) {
+          const row = state.proposals.get(String(params[2]))!;
+          row.status = params[3] as ComicDirectorProposal["status"];
+          row.proposal = params[4] as ComicDirectorProposal["proposal"];
+          return { rows: [{ ...row, createdAt: new Date(row.createdAt) }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+      release: vi.fn(),
+    } as unknown as PoolClient;
+
+    const pool = { connect: vi.fn(async () => client), query: client.query } as unknown as Pool;
+    const episodes = new PgComicDramaRepository(pool);
+    const repo = new PgComicDirector(pool, episodes);
+    return { state, episodes, repo };
+  }
+
+  it("enhances two adjacent storyboard clips, adopts only the second with 100% shares, and leaves the first untouched with zero media jobs", async () => {
+    const { state, episodes, repo } = makeEnhanceHarness();
+    const previewGeneration = vi.fn();
+    let capturedPayload: unknown = null;
+    const llm: LLMProvider = {
+      async *chat(messages) {
+        capturedPayload = JSON.parse(String(messages.at(-1)!.content));
+        yield {
+          type: "tool_call",
+          toolCall: {
+            id: "call_clips",
+            name: "enhance_clips",
+            arguments: {
+              clips: [
+                {
+                  index: 0, clipId: clipA, scene: "建议场景一：暴雨街头", durationMs: 5000, notes: "增加切镜",
+                  shots: [
+                    { framingKey: "extreme_wide", movementKey: "pull", description: "远景拉远展现雨夜霓虹", durationShare: 50 },
+                    { framingKey: "near", movementKey: "follow", description: "林夏压低帽檐走近门口", durationShare: 50 },
+                  ],
+                  lines: [{ speaker: null, text: "夜深了，雨越下越大。", emotionKey: "calm", speed: 1 }],
+                },
+                {
+                  index: 1, clipId: clipB, scene: "建议场景二：暖灯柜台", durationMs: 8000, notes: "突出重逢瞬间",
+                  shots: [
+                    { framingKey: "wide", movementKey: "push", description: "推进到门铃晃动", durationShare: 30 },
+                    { framingKey: "close_up", movementKey: "fixed", description: "特写林夏摘下兜帽", durationShare: 70 },
+                  ],
+                  lines: [{ speaker: "小夏", text: "这把伞，我还给你。", emotionKey: "gentle", speed: 1 }],
+                },
+              ],
+            },
+          },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const director = new ComicDirector(repo, {
+      agentId: "comic_drama", ownerKeyOnly: true, disableUserMemory: true,
+      conversationMetadata: () => ({}), assertConversation: () => {}, validateChatMedia: async () => null,
+      beginTurn: async () => ({ allowedToolNames: [], blockedToolNames: [], dynamicParts: [] }),
+      resolveModel: async () => ({ llm, usedModelId: "kimi-k3.1-pro", modelIds: ["kimi-k3.1-pro"] }),
+    }, undefined, {
+      episodes,
+      library: { listCharacters: vi.fn(), listMaterials: vi.fn() },
+      previewGeneration,
+    });
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicDirectorRoutes(repo, director, "unused"));
+
+    const proposeRes = await app.request(`/series/${seriesId}/director/proposals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "aaaaaaaa-1111-4111-8111-111111111111",
+        expectedRevision: 1,
+        language: "zh",
+        action: "enhance",
+        enhance: { scope: "clips", clipIds: [clipA, clipB] },
+      }),
+    });
+    expect(proposeRes.status).toBe(200);
+    const created = await proposeRes.json() as ComicDirectorProposal;
+    expect(created.status).toBe("ready");
+    expect(created.proposal?.clipEnhancements).toHaveLength(2);
+    // Verify context passed to LLM includes cast, style, target duration, and adjacent clips
+    expect((capturedPayload as { series: { style: string } }).series.style).toBe("国漫厚涂");
+    expect((capturedPayload as { targets: Array<{ nextClip: unknown; previousClip: unknown }> }).targets[0]?.nextClip).toBeTruthy();
+    expect((capturedPayload as { targets: Array<{ nextClip: unknown; previousClip: unknown }> }).targets[1]?.previousClip).toBeTruthy();
+    // Alias "小夏" normalized to cast member "林夏"
+    expect(created.proposal?.clipEnhancements?.[1]?.suggested.lines[0]?.speaker).toBe("林夏");
+
+    // Creator edits segment 2 and adopts ONLY segment 2 (index 1)
+    const editedSecond = {
+      ...created.proposal!.clipEnhancements![1]!.suggested,
+      shots: [
+        { ...created.proposal!.clipEnhancements![1]!.suggested.shots[0]!, durationShare: 40 },
+        { ...created.proposal!.clipEnhancements![1]!.suggested.shots[1]!, durationShare: 60 },
+      ],
+    };
+    const applyRes = await app.request(`/series/${seriesId}/director/proposals/${created.id}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        decision: "enhance",
+        clipItems: [{ index: 1, draft: editedSecond }],
+      }),
+    });
+    expect(applyRes.status).toBe(200);
+    const afterApply = await applyRes.json() as ComicDirectorProposal;
+    expect(afterApply.status).toBe("ready"); // segment 0 still pending
+    expect(afterApply.appliedRevision).toBe(2);
+    expect(state.clips[0]!.draft.scene).toBe("原场景一：雨夜街头");
+    expect(state.clips[0]!.draft.shots[0]!.description).toBe("原镜头一");
+    expect(state.clips[1]!.draft.scene).toBe("建议场景二：暖灯柜台");
+    expect(state.clips[1]!.draft.shots.reduce((sum, s) => sum + s.durationShare, 0)).toBe(100);
+    expect(previewGeneration).not.toHaveBeenCalled();
+
+    // Dismiss remaining segment 0 transitions proposal to applied
+    const dismissRes = await app.request(`/series/${seriesId}/director/proposals/${created.id}/dismiss`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 0 }),
+    });
+    expect(dismissRes.status).toBe(200);
+    expect((await dismissRes.json() as ComicDirectorProposal).status).toBe("applied");
+    expect(state.clips[0]!.draft.scene).toBe("原场景一：雨夜街头");
+  });
+
+  it("enhances adjacent script paragraphs partially and rejects stale adoption after concurrent edits", async () => {
+    const { state, episodes, repo } = makeEnhanceHarness();
+    let mutateDuringRun = false;
+    const llm: LLMProvider = {
+      async *chat() {
+        if (mutateDuringRun) {
+          state.series.revision += 1;
+          state.script = "并发修改后的剧本第一段。\n\n并发修改后的第二段。";
+        }
+        yield {
+          type: "tool_call",
+          toolCall: {
+            id: "call_script",
+            name: "enhance_script",
+            arguments: {
+              segments: [
+                { index: 0, suggested: "第一段增强：暴雨倾盆，林夏攥紧伞柄。" },
+                { index: 1, suggested: "第二段增强：铜铃轻响，柜台后的老板微微抬眼。" },
+              ],
+            },
+          },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const director = new ComicDirector(repo, {
+      agentId: "comic_drama", ownerKeyOnly: true, disableUserMemory: true,
+      conversationMetadata: () => ({}), assertConversation: () => {}, validateChatMedia: async () => null,
+      beginTurn: async () => ({ allowedToolNames: [], blockedToolNames: [], dynamicParts: [] }),
+      resolveModel: async () => ({ llm, usedModelId: "kimi-k3.1-pro", modelIds: ["kimi-k3.1-pro"] }),
+    }, undefined, {
+      episodes,
+      library: { listCharacters: vi.fn(), listMaterials: vi.fn() },
+    });
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicDirectorRoutes(repo, director, "unused"));
+
+    // 1. Two-paragraph enhancement -> adopt ONLY second paragraph
+    const res1 = await app.request(`/series/${seriesId}/director/proposals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "bbbbbbbb-1111-4111-8111-111111111111",
+        expectedRevision: 1,
+        language: "zh",
+        action: "enhance",
+        enhance: { scope: "script_full" },
+      }),
+    });
+    const prop1 = await res1.json() as ComicDirectorProposal;
+    expect(prop1.status).toBe("ready");
+    expect(prop1.proposal?.scriptEnhancements).toHaveLength(2);
+
+    const applyP2 = await app.request(`/series/${seriesId}/director/proposals/${prop1.id}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, decision: "enhance", scriptItems: [{ index: 1 }] }),
+    });
+    expect(applyP2.status).toBe(200);
+    expect(state.script).toBe("第一段：林夏独自站在雨夜街头。\n\n第二段增强：铜铃轻响，柜台后的老板微微抬眼。");
+
+    // 2. Concurrent edit while suggestions are generating -> apply must reject with 409 DIRECTOR_PROPOSAL_STALE
+    mutateDuringRun = true;
+    const currentRev = state.series.revision;
+    const res2 = await app.request(`/series/${seriesId}/director/proposals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "cccccccc-1111-4111-8111-111111111111",
+        expectedRevision: currentRev,
+        language: "zh",
+        action: "enhance",
+        enhance: { scope: "script_full" },
+      }),
+    });
+    const prop2 = await res2.json() as ComicDirectorProposal;
+    const staleApply = await app.request(`/series/${seriesId}/director/proposals/${prop2.id}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: currentRev, decision: "enhance", scriptItems: [{ index: 0 }] }),
+    });
+    expect(staleApply.status).toBe(409);
+    expect(await staleApply.json()).toEqual({ code: "DIRECTOR_PROPOSAL_STALE" });
+    expect(state.script).toBe("并发修改后的剧本第一段。\n\n并发修改后的第二段。");
+  });
+
+  it("propose_enhancement chat tool endsTurn before any generation submission", async () => {
+    const previewGeneration = vi.fn();
+    const createdProposal: ComicDirectorProposal = {
+      id: "dddddddd-1111-4111-8111-111111111111",
+      conversationId: convId,
+      baseRevision: 1,
+      createdAt: new Date().toISOString(),
+      input: {
+        requestId: "eeeeeeee-1111-4111-8111-111111111111",
+        expectedRevision: 1,
+        mode: "paste",
+        language: "zh",
+        text: "增强第 1 镜运镜",
+        action: "enhance",
+        enhance: { scope: "clips", clipIds: [clipA] },
+      },
+      original: "",
+      status: "ready",
+      appliedRevision: null,
+      proposal: { script: "", roles: [] },
+    };
+    const tools = createComicDirectorTools(ownerId, seriesId, {
+      episodes: {
+        get: vi.fn(async () => ({
+          series: {
+            id: seriesId, parentId: null, title: "T", logline: "", seriesGroup: null, episodeNo: 1,
+            styleKey: "thick_painting", aspectRatio: "9:16" as const, videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
+          },
+          script: { version: 1, content: "第一段" },
+          cast: [],
+          clips: [{
+            id: clipA, revision: 1, selectionRevision: 1, ordinal: 1,
+            draft: {
+              schemaVersion: 1 as const, durationMs: 4000, scene: "街头",
+              shots: [{ id: shot1, framingKey: "wide", movementKey: "fixed", description: "原描述", durationShare: 100 }],
+              lines: [],
+            },
+          }],
+        })),
+        saveClip: vi.fn(),
+        reorder: vi.fn(),
+      },
+      library: { listCharacters: vi.fn(), listMaterials: vi.fn() },
+      previewGeneration,
+    }, {
+      expectedRevision: 1,
+      createProposal: vi.fn(async () => createdProposal),
+    });
+
+    const outcome = await tools.execute("propose_enhancement", { scope: "clips", clipOrdinals: [1], instruction: "增强运镜" });
+    expect(outcome.ok).toBe(true);
+    expect(outcome.endsTurn).toBe(true);
+    expect(outcome.proposal?.id).toBe(createdProposal.id);
+    expect(previewGeneration).not.toHaveBeenCalled();
   });
 });
