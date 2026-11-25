@@ -13,8 +13,10 @@ import { PgComicEdits } from "../../src/comic-drama/edit-repository.js";
 import { ComicEditSpeech } from "../../src/comic-drama/edit-speech.js";
 import { insertComicMedia } from "../../src/comic-drama/library-repository.js";
 import { libraryTransaction } from "../../src/comic-drama/library-db.js";
+import { COMIC_LOCAL_SPEECH_MODEL, createComicLocalSpeech } from "../../src/comic-drama/local-speech.js";
 import type { ComicMediaLibrary } from "../../src/comic-drama/media-library.js";
 import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js";
+import { composeComicRender } from "../../src/comic-drama/render-media.js";
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 
 type App = Hono<{ Variables: { userId: string } }>;
@@ -107,6 +109,43 @@ export async function verifyComicEdits(app: App, pool: Pool, seriesRepo: PgComic
   }
   const a1 = await done(owner, a, 1, six), b1 = await done(owner, b, 1, eight), b2 = await done(owner, b, 2, five);
   const otherTake = await done(other, foreign, 1, six);
+  const localSpeech = createComicLocalSpeech();
+  if (localSpeech) {
+    const edits = new PgComicEdits(pool);
+    const speech = new ComicEditSpeech(pool, edits, media, {
+      localSpeech,
+      ownerSpeech: async () => { throw new Error("Local speech must not request gateway credentials"); },
+    });
+    await seriesRepo.saveClip(owner, b.series.id, b.clip.id, { expectedRevision: b.clip.revision, draft: { ...b.clip.draft, lines: [lines[1]] } });
+    const edit = await edits.create(owner, { title: "W8 本机配音", takeId: b2.takeId });
+    const fields = { expectedRevision: edit.revision, includeVoice: true, includeSubtitles: true };
+    const plan = await speech.previewAutoDialogue(owner, edit.id, fields);
+    assert.equal(plan.toSynthesizeCount, 1);
+    assert.equal(plan.estimatedPoints, 0);
+    const signal = AbortSignal.timeout(90_000);
+    const result = await speech.autoDialogue(owner, edit.id, { ...fields, overflowMode: "ask" }, signal);
+    assert.equal(result.voicedCount, 1, JSON.stringify(result.items));
+    assert.equal(result.subtitledCount, 1);
+    const audioId = result.edit.timeline.voice[0].mediaId;
+    const { rows: [attempt] } = await pool.query(`SELECT model_id, gateway_http_status, status
+      FROM lot_comic_drama.cd_speech_attempts WHERE edit_id=$1`, [edit.id]);
+    assert.deepEqual(attempt, { model_id: COMIC_LOCAL_SPEECH_MODEL, gateway_http_status: null, status: "ready" });
+    const video = await media.renderSource(owner, b2.mediaId, "video");
+    const audio = await media.renderSource(owner, audioId, "audio");
+    const mixed = await composeComicRender(result.edit.timeline, {
+      videos: new Map([[b2.takeId, video]]), audio: new Map([[audioId, audio]]),
+    }, signal);
+    try {
+      const meter = "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.Peak_level:file=-";
+      const stats = await mediaProcess(ffmpeg(), ["-v", "error", "-i", mixed.file, "-vn", "-af", meter, "-f", "null", "-"], { signal });
+      const peaks = [...stats.matchAll(/Peak_level=(-?[\d.]+)/g)].map(match => Number(match[1]));
+      assert.ok(peaks.some(db => db > -50), "The MP4 exported from a silent source must contain audible dialogue");
+    } finally {
+      await mixed.dispose();
+    }
+    await edits.remove(owner, edit.id, result.edit.revision);
+    console.log("PASS macOS speech: no gateway, WAV stored on dialogue track, subtitles and MP4 audio encoded");
+  }
   const adopt = (ep: typeof a, take: { takeId: string }) => pool.query("UPDATE lot_comic_drama.cd_clips SET adopted_video_take_id=$2 WHERE id=$1",
     [ep.clip.id, take.takeId]);
   await adopt(a, a1);

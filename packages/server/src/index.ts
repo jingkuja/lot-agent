@@ -83,6 +83,7 @@ import { createComicGenerationRoutes, createComicSeriesPreviewer } from "./comic
 import { PgComicGeneration } from "./comic-drama/generation-repository.js";
 import { PgComicEdits } from "./comic-drama/edit-repository.js";
 import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
+import { createComicLocalSpeech } from "./comic-drama/local-speech.js";
 import { PgComicRenders } from "./comic-drama/render-repository.js";
 import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
 import { startComicTempCleanup } from "./comic-drama/temp-cleanup.js";
@@ -450,8 +451,13 @@ async function main() {
   }
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
   const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(service.db.pool));
-  app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
-  const stopComicTempCleanup = startComicTempCleanup({ mediaRoot: resolve(ROOT, "data/comic-drama") });
+  const comicEdits = new PgComicEdits(service.db.pool);
+  const comicRenders = new PgComicRenders(service.db.pool, comicEdits);
+  app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions, (id, key) => comicRenders.hasFile(id, key)));
+  const stopComicTempCleanup = startComicTempCleanup({
+    mediaRoot: comicMedia.rootDir,
+    purgeDeletedRenders: () => comicRenders.purgeDeletedFiles(key => comicMedia.removeRenderFile(key)),
+  });
   let stopComicSettlementSync: (() => Promise<void>) | undefined;
   if (comicDramaEnabled) {
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
@@ -492,10 +498,11 @@ async function main() {
       if (!key || !catalog?.video.some(item => item.id === modelId && item.provider === "openai-video")) return null;
       return quoteComicVideoPrices(service.tokenhub, billing, key, modelId, inputs, signal);
     };
-    const edits = new PgComicEdits(service.db.pool);
+    const edits = comicEdits;
     const speechModel = loadTwinVoiceConfig().targetModel;
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
       presetModel: speechModel,
+      localSpeech: createComicLocalSpeech(),
       ownerSpeech: async owner => {
         const apiKey = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
         return apiKey ? new OpenAISpeechProvider({ apiKey, headers: gatewayModelHeaders(),
@@ -525,7 +532,7 @@ async function main() {
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/edits/:id/render`, `${COMIC_DRAMA_API_ROOT}/renders/:id/recover`,
     ], generationRateLimit);
-    app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(new PgComicRenders(service.db.pool, edits), comicMedia,
+    app.route(COMIC_DRAMA_API_ROOT, createComicRenderRoutes(comicRenders, comicMedia,
       service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined, rollout.accepting));
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`,

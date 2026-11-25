@@ -17,6 +17,7 @@ import { PgComicDictionary } from "../src/comic-drama/dictionary.js";
 import { PgComicLibrary } from "../src/comic-drama/library-repository.js";
 import { PgComicSettings } from "../src/comic-drama/settings-repository.js";
 import { ComicMediaLibrary } from "../src/comic-drama/media-library.js";
+import { PgComicRenders } from "../src/comic-drama/render-repository.js";
 import { createComicLibraryRoutes } from "../src/comic-drama/library-routes.js";
 import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-drama-library.js";
 import { verifyComicCast } from "./fixtures/check-comic-drama-cast.js";
@@ -63,10 +64,11 @@ let clockOffset = 0;
 const files = new ComicMediaLibrary(fixtureMediaDir, library, {
   masterKey: "cd".repeat(32), now: () => Date.now() + clockOffset, publicBaseUrl: "https://comic-fixture.invalid",
 });
+const renders = new PgComicRenders(pool);
 app.route(COMIC_DRAMA_API_ROOT, createComicLibraryRoutes(library, new PgComicDictionary(pool), files, new PgComicSettings(pool)));
 app.route(COMIC_MEDIA_PATH.slice(0, -1), files.publicRoutes({
   resolve: async token => token === "fixture-one" ? { userId: owner } : token === "fixture-two" ? { userId: other } : null,
-}));
+}, (id, key) => renders.hasFile(id, key)));
 const fixtureUser = { id: owner, name: "Comic fixture" };
 app.get("/api/auth/me", c => c.json(fixtureUser));
 app.get("/api/auth/mode", c => c.json({ debug: true, user: fixtureUser }));
@@ -250,7 +252,7 @@ try {
         await page.getByRole("button", { name: "历史剧集", exact: true }).click();
         await page.getByRole("textbox", { name: "搜索剧集" }).fill("雨夜便利店");
         await page.getByRole("button", { name: "搜索", exact: true }).click();
-        await page.getByRole("button", { name: /雨夜便利店/ }).first().click();
+        await page.locator(".comic-history-title").filter({ hasText: "雨夜便利店" }).first().click();
         await page.getByRole("heading", { name: "雨夜便利店", exact: true }).waitFor();
         await page.reload();
         await page.getByRole("heading", { name: "雨夜便利店", exact: true }).waitFor();
@@ -336,7 +338,7 @@ try {
         const steps = page.getByRole("navigation", { name: "制作步骤" });
         await steps.getByRole("button", { name: /选角/ }).click();
         await page.getByRole("button", { name: /选择角色/ }).click();
-        await page.getByLabel("角色名称").selectOption({ label: "W3 角色" });
+        await page.getByLabel("角色名称").selectOption({ label: "W3 角色 · 通用" });
         await page.getByLabel("造型套装").selectOption({ label: "雨衣" });
         await page.getByRole("button", { name: "锁定造型" }).click();
         const castCard = page.locator(".comic-cast-card").filter({ hasText: "W3 角色" });
@@ -516,8 +518,30 @@ try {
           await newest.getByRole("button", { name: "采用此版本", exact: true }).click();
           await newest.getByText(/版本 2 · 已采用/).waitFor();
           assert.equal(generation.video.submitted.length, beforeVideo + 1);
-          await newest.locator("video").evaluate((player: HTMLVideoElement) => { player.preload = "metadata"; player.load(); });
-          await page.waitForFunction(() => Array.from(document.querySelectorAll("video")).some(player => player.videoWidth === 320 && player.duration === 4));
+          const players = page.locator(".comic-video-card video");
+          assert.equal(await players.count(), 0);
+          await newest.getByRole("button", { name: "预览视频", exact: true }).click();
+          await newest.locator("video").evaluate((player: HTMLVideoElement) => player.play());
+          await page.waitForFunction(() => {
+            const player = document.querySelector<HTMLVideoElement>(".comic-video-card video");
+            return player?.videoWidth === 320 && player.duration === 4 && player.currentTime > 0;
+          });
+          const previousPlayer = await newest.locator("video").elementHandle();
+          assert.ok(previousPlayer);
+          const older = page.locator(".comic-video-card").filter({ hasText: "版本 1" });
+          await older.getByRole("button", { name: "预览视频", exact: true }).click();
+          await older.locator("video").waitFor();
+          assert.equal(await players.count(), 1);
+          assert.equal(await newest.locator("video").count(), 0);
+          assert.ok(await previousPlayer.evaluate((player: HTMLVideoElement) => player.paused && !player.hasAttribute("src")));
+          await previousPlayer.dispose();
+          await older.getByRole("button", { name: "关闭预览", exact: true }).click();
+          assert.equal(await players.count(), 0);
+          const [download] = await Promise.all([
+            page.waitForEvent("download"),
+            newest.getByRole("button", { name: "下载视频", exact: true }).click(),
+          ]);
+          assert.equal(download.suggestedFilename(), "comic-v2.mp4");
           await newest.getByRole("button", { name: "截帧另存", exact: true }).click();
           const frame = page.getByRole("dialog", { name: "截帧另存", exact: true });
           await frame.getByLabel("素材名称").fill("W6 界面截帧");
@@ -699,6 +723,7 @@ try {
           try {
             await page.getByRole("button", { name: "导出 MP4", exact: true }).click();
             await exports.first().getByText("正在合成", { exact: true }).waitFor();
+            assert.equal(await exports.first().getByRole("button", { name: "删除导出", exact: true }).count(), 0);
             await page.locator(".comic-track-lane[data-track=subtitles] button").click();
             const caption = page.locator(".comic-track-inspector");
             await caption.getByLabel("字幕文字", { exact: true }).fill("W10 新版字幕");
@@ -726,6 +751,34 @@ try {
           ]).then(([download]) => download);
           assert.equal(downloadCopy.suggestedFilename(), originalName);
           assert.deepEqual(await readFile(await downloadCopy.path()), originalBytes);
+          await exports.first().getByRole("button", { name: "播放导出成片", exact: true }).click();
+          const exportPlayer = page.locator(".comic-render-panel video");
+          await exportPlayer.waitFor();
+          page.once("dialog", (dialog: { dismiss(): Promise<void> }) => { void dialog.dismiss(); });
+          await exports.first().getByRole("button", { name: "删除导出", exact: true }).click();
+          assert.equal(await exports.count(), 3);
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.evaluate(() => {
+            document.documentElement.setAttribute("data-theme", "dark");
+            localStorage.setItem("lot:language", "en");
+          });
+          await page.reload();
+          await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+          const deleteExport = exports.first().getByRole("button", { name: "Delete export", exact: true });
+          await exportPlayer.waitFor({ state: "detached" });
+          await exports.first().getByRole("button", { name: "Play exported video", exact: true }).click();
+          await exportPlayer.waitFor();
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+          page.once("dialog", (dialog: { accept(): Promise<void> }) => { void dialog.accept(); });
+          await deleteExport.click();
+          await exportPlayer.waitFor({ state: "detached" });
+          await exports.nth(2).waitFor({ state: "detached" });
+          assert.equal(await exports.count(), 2);
+          await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.reload();
+          await exports.nth(1).waitFor();
+          assert.equal(await exports.count(), 2);
           await page.getByRole("navigation", { name: "漫剧工厂" }).getByRole("button", { name: "导出历史", exact: true }).click();
           await page.getByRole("heading", { name: "导出历史", exact: true }).waitFor();
           await page.locator(".comic-export-history li").filter({ hasText: "W9 导出验收" }).first().waitFor();
@@ -757,7 +810,7 @@ try {
           await directorPanel.getByText("已采用剧本", { exact: true }).waitFor();
           await page.evaluate(() => localStorage.setItem("lot:language", "en"));
           await page.reload();
-          await page.getByRole("navigation", { name: "Production steps" }).getByRole("button", { name: /Script/ }).click();
+          await page.getByRole("navigation", { name: "Production steps" }).getByRole("button", { name: /Episode script/ }).click();
           await directorPanel.getByRole("tab", { name: /Script & breakdown proposals/ }).click();
           await directorPanel.getByText("Script adopted", { exact: true }).waitFor();
           await page.evaluate(() => localStorage.setItem("lot:language", "zh"));
@@ -828,6 +881,14 @@ try {
               if (videoEpisode) {
                 await desktopPage.getByRole("button", { name: "历史成片", exact: true }).click();
                 const card = desktopPage.locator(".comic-video-card").filter({ hasText: "W6 video fixture" }).filter({ hasText: "版本 2 · 已采用" });
+                await card.getByRole("button", { name: "预览视频", exact: true }).click();
+                await card.locator("video").evaluate((player: HTMLVideoElement) => player.play());
+                await desktopPage.waitForFunction(() => {
+                  const player = document.querySelector<HTMLVideoElement>(".comic-video-card video");
+                  return player?.videoWidth === 320 && player.currentTime > 0;
+                });
+                await card.getByRole("button", { name: "关闭预览", exact: true }).click();
+                assert.equal(await card.locator("video").count(), 0);
                 await card.getByRole("button", { name: "选作剪辑片源", exact: true }).click();
                 await desktopPage.waitForURL(/\/editor\/sources\/[a-f0-9-]+$/);
                 await desktopPage.reload();

@@ -65,6 +65,9 @@ export const messages: Record<string, { en: string; id: string }> = {
   "分镜台词已变化，请重新读取": { en: "The clip dialogue changed. Reload it.", id: "Dialog klip berubah. Muat ulang." },
   "这句配音正在合成": { en: "This line is being synthesized.", id: "Baris ini sedang disintesis." },
   "语音服务暂不可用，请检查模型账号": { en: "Speech is unavailable. Check your model account.", id: "Layanan suara tidak tersedia. Periksa akun model Anda." },
+  "本机配音失败，请检查 macOS 系统语音和 FFmpeg": {
+    en: "Local dubbing failed. Check macOS system voices and FFmpeg.", id: "Sulih suara lokal gagal. Periksa suara sistem macOS dan FFmpeg.",
+  },
   "配音结果待核实，原请求可能已计费": { en: "Speech result is unverified. The gateway may have charged the request.", id: "Hasil suara belum terverifikasi. Gateway mungkin sudah menagih permintaan." },
   "此句配音暂不可释放，请重新读取台词": { en: "This line cannot be released right now. Reload the dialogue.", id: "Baris ini belum dapat dilepas sekarang. Muat ulang dialog." },
   "原配音请求可能已扣费。释放后可重新合成，新请求可能再次扣费。确认释放？": {
@@ -180,6 +183,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "正在停止处理": { en: "Stopping", id: "Sedang dihentikan" },
   "视频版本 · 分镜 {0}": { en: "Video versions · Clip {0}", id: "Versi video · Klip {0}" },
   "预览视频费用": { en: "Preview video cost", id: "Lihat biaya video" },
+  "预览视频": { en: "Preview video", id: "Pratinjau video" },
   "暂无视频版本": { en: "No video versions yet", id: "Belum ada versi video" },
   "原请求可能已扣费。释放后可重新报价，新请求可能再次扣费。确认释放？": { en: "The original request may have been charged. A new request may incur another charge. Release this submission?", id: "Permintaan awal mungkin sudah ditagih. Permintaan baru mungkin dikenakan biaya lagi. Lepaskan pengiriman ini?" },
   "停止此项": { en: "Stop this item", id: "Hentikan item ini" },
@@ -517,6 +521,12 @@ export const messages: Record<string, { en: string; id: string }> = {
   "匹配到本人角色库": {"en": "Matched a character from your library", "id": "Cocok dengan tokoh dalam pustaka Anda"},
   "取消导出": {"en": "Cancel export", "id": "Batalkan ekspor"},
   "取消这次导出？": {"en": "Cancel this export?", "id": "Batalkan ekspor ini?"},
+  "删除导出": {"en": "Delete export", "id": "Hapus ekspor"},
+  "删除导出修订 {0} 的成片？此操作无法撤销。": {
+    "en": "Delete the exported video for revision {0}? This cannot be undone.",
+    "id": "Hapus video hasil ekspor revisi {0}? Tindakan ini tidak dapat dibatalkan.",
+  },
+  "导出完成后即可删除": {"en": "The export can be deleted once it finishes.", "id": "Ekspor dapat dihapus setelah selesai."},
   "合成完成后即可下载": {"en": "The file is available after export finishes.", "id": "Berkas tersedia setelah ekspor selesai."},
   "基于修订 {0}": {"en": "Based on revision {0}", "id": "Berdasarkan revisi {0}"},
   "导入 TXT 或 DOCX": {"en": "Import TXT or DOCX", "id": "Impor TXT atau DOCX"},

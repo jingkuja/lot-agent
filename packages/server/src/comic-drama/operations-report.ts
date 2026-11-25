@@ -127,9 +127,9 @@ const takes = `${jobs} LEFT JOIN image_call_receipts i ON i.task_id=r.task_id AN
   WHERE r.confirmed_at>=${cutoff}`;
 
 export const COMIC_RENDER_STATS_SQL = `SELECT count(*)::int AS total,
-  count(*) FILTER (WHERE r.media_id IS NOT NULL)::int AS ready,
-  count(*) FILTER (WHERE r.media_id IS NULL AND t.status='failed')::int AS failed,
-  count(*) FILTER (WHERE r.media_id IS NULL AND t.status='cancelled')::int AS cancelled,
+  count(*) FILTER (WHERE r.media_id IS NOT NULL OR r.deleted_at IS NOT NULL)::int AS ready,
+  count(*) FILTER (WHERE r.media_id IS NULL AND r.deleted_at IS NULL AND t.status='failed')::int AS failed,
+  count(*) FILTER (WHERE r.media_id IS NULL AND r.deleted_at IS NULL AND t.status='cancelled')::int AS cancelled,
   round(percentile_cont(.50) WITHIN GROUP (ORDER BY extract(epoch FROM t.finished_at-t.run_started_at)*1000)) AS run_p50_ms,
   round(percentile_cont(.95) WITHIN GROUP (ORDER BY extract(epoch FROM t.finished_at-t.run_started_at)*1000)) AS run_p95_ms,
   round(max(extract(epoch FROM t.finished_at-t.run_started_at)*1000)) AS run_max_ms,

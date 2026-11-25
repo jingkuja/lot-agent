@@ -5,7 +5,6 @@ import {
 import { useI18n } from "../../i18n/index.js";
 import { ApiClientError } from "../../api/client.js";
 import { comicEditApi, comicRenderError, editError } from "./edit-api.js";
-import { comicLibraryApi } from "./library-api.js";
 
 const active = (render: ComicRender) => render.status === "pending" || render.status === "running";
 
@@ -16,10 +15,12 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [preview, setPreview] = useState<string>();
+  const [preview, setPreview] = useState<{ id: string; url: string }>();
   const [pending, setPending] = useState<string | null>(null);
   const [fpsMode, setFpsMode] = useState<ComicRenderFpsMode>("auto");
   const running = useRef(false);
+  const removed = useRef(new Set<string>());
+  const player = useRef<HTMLVideoElement>(null);
   const request = useRef<{ revision: number; fpsMode: ComicRenderFpsMode; requestId: string }>(null);
   const targetFps: ComicRenderFps = fpsMode === "24" ? 24 : 30;
   const issue = project ? comicRenderIssue(project.timeline, targetFps) : null;
@@ -33,7 +34,7 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
       try {
         const result = await comicEditApi.renders(edit, cursor, controller.signal);
         if (controller.signal.aborted) return;
-        setHistory(result);
+        setHistory({ ...result, entries: result.entries.filter(render => !removed.current.has(render.id)) });
         setLoadError(false);
         if (result.entries.some(active)) timer = setTimeout(poll, 1800);
       } catch { if (!controller.signal.aborted) setLoadError(true); }
@@ -72,7 +73,8 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     reload();
   });
   const play = (render: ComicRender) => void action(render.id, async () => {
-    if (render.mediaId) setPreview((await comicLibraryApi.links(render.mediaId)).url);
+    const { url } = await comicEditApi.downloadRender(render.id, true);
+    setPreview({ id: render.id, url });
   });
   const download = (render: ComicRender) => void action(render.id, async () => {
     const result = await comicEditApi.downloadRender(render.id);
@@ -82,6 +84,20 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     document.body.appendChild(link);
     link.click();
     link.remove();
+  });
+  const remove = (render: ComicRender) => void action(render.id, async () => {
+    if (!window.confirm(t("删除导出修订 {0} 的成片？此操作无法撤销。", [render.editRevision]))) return;
+    await comicEditApi.removeRender(render.id);
+    removed.current.add(render.id);
+    if (preview?.id === render.id) {
+      player.current?.pause();
+      player.current?.removeAttribute("src");
+      player.current?.load();
+      setPreview(undefined);
+    }
+    setHistory(current => current && { ...current, entries: current.entries.filter(row => row.id !== render.id) });
+    if (cursor && history?.entries.length === 1) setCursors(values => values.slice(0, -1));
+    reload();
   });
   return <section className="comic-edit-card comic-render-panel">
     <header>
@@ -126,15 +142,16 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
           <button type="button" disabled={pending !== null} onClick={() => play(render)}>{t("播放导出成片")}</button>
           <button type="button" disabled={pending !== null} onClick={() => download(render)}>{t("下载 MP4")}</button>
         </>}
+        {render.status === "ready" && <button type="button" disabled={pending !== null} onClick={() => remove(render)}>{t("删除导出")}</button>}
       </div>
     </li>)}</ul> : <p>{t("暂无导出记录")}</p>)}
     {(cursor || history?.nextCursor) && <div className="comic-actions">
-      <button type="button" disabled={!cursor} onClick={() => setCursors(values => values.slice(0, -1))}>{t("上一页")}</button>
-      <button type="button" disabled={!history?.nextCursor} onClick={() => {
+      <button type="button" disabled={!cursor || pending !== null} onClick={() => setCursors(values => values.slice(0, -1))}>{t("上一页")}</button>
+      <button type="button" disabled={!history?.nextCursor || pending !== null} onClick={() => {
         if (history?.nextCursor) setCursors(values => [...values, history.nextCursor!]);
       }}>{t("下一页")}</button>
     </div>}
-    {preview && <video key={preview} src={preview} controls playsInline preload="metadata" aria-label={t("导出成片")}
-      onError={() => { setPreview(undefined); setMessage("重新获取预览"); }} />}
+    {preview && <video ref={player} key={preview.url} src={preview.url} controls playsInline preload="metadata" aria-label={t("导出成片")}
+      onError={() => { setPreview(undefined); if (!removed.current.has(preview.id)) setMessage("重新获取预览"); }} />}
   </section>;
 }

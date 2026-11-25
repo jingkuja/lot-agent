@@ -40,6 +40,7 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
   const [data, setData] = useState<VideoHistory | "error" | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [addingTake, setAddingTake] = useState<ComicVideoTake | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const cursor = cursors.at(-1);
   const reload = () => setRefresh(value => value + 1);
 
@@ -55,6 +56,7 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
     const controller = new AbortController();
     const params = new URLSearchParams(query);
     if (cursor) params.set("cursor", cursor);
+    setPreviewId(null);
     setData(null);
     void comicGenerationApi.videoHistory(params, controller.signal).then(page => {
       if (!controller.signal.aborted) setData(page);
@@ -81,6 +83,8 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
       open={() => open(take.seriesId, take.targetId)}
       choose={() => choose(take.id)}
       addToEdit={!picker && openEdit ? () => setAddingTake(take) : undefined}
+      previewOpen={previewId === take.id}
+      togglePreview={() => setPreviewId(current => current === take.id ? null : take.id)}
       refresh={reload}
     />
   );

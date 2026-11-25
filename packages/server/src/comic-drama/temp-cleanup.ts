@@ -169,6 +169,7 @@ export function startComicTempCleanup(options: {
   tempRoot?: string;
   maxAgeMs?: number;
   intervalMs?: number;
+  purgeDeletedRenders?: () => Promise<void>;
 } = {}): () => void {
   let running = false;
   const runSweep = async () => {
@@ -179,6 +180,7 @@ export function startComicTempCleanup(options: {
       if (result.removed > 0) {
         console.info("[comic-drama] cleaned orphan temporary directories", result);
       }
+      await options.purgeDeletedRenders?.();
     } catch (error) {
       console.warn("[comic-drama] temporary directory cleanup failed", {
         errorType: error instanceof Error ? error.name : "Error",

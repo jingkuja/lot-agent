@@ -40,6 +40,11 @@ export function createComicRenderRoutes(repo: PgComicRenders, media: ComicMediaL
     c.header("Cache-Control", "private, no-store");
     return c.json(await repo.status(c.get("userId"), id(c.req.param("id"))));
   });
+  app.delete("/renders/:id", async c => {
+    const file = await repo.remove(c.get("userId"), id(c.req.param("id")));
+    if (file) await repo.purgeDeletedFile(file, key => media.removeRenderFile(key));
+    return c.json({ ok: true });
+  });
   app.get("/renders", async c => {
     c.header("Cache-Control", "private, no-store");
     const editId = c.req.query("editId");
@@ -52,7 +57,7 @@ export function createComicRenderRoutes(repo: PgComicRenders, media: ComicMediaL
     const owner = c.get("userId");
     const render = await repo.status(owner, id(c.req.param("id")));
     if (!render.mediaId) throw new ComicLibraryError("RENDER_DOWNLOAD_UNAVAILABLE", 409);
-    return c.json(await media.renderDownload(owner, render.mediaId, render.id));
+    return c.json(await media.renderDownload(owner, render.mediaId, render.id, c.req.query("inline") === "1"));
   });
   app.post("/renders/:id/cancel", async c => {
     const owner = c.get("userId"), renderId = id(c.req.param("id"));

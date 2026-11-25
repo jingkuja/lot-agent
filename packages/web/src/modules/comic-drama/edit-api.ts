@@ -46,7 +46,9 @@ export const comicEditApi = {
     return request<ComicRenderHistory>(root + "/renders?" + params, { signal });
   },
   renderControl: (id: string, action: "recover" | "cancel") => send<ComicRender>(root + "/renders/" + encodeURIComponent(id) + "/" + action, "POST", {}),
-  downloadRender: (id: string) => request<ComicRenderDownload>(root + "/renders/" + encodeURIComponent(id) + "/download"),
+  downloadRender: (id: string, inline = false) =>
+    request<ComicRenderDownload>(root + "/renders/" + encodeURIComponent(id) + "/download" + (inline ? "?inline=1" : "")),
+  removeRender: (id: string) => request<{ ok: true }>(root + "/renders/" + encodeURIComponent(id), { method: "DELETE" }),
 };
 const errors: Record<string, string> = {
   COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
@@ -62,6 +64,7 @@ const errors: Record<string, string> = {
   EDIT_DIALOGUE_CHANGED: "分镜台词已变化，请重新读取",
   EDIT_SPEECH_RUNNING: "这句配音正在合成",
   EDIT_SPEECH_UNAVAILABLE: "语音服务暂不可用，请检查模型账号",
+  EDIT_LOCAL_SPEECH_FAILED: "本机配音失败，请检查 macOS 系统语音和 FFmpeg",
   EDIT_SPEECH_UNKNOWN: "配音结果待核实，原请求可能已计费",
   EDIT_SPEECH_NOT_RELEASABLE: "此句配音暂不可释放，请重新读取台词",
   EDIT_SPEECH_SUPERSEDED: "旧的配音请求已失效，请以最新提交结果为准",
@@ -81,6 +84,7 @@ const errors: Record<string, string> = {
   RENDER_CONTROL_BUSY: "导出状态正在更新，请稍后重试",
   RENDER_RECOVERY_UNAVAILABLE: "队列仍在处理原任务或暂不可用，请稍后重试",
   RENDER_DOWNLOAD_UNAVAILABLE: "合成完成后即可下载",
+  RENDER_DELETE_UNAVAILABLE: "导出完成后即可删除",
 };
 export const comicRenderError = (code: string) => errors[code] ?? errors.RENDER_FAILED;
 export function editError(error: unknown) {

@@ -21,6 +21,7 @@ const view = `SELECT r.id,r.edit_id AS "editId",r.edit_revision AS "editRevision
     (t.status IN ('pending','running') AND t.updated_at<now()-interval '30 seconds'),false)) AS recoverable
   FROM ${cd}.cd_renders r LEFT JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text AND t.type=$3`;
 type RenderRow = Omit<ComicRender, "createdAt"> & { createdAt: Date; stamp: string };
+type DeletedRenderFile = { id: string; key: string };
 const renderView = ({ createdAt, stamp: _stamp, ...row }: RenderRow): ComicRender => ({ ...row, createdAt: createdAt.toISOString() });
 export class PgComicRenders {
   constructor(private readonly pool: Pool, private readonly edits = new PgComicEdits(pool)) {}
@@ -28,9 +29,10 @@ export class PgComicRenders {
   start(owner: string, editId: string, input: ComicRenderRequest, accepting?: () => void) {
     return libraryTransaction(this.pool, async db => {
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`comic-render-request:${owner}:${input.requestId}`]);
-      const { rows: [existing] } = await db.query<{ id: string; edit_id: string; edit_revision: number }>(
-        `SELECT id,edit_id,edit_revision FROM ${cd}.cd_renders WHERE owner_id=$1 AND request_id=$2`, [owner, input.requestId]);
+      const { rows: [existing] } = await db.query<{ id: string; edit_id: string; edit_revision: number; deleted_at: Date | null }>(
+        `SELECT id,edit_id,edit_revision,deleted_at FROM ${cd}.cd_renders WHERE owner_id=$1 AND request_id=$2`, [owner, input.requestId]);
       if (existing) {
+        if (existing.deleted_at) libraryMissing();
         if (existing.edit_id !== editId || existing.edit_revision !== input.expectedRevision) throw new ComicLibraryError("RENDER_REQUEST_CONFLICT", 409);
         return { id: existing.id, created: false };
       }
@@ -55,7 +57,8 @@ export class PgComicRenders {
   }
 
   async status(owner: string, id: string): Promise<ComicRender> {
-    const { rows: [row] } = await this.pool.query<RenderRow>(`${view} WHERE r.owner_id=$1 AND r.id=$2`, [owner, id, COMIC_RENDER_TASK]);
+    const { rows: [row] } = await this.pool.query<RenderRow>(
+      `${view} WHERE r.owner_id=$1 AND r.id=$2 AND r.deleted_at IS NULL`, [owner, id, COMIC_RENDER_TASK]);
     if (!row) libraryMissing();
     return renderView(row);
   }
@@ -65,17 +68,73 @@ export class PgComicRenders {
     if (cursor && (extra !== undefined || !Number.isFinite(Date.parse(stamp)) || !comicDramaIdSchema.safeParse(id).success)) {
       throw new ComicLibraryError("INVALID_CURSOR", 400);
     }
-    const { rows } = await this.pool.query<RenderRow>(`${view} WHERE r.owner_id=$1 AND ($2::uuid IS NULL OR r.edit_id=$2)
+    const { rows } = await this.pool.query<RenderRow>(`${view} WHERE r.owner_id=$1 AND r.deleted_at IS NULL AND ($2::uuid IS NULL OR r.edit_id=$2)
       AND ($4::timestamptz IS NULL OR (r.created_at,r.id)<($4,$5::uuid)) ORDER BY r.created_at DESC,r.id DESC LIMIT 25`,
     [owner, editId, COMIC_RENDER_TASK, stamp ?? null, id ?? null]);
     return { entries: rows.slice(0, 24).map(renderView), nextCursor: rows.length > 24 ? `${rows[23].stamp},${rows[23].id}` : null };
   }
 
+  async hasFile(id: string, key: string) {
+    const result = await this.pool.query(
+      `SELECT 1 FROM ${cd}.cd_renders r JOIN ${cd}.cd_media m ON (m.owner_id,m.id)=(r.owner_id,r.media_id)
+       WHERE r.id=$1 AND r.deleted_at IS NULL AND m.storage_key=$2`, [id, key]);
+    return !!result.rowCount;
+  }
+
+  remove(owner: string, id: string) {
+    return libraryTransaction(this.pool, async db => {
+      const { rows: [row] } = await db.query<{ media_id: string | null; deleted_at: Date | null; deleted_storage_key: string | null }>(
+        `SELECT media_id,deleted_at,deleted_storage_key FROM ${cd}.cd_renders WHERE owner_id=$1 AND id=$2 FOR UPDATE`, [owner, id]);
+      if (!row) libraryMissing();
+      if (row.deleted_at) return row.deleted_storage_key ? { id, key: row.deleted_storage_key } : null;
+      if (!row.media_id) throw new ComicLibraryError("RENDER_DELETE_UNAVAILABLE", 409);
+      await db.query(`UPDATE ${cd}.cd_renders SET media_id=NULL,deleted_at=now() WHERE owner_id=$1 AND id=$2`, [owner, id]);
+      await db.query(`DELETE FROM ${cd}.cd_render_takes WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
+      await db.query(`DELETE FROM ${cd}.cd_render_media WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
+
+      await db.query("SAVEPOINT render_output");
+      const { rows: [output] } = await db.query<{ key: string }>(
+        `DELETE FROM ${cd}.cd_media m WHERE m.owner_id=$1 AND m.id=$2 AND m.mime='video/mp4' AND m.storage_key=m.id::text||'.mp4'
+         AND NOT EXISTS (SELECT 1 FROM ${cd}.cd_clips c WHERE c.keyframe_media_id=m.id)
+         AND NOT EXISTS (SELECT 1 FROM ${cd}.cd_style_presets s WHERE (s.owner_id,s.media_id)=(m.owner_id,m.id))
+         AND NOT EXISTS (SELECT 1 FROM ${cd}.cd_speech_attempts a WHERE a.media_id=m.id)
+         RETURNING m.storage_key AS key`, [owner, row.media_id],
+      ).catch(async error => {
+        // An export saved as a material (or referenced elsewhere) still owns its media.
+        if (error.code !== "23503") throw error;
+        await db.query("ROLLBACK TO SAVEPOINT render_output");
+        return { rows: [] };
+      });
+      if (!output) return null;
+      await db.query(`UPDATE ${cd}.cd_renders SET deleted_storage_key=$3 WHERE owner_id=$1 AND id=$2`, [owner, id, output.key]);
+      return { id, key: output.key };
+    });
+  }
+
+  async purgeDeletedFile(file: DeletedRenderFile, removeFile: (key: string) => Promise<void>) {
+    try {
+      await removeFile(file.key);
+      await this.pool.query(`UPDATE ${cd}.cd_renders SET deleted_storage_key=NULL WHERE id=$1 AND deleted_storage_key=$2`, [file.id, file.key]);
+    } catch {
+      console.warn("[comic-drama] export file cleanup deferred", { renderId: file.id });
+    }
+  }
+
+  async purgeDeletedFiles(removeFile: (key: string) => Promise<void>) {
+    const { rows } = await this.pool.query<DeletedRenderFile>(
+      `SELECT id,deleted_storage_key AS key FROM ${cd}.cd_renders
+       WHERE deleted_storage_key IS NOT NULL ORDER BY deleted_at,id LIMIT 100`);
+    for (const file of rows) await this.purgeDeletedFile(file, removeFile);
+  }
+
   private async lockTask(db: ComicQuery, owner: string, id: string) {
     const { rows: [task] } = await db.query<{ status: string }>(`SELECT status FROM tasks WHERE id=$1 AND user_id=$2::text
-      AND type=$3 AND EXISTS(SELECT 1 FROM ${cd}.cd_renders WHERE owner_id=$2::uuid AND id=$1) FOR UPDATE`, [id, owner, COMIC_RENDER_TASK]);
+      AND type=$3 AND EXISTS(SELECT 1 FROM ${cd}.cd_renders WHERE owner_id=$2::uuid AND id=$1 AND deleted_at IS NULL) FOR UPDATE`,
+    [id, owner, COMIC_RENDER_TASK]);
     if (!task) libraryMissing();
-    const { rows: [row] } = await db.query<{ media_id: string | null }>(`SELECT media_id FROM ${cd}.cd_renders WHERE owner_id=$1 AND id=$2`, [owner, id]);
+    const { rows: [row] } = await db.query<{ media_id: string | null }>(
+      `SELECT media_id FROM ${cd}.cd_renders WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL`, [owner, id]);
+    if (!row) libraryMissing();
     return { ...task, ready: row.media_id !== null };
   }
 
@@ -124,7 +183,7 @@ export class PgComicRenders {
         (SELECT jsonb_object_agg(m.take_id,m.media_id) FROM ${cd}.cd_render_takes m WHERE (m.owner_id,m.render_id)=(r.owner_id,r.id)) AS takes,
         ARRAY(SELECT m.media_id FROM ${cd}.cd_render_media m WHERE (m.owner_id,m.render_id)=(r.owner_id,r.id)) AS inputs
         FROM ${cd}.cd_renders r JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text AND t.type=$3 AND t.status='running'
-        WHERE r.owner_id=$1 AND r.id=$2`, [owner, id, COMIC_RENDER_TASK]);
+        WHERE r.owner_id=$1 AND r.id=$2 AND r.deleted_at IS NULL`, [owner, id, COMIC_RENDER_TASK]);
     if (!row) libraryMissing();
     return { ...row, frozen: comicFrozenRenderSchema.parse(row.frozen) };
   }
@@ -140,7 +199,7 @@ export class PgComicRenders {
         `UPDATE ${cd}.cd_renders
          SET media_id=$3,
              frozen=CASE WHEN $4::int IS NOT NULL THEN jsonb_set(frozen,'{outputFps}',to_jsonb($4::int),true) ELSE frozen END
-         WHERE id=$1 AND owner_id=$2 AND media_id IS NULL`,
+         WHERE id=$1 AND owner_id=$2 AND media_id IS NULL AND deleted_at IS NULL`,
         [id, file.owner, file.id, outputFps ?? null],
       );
       if (!result.rowCount) throw new ComicLibraryError("RENDER_ALREADY_PUBLISHED", 409);

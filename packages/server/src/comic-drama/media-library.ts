@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { Hono } from "hono";
 import {
-  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, comicRenderDurationToleranceMs,
+  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, comicDramaIdSchema, comicRenderDurationToleranceMs,
   type ComicGenerationImage, type ComicGenerationTimedMedia,
   type ComicLibraryRepository, type ComicMaterialKind, type ComicMediaLinks, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
@@ -247,15 +247,21 @@ export class ComicMediaLibrary {
     return { url: this.sign(owner, id, media.storageKey), thumbnailUrl: media.thumbnailKey ? this.sign(owner, id, media.thumbnailKey) : null };
   }
 
-  async renderDownload(owner: string, id: string, renderId: string) {
+  async renderDownload(owner: string, id: string, renderId: string, inline = false) {
     const media = await this.repo.media(owner, id);
     if (!media || media.mime !== "video/mp4") libraryMissing();
     const url = new URL(this.sign(owner, id, media.storageKey), "http://comic-drama.invalid");
     url.searchParams.set("render", renderId);
+    if (inline) url.searchParams.set("inline", "1");
     return { url: url.pathname + url.search, filename: `comic-${renderId}.mp4` };
   }
 
-  publicRoutes(sessions: Parameters<typeof createUploadAccessGuard>[1]) {
+  async removeRenderFile(key: string) {
+    if (!/^[a-f0-9-]{36}\.mp4$/.test(key)) throw new Error("Invalid export storage key");
+    await rm(join(this.root, key), { force: true });
+  }
+
+  publicRoutes(sessions: Parameters<typeof createUploadAccessGuard>[1], hasRenderFile: (id: string, key: string) => Promise<boolean>) {
     const app = new Hono();
     const guard = createUploadAccessGuard({
       getUploadByStorageKey: async key => {
@@ -269,10 +275,15 @@ export class ComicMediaLibrary {
       await next();
     });
     app.get("/:filename", staticFileHandler(this.root, {
-      authorize: guard,
+      authorize: async (c, key) => {
+        const access = await guard(c, key);
+        const render = c.req.query("render");
+        if (!access || render === undefined) return access;
+        return comicDramaIdSchema.safeParse(render).success && await hasRenderFile(render, key).catch(() => false);
+      },
       attachmentName: (c, key) => {
         const id = c.req.query("render");
-        return key.endsWith(".mp4") && id && /^[a-f0-9-]{36}$/.test(id) ? `comic-${id}.mp4` : undefined;
+        return key.endsWith(".mp4") && id && c.req.query("inline") !== "1" ? `comic-${id}.mp4` : undefined;
       },
     }));
     return app;

@@ -16,6 +16,7 @@ import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library
 import { insertComicMedia } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import { DEFAULT_TTS_MODEL } from "../models/media-defaults.js";
+import { COMIC_LOCAL_SPEECH_MODEL } from "./local-speech.js";
 
 // Keep the stored preset IDs valid across the switch to Qwen system voices.
 const qwenVoiceIds: Record<ComicSpeechPresetId, string> = { alloy: "longanlingxin", nova: "longanlingxin", onyx: "longanlufeng" };
@@ -27,10 +28,19 @@ const qwenPresets: readonly ComicSpeechPresetMeta[] = [
     labels: { zh: "龙安鲁风 · 明亮男声", en: "Lufeng · Bright Male Voice", id: "Lufeng · Suara Pria Cerah" },
     summary: { zh: "明亮开朗，支持普通话与英语", en: "Bright and upbeat, supports Mandarin and English", id: "Cerah dan ceria, mendukung Mandarin dan Inggris" } },
 ];
+const localPresets: readonly ComicSpeechPresetMeta[] = [
+  { id: "nova", gender: "female", age: "adult", tone: "balanced",
+    labels: { zh: "macOS 系统女声", en: "macOS System Female Voice", id: "Suara Wanita Sistem macOS" },
+    summary: { zh: "本机合成，支持普通话和英语", en: "Synthesized locally in Mandarin or English", id: "Disintesis secara lokal dalam Mandarin atau Inggris" } },
+  { id: "onyx", gender: "male", age: "adult", tone: "balanced",
+    labels: { zh: "macOS 系统男声", en: "macOS System Male Voice", id: "Suara Pria Sistem macOS" },
+    summary: { zh: "本机合成，支持普通话和英语", en: "Synthesized locally in Mandarin or English", id: "Disintesis secara lokal dalam Mandarin atau Inggris" } },
+];
 
 type CloneVoice = { targetModel: string; voiceId: string };
 export type ComicSpeechDeps = {
   presetModel?: string;
+  localSpeech?: SpeechProvider;
   ownerSpeech(owner: string): Promise<SpeechProvider | null>;
   clones?: {
     list(owner: string): Promise<{ id: string; title: string }[]>;
@@ -52,8 +62,14 @@ export class ComicEditSpeech {
     private readonly deps: ComicSpeechDeps) {}
 
   private presets() {
-    const presetCatalog = !this.deps.presetModel ? [] : this.deps.presetModel === DEFAULT_TTS_MODEL ? qwenPresets : COMIC_SPEECH_PRESET_CATALOG;
+    const model = this.presetModel();
+    const presetCatalog = model === COMIC_LOCAL_SPEECH_MODEL ? localPresets
+      : model === DEFAULT_TTS_MODEL ? qwenPresets : model ? COMIC_SPEECH_PRESET_CATALOG : [];
     return { presetCatalog, presets: presetCatalog.map(preset => preset.id) };
+  }
+
+  private presetModel() {
+    return this.deps.localSpeech ? COMIC_LOCAL_SPEECH_MODEL : this.deps.presetModel;
   }
 
   private async binding(owner: string, id: string) {
@@ -81,7 +97,7 @@ export class ComicEditSpeech {
   async bind(owner: string, id: string, binding: ComicVoiceBind) {
     const exists = await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL`, [owner, id]);
     if (!exists.rowCount) libraryMissing();
-    if (binding.kind === "preset" && !this.deps.presetModel) throw unavailable();
+    if (binding.kind === "preset" && !this.presetModel()) throw unavailable();
     const fingerprint = binding.kind === "clone" ? digest(await this.ready(owner, binding.itemId)) : null;
     await libraryTransaction(this.pool, async db => {
       const locked = await db.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, id]);
@@ -109,7 +125,7 @@ export class ComicEditSpeech {
         WHERE (x.owner_id,x.series_id)=(s.owner_id,s.id)
           AND (($3::boolean AND v.binding->>'kind'='preset') OR ($4::boolean AND v.binding->>'kind'='clone'))),'[]'::jsonb) AS characters
       FROM ${cd}.cd_clips c JOIN ${cd}.cd_series s ON s.id=c.series_id WHERE c.id=$1 AND s.owner_id=$2 AND s.deleted_at IS NULL`,
-      [clipId, owner, !!this.deps.presetModel, !!this.deps.clones]);
+      [clipId, owner, !!this.presetModel(), !!this.deps.clones]);
     return { clipRevision: source?.revision ?? null, presets, presetCatalog, characters: source?.characters ?? [],
       lines: source ? comicDramaClipDraftSchema.parse(source.draft).lines.filter(line => line.text) : [] };
   }
@@ -130,8 +146,8 @@ export class ComicEditSpeech {
       if (digest(voice) !== binding?.fingerprint) throw unavailable();
       return { voice, version: binding.version, clone: true };
     }
-    if (selected?.kind === "preset" && this.deps.presetModel) {
-      const targetModel = this.deps.presetModel;
+    const targetModel = this.presetModel();
+    if (selected?.kind === "preset" && targetModel) {
       const voiceId = targetModel === DEFAULT_TTS_MODEL ? qwenVoiceIds[selected.preset] : selected.preset;
       return { voice: { targetModel, voiceId }, version: binding?.version ?? null, clone: false };
     }
@@ -244,7 +260,8 @@ export class ComicEditSpeech {
     if (existing) return existing;
     accepting?.();
     this.media.assertAvailable();
-    const provider = await this.deps.ownerSpeech(owner);
+    const local = !clone && voice.targetModel === COMIC_LOCAL_SPEECH_MODEL ? this.deps.localSpeech : undefined;
+    const provider = local ?? await this.deps.ownerSpeech(owner);
     if (!provider) throw new ComicLibraryError("EDIT_SPEECH_UNAVAILABLE", 503);
     signal.throwIfAborted();
     const attemptId = randomUUID();
@@ -279,8 +296,8 @@ export class ComicEditSpeech {
       trace = output.gatewayRequestId;
     } catch (error) {
       const httpStatus = error instanceof ProviderError ? error.httpStatus : undefined;
-      const rejected = error instanceof ProviderError && error.code === "HTTP_ERROR" && httpStatus
-        && httpStatus >= 400 && httpStatus < 500 && ![408, 409, 425].includes(httpStatus);
+      const rejected = local || (error instanceof ProviderError && error.code === "HTTP_ERROR" && httpStatus
+        && httpStatus >= 400 && httpStatus < 500 && ![408, 409, 425].includes(httpStatus));
       const nextStatus = rejected ? "failed" : "unknown";
       const errCode = error instanceof ProviderError ? error.code : error instanceof Error ? error.name : "SPEECH_FAILED";
       const errTrace = safeTrace(error instanceof ProviderError ? error.gatewayRequestId : trace);
@@ -301,6 +318,7 @@ export class ComicEditSpeech {
           [owner, fingerprint, nextStatus, errTrace, attemptId],
         );
       });
+      if (local) throw new ComicLibraryError("EDIT_LOCAL_SPEECH_FAILED", 503);
       throw rejected ? new ComicLibraryError("EDIT_SPEECH_UNAVAILABLE", 503) : new ComicLibraryError("EDIT_SPEECH_UNKNOWN", 409);
     }
 
@@ -322,19 +340,19 @@ export class ComicEditSpeech {
           await db.query(
             `UPDATE ${cd}.cd_speech_attempts
              SET status='ready', media_id=$3, gateway_request_id=coalesce(gateway_request_id,$4),
-                 gateway_http_status=coalesce(gateway_http_status,200), updated_at=now()
+                 gateway_http_status=coalesce(gateway_http_status,$5), updated_at=now()
              WHERE id=$1 AND owner_id=$2`,
-            [attemptId, owner, file.id, safeId],
+            [attemptId, owner, file.id, safeId, local ? null : 200],
           );
           return { mediaId: file.id, durationMs: file.durationMs, cached: false, attemptId };
         }
         await db.query(
           `UPDATE ${cd}.cd_speech_attempts
            SET media_id=coalesce(media_id,$3), gateway_request_id=coalesce(gateway_request_id,$4),
-               gateway_http_status=coalesce(gateway_http_status,200),
+               gateway_http_status=coalesce(gateway_http_status,$5),
                error=coalesce(error,'LATE_RESULT_IGNORED'), updated_at=now()
            WHERE id=$1 AND owner_id=$2`,
-          [attemptId, owner, file.id, safeId],
+          [attemptId, owner, file.id, safeId, local ? null : 200],
         );
         superseded = true;
         return null;
@@ -344,22 +362,23 @@ export class ComicEditSpeech {
     } catch (error) {
       if (error instanceof ComicLibraryError && error.code === "EDIT_SPEECH_SUPERSEDED") throw error;
       const errTrace = safeTrace(trace);
+      const nextStatus = local ? "failed" : "unknown";
       await libraryTransaction(this.pool, async db => {
         await db.query(
           `UPDATE ${cd}.cd_speech_attempts
-           SET status=CASE WHEN status='submitting' THEN 'unknown' ELSE status END,
+           SET status=CASE WHEN status='submitting' THEN $5 ELSE status END,
                gateway_request_id=coalesce(gateway_request_id,$3),
                error=coalesce(error,$4), updated_at=now()
            WHERE id=$1 AND owner_id=$2`,
-          [attemptId, owner, errTrace, error instanceof Error ? error.message.slice(0, 120) : "STORE_FAILED"],
+          [attemptId, owner, errTrace, local ? "LOCAL_STORE_FAILED" : error instanceof Error ? error.message.slice(0, 120) : "STORE_FAILED", nextStatus],
         );
         await db.query(
-          `UPDATE ${cd}.cd_speech_cache SET status='unknown', gateway_request_id=$3, updated_at=now()
+          `UPDATE ${cd}.cd_speech_cache SET status=$5, gateway_request_id=$3, updated_at=now()
            WHERE owner_id=$1 AND fingerprint=$2 AND active_attempt_id=$4 AND status='submitting'`,
-          [owner, fingerprint, errTrace, attemptId],
+          [owner, fingerprint, errTrace, attemptId, nextStatus],
         );
       });
-      throw new ComicLibraryError("EDIT_SPEECH_UNKNOWN", 409);
+      throw local ? new ComicLibraryError("EDIT_LOCAL_SPEECH_FAILED", 503) : new ComicLibraryError("EDIT_SPEECH_UNKNOWN", 409);
     }
   }
 
@@ -503,7 +522,7 @@ export class ComicEditSpeech {
           });
         } else {
           toSynthesizeCount += 1;
-          newSyntheses.add(fingerprint);
+          if (resolved.voice.targetModel !== COMIC_LOCAL_SPEECH_MODEL || resolved.clone) newSyntheses.add(fingerprint);
           const est = Math.max(800, estimateComicDialogueMs([{ ...line, text, speed }]));
           lines.push({ ...base, status: "to_synthesize" });
           cursorMs = Math.max(cursorMs, startOffset + Math.min(remainingMs, est));

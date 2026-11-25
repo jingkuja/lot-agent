@@ -23,6 +23,7 @@ export function ClipVideoVersions({ seriesId, clip, origin, refresh, disabled, q
   const { t } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.videos(seriesId, clip.id, signal), [seriesId, clip.id]);
   const history = useGenerationHistory(load, 5_000, refresh);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const busy = history.current?.some(take => ["pending", "running", "unknown", "recoverable"].includes(take.state));
   const selectionRevision = history.current?.[0]?.clipSelectionRevision ?? clip.selectionRevision ?? 1;
   return <section className="comic-edit-card">
@@ -45,6 +46,7 @@ export function ClipVideoVersions({ seriesId, clip, origin, refresh, disabled, q
     {!history.current ? <p role="status">{t("加载中…")}</p> :
       !history.current.length ? <p className="comic-generation-note">{t("暂无视频版本")}</p> :
       <div className="comic-library-grid">{history.current.map(take => <VideoTakeCard key={take.id} take={take}
+        previewOpen={previewId === take.id} togglePreview={() => setPreviewId(current => current === take.id ? null : take.id)}
         choose={() => choose(take.id)}
         adopt={disabled || take.adopted ? undefined : async () => {
           await comicGenerationApi.adopt(seriesId, clip.id, take.id, clip.revision, selectionRevision);
@@ -109,38 +111,83 @@ function VideoReceipt({ takeId, close }: { takeId: string; close: () => void }) 
   </dialog>;
 }
 
-export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, selected = false }: {
+function VideoTakePlayer({ mediaId, posterMediaId, version, player }: {
+  mediaId: string; posterMediaId?: string | null; version: number; player: React.RefObject<HTMLVideoElement | null>;
+}) {
+  const { t } = useI18n();
+  const [links, setLinks] = useState<ComicMediaLinks | "error" | null>(null);
+  const [posterUrl, setPosterUrl] = useState<string>();
+  const [attempt, reload] = useState(0);
+  const source = links && links !== "error" ? links.url : null;
+  const attachPlayer = useCallback((element: HTMLVideoElement | null) => {
+    if (!element || !source) return;
+    player.current = element;
+    element.src = source;
+    return () => {
+      player.current = null;
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
+    };
+  }, [player, source]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void comicLibraryApi.links(mediaId, controller.signal).then(result => {
+      if (!controller.signal.aborted) setLinks(result);
+    }).catch(() => { if (!controller.signal.aborted) setLinks("error"); });
+    return () => controller.abort();
+  }, [attempt, mediaId]);
+  useEffect(() => {
+    if (!posterMediaId) return;
+    const controller = new AbortController();
+    void comicLibraryApi.links(posterMediaId, controller.signal).then(result => {
+      if (!controller.signal.aborted) setPosterUrl(result.thumbnailUrl ?? result.url);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [posterMediaId]);
+  const retry = () => { setLinks(null); reload(value => value + 1); };
+  if (links === "error") return <button type="button" onClick={retry}>{t("重新获取预览")}</button>;
+  if (!links) return <p role="status">{t("加载中…")}</p>;
+  return <video ref={attachPlayer} controls playsInline poster={posterUrl} preload="metadata"
+    aria-label={t("视频预览 · 版本 {0}", [version])} onError={() => setLinks("error")} />;
+}
+
+export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, selected = false, previewOpen, togglePreview }: {
   take: ComicVideoTake; adopt?: () => Promise<unknown>; refresh: () => void; open?: () => void;
-  choose?: () => void; addToEdit?: () => void; selected?: boolean;
+  choose?: () => void; addToEdit?: () => void; selected?: boolean; previewOpen?: boolean; togglePreview?: () => void;
 }) {
   const { t, locale } = useI18n();
-  const [links, setLinks] = useState<ComicMediaLinks | "error" | null>(null);
-  const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
-  const [attempt, reload] = useState(0);
+  const [downloading, setDownloading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [selectionConflict, setSelectionConflict] = useState(false);
   const [frame, setFrame] = useState<number | null>(null);
   const [savedFrame, setSavedFrame] = useState(false);
-  const renewed = useRef(false);
-  const hoverPlaying = useRef(false);
   const player = useRef<HTMLVideoElement>(null);
+  const downloadRequest = useRef<AbortController | null>(null);
   useEffect(() => {
+    return () => downloadRequest.current?.abort();
+  }, []);
+  const download = async () => {
+    if (!take.mediaId || downloadRequest.current) return;
     const controller = new AbortController();
-    if (!take.mediaId) return;
-    void comicLibraryApi.links(take.mediaId, controller.signal).then(result => {
-      if (!controller.signal.aborted) setLinks(result);
-    }).catch(() => { if (!controller.signal.aborted) setLinks("error"); });
-    return () => controller.abort();
-  }, [attempt, take.mediaId]);
-  useEffect(() => {
-    if (!take.posterMediaId) { setPosterUrl(undefined); return; }
-    const controller = new AbortController();
-    void comicLibraryApi.links(take.posterMediaId, controller.signal).then(result => {
-      if (!controller.signal.aborted) setPosterUrl(result.thumbnailUrl ?? result.url);
-    }).catch(() => {});
-    return () => controller.abort();
-  }, [take.posterMediaId]);
+    downloadRequest.current = controller;
+    setDownloading(true);
+    setError("");
+    try {
+      const { url } = await comicLibraryApi.links(take.mediaId, controller.signal);
+      if (controller.signal.aborted) return;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `comic-v${take.version}.mp4`;
+      link.click();
+    } catch {
+      if (!controller.signal.aborted) setError("操作失败，请重试");
+    } finally {
+      downloadRequest.current = null;
+      if (!controller.signal.aborted) setDownloading(false);
+    }
+  };
   const performAdopt = async () => {
     if (!adopt || saving) return;
     setSaving(true);
@@ -154,30 +201,8 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
     finally { setSaving(false); }
   };
   return <article className="comic-library-card comic-video-card">
-    {links === "error" ? <button type="button" onClick={() => { renewed.current = false; reload(value => value + 1); }}>{t("重新获取预览")}</button> :
-      links && <video ref={player} controls playsInline poster={posterUrl} preload={selected ? "metadata" : "none"}
-        aria-label={t("视频预览 · 版本 {0}", [take.version])} src={links.url}
-        onMouseEnter={() => {
-          const video = player.current;
-          if (!selected && video && video.paused) {
-            video.muted = true;
-            hoverPlaying.current = true;
-            void video.play().catch(() => { hoverPlaying.current = false; });
-          }
-        }}
-        onMouseLeave={() => {
-          const video = player.current;
-          if (hoverPlaying.current && video) {
-            hoverPlaying.current = false;
-            video.pause();
-            video.currentTime = 0;
-          }
-        }}
-        onPlay={() => { if (!player.current?.muted) hoverPlaying.current = false; }}
-        onError={() => {
-          if (renewed.current) setLinks("error");
-          else { renewed.current = true; reload(value => value + 1); }
-        }} />}
+    {take.mediaId && (selected || previewOpen) && <VideoTakePlayer key={take.mediaId}
+      mediaId={take.mediaId} posterMediaId={take.posterMediaId} version={take.version} player={player} />}
     {(open || selected) && take.dramaTitle && (
       <small className="comic-take-origin">
         {take.dramaTitle}{take.episodeNo ? ` · ${t("第 {0} 集", [take.episodeNo])}` : ""}
@@ -199,8 +224,11 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
       {addToEdit && <button type="button" onClick={addToEdit}>{t("加入剪辑台")}</button>}
       {choose && <button type="button" onClick={choose}>{t("选作剪辑片源")}</button>}
       {adopt && <button type="button" className="primary" onClick={() => void performAdopt()} disabled={saving}>{t("采用此版本")}</button>}
-      {links && links !== "error" && <>
-        <a href={links.url} download={`comic-v${take.version}.mp4`}>{t("下载视频")}</a>
+      {take.mediaId && <>
+        {togglePreview && <button type="button" aria-expanded={!!previewOpen} onClick={togglePreview}>
+          {t(previewOpen ? "关闭预览" : "预览视频")}
+        </button>}
+        <button type="button" disabled={downloading} onClick={() => void download()}>{t("下载视频")}</button>
         <button type="button" onClick={() => {
           setSavedFrame(false);
           setFrame(Math.min(take.durationMs - 1, Math.round((player.current?.currentTime ?? 0) * 1000)));

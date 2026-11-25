@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { copyFile, readFile } from "node:fs/promises";
+import { copyFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
@@ -138,6 +138,7 @@ export async function verifyComicRenders(app: App, pool: Pool, media: ComicMedia
     const cancelTarget = await exportClip(black.revision);
     for (let i = 0; i < 100 && (await status(cancelTarget.id)).status !== "running"; i++) await delay(25);
     assert.equal((await status(cancelTarget.id)).status, "running");
+    await json("/renders/" + cancelTarget.id, "DELETE", undefined, 409);
     await json("/renders/" + cancelTarget.id + "/cancel", "POST", {}, 404, "fixture-two");
     cancelled = await json<ComicRender>("/renders/" + cancelTarget.id + "/cancel", "POST", {});
     assert.equal(cancelled.status, "cancelled");
@@ -219,6 +220,41 @@ export async function verifyComicRenders(app: App, pool: Pool, media: ComicMedia
   assert.ok(tone(1.2, 750) > tone(1.2, 660) * 2 && tone(1.2, 330) > 500);
   assert.ok(tone(6.1, 990) > 700 && tone(8.1, 660) > 200 && tone(8.1, 330) < 100);
   if (process.env.COMIC_RENDER_FIXTURE_OUTPUT) await copyFile(fade.file, process.env.COMIC_RENDER_FIXTURE_OUTPUT);
+  const repeatPath = "/renders/" + repeat.id;
+  const repeatLink = await json<ComicRenderDownload>(repeatPath + "/download");
+  const repeatPreview = await json<ComicRenderDownload>(repeatPath + "/download?inline=1");
+  assert.equal((await app.request(repeatPreview.url, { headers: { Range: "bytes=0-31" } })).headers.get("Content-Disposition"), "inline");
+  await json(repeatPath, "DELETE", undefined, 404, "fixture-two");
+  assert.deepEqual(await Promise.all([1, 2].map(() => json(repeatPath, "DELETE"))), [{ ok: true }, { ok: true }]);
+  await json(repeatPath, "GET", undefined, 404);
+  await json(repeatPath + "/download", "GET", undefined, 404);
+  assert.equal((await app.request(repeatLink.url)).status, 404);
+  assert.equal((await app.request(repeatPreview.url)).status, 404);
+  await assert.rejects(stat(repeat.file), { code: "ENOENT" });
+  assert.equal((await json<ComicRenderHistory>("/renders?editId=" + fresh.id)).entries.length, 5);
+  await json(path + "/render", "POST", { expectedRevision: changed.revision, requestId: await pool.query<{ request_id: string }>(
+    "SELECT request_id FROM lot_comic_drama.cd_renders WHERE id=$1", [repeat.id],
+  ).then(result => result.rows[0].request_id) }, 404);
+  assert.equal((await status(fade.id)).mediaId, fade.mediaId);
+  assert.equal((await media.renderSource(owner, seed.b1.mediaId, "video")).durationMs, seed.b1.durationMs);
+
+  const savedOutput = await json<{ id: string }>("/materials/from-media", "POST",
+    { mediaId: savedAgain.mediaId, material: { kind: "other", name: "W10 复用导出成片", categoryKey: null, tags: [] } }, 201);
+  const sharedLink = await json<ComicRenderDownload>("/renders/" + savedAgain.id + "/download");
+  await json("/renders/" + savedAgain.id, "DELETE");
+  assert.equal((await app.request(sharedLink.url)).status, 404);
+  await json("/materials/" + savedOutput.id + "/versions");
+  assert.equal((await stat(savedAgain.file)).isFile(), true);
+
+  const renders = new PgComicRenders(pool);
+  const deferred = await renders.remove(owner, blackFade.id);
+  assert.ok(deferred);
+  await renders.purgeDeletedFile(deferred, async () => { throw new Error("Fixture file cleanup failed"); });
+  assert.equal((await stat(blackFade.file)).isFile(), true);
+  await json("/renders/" + blackFade.id, "GET", undefined, 404);
+  await renders.purgeDeletedFiles(key => media.removeRenderFile(key));
+  await assert.rejects(stat(blackFade.file), { code: "ENOENT" });
+  console.log("PASS completed export deletion: authorization, idempotency, stale link revocation, file cleanup and reused material retention");
   console.log("PASS W9 PG/Redis/FFmpeg: freeze, replay, private Range, retention, 13.2s cut, 12.7s fades, three subtitles and four audio sources");
   console.log("PASS W10 PG/Redis/FFmpeg: active cancel, safe same-job recovery, lost dispatch, detached history, private attachment and original revision");
 }
