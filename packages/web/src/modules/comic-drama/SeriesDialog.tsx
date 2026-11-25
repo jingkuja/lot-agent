@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  comicVideoOptions, selectComicVideoModel, type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaTreeEntry,
+  analyzeComicModelSwitch, comicVideoOptions, selectComicVideoModel, type ComicDramaClip, type ComicDramaSeries,
+  type ComicDramaSeriesInput, type ComicDramaTreeEntry, type ComicModelSwitchIssue,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
@@ -18,12 +19,15 @@ export type PresetDramaTarget = {
   latestEpisodeId?: string | null;
 };
 
-export function SeriesDialog({ series, presetDrama, models, close, save, error }: {
+export type SeriesModelAdaptOptions = { apply: boolean; clampDuration: boolean };
+
+export function SeriesDialog({ series, clips, presetDrama, models, close, save, error }: {
   series?: ComicDramaSeries;
+  clips?: readonly ComicDramaClip[];
   presetDrama?: PresetDramaTarget;
   models: readonly ComicDramaModel[];
   close: () => void;
-  save: (fields: ComicDramaSeriesInput) => Promise<boolean>;
+  save: (fields: ComicDramaSeriesInput, modelAdapt?: SeriesModelAdaptOptions) => Promise<boolean>;
   error: string | null;
 }) {
   const { t } = useI18n();
@@ -44,9 +48,37 @@ export function SeriesDialog({ series, presetDrama, models, close, save, error }
   const [videoModel, setVideoModel] = useState(
     series?.videoModel ?? presetDrama?.videoModel ?? selectComicVideoModel(models) ?? "",
   );
+  const [applyAdapt, setApplyAdapt] = useState(true);
+  const [clampDuration, setClampDuration] = useState(false);
   const [preferredVideo, setPreferredVideo] = useState<string | null>(null);
   const videoTouched = useRef(false);
   const available = comicVideoOptions(models, videoModel);
+  const switchReport = useMemo(
+    () => (series && clips?.length && videoModel ? analyzeComicModelSwitch(clips, videoModel, { clampDuration }) : null),
+    [series, clips, videoModel, clampDuration],
+  );
+  const describeSwitchIssue = (issue: ComicModelSwitchIssue): string => {
+    switch (issue.code) {
+      case "DURATION_EXCEEDS_MAX":
+        return t("时长 {0} 秒超过上限 {1} 秒（建议压缩或手动拆分）", [+(issue.durationMs / 1000).toFixed(1), issue.maxSeconds]);
+      case "DURATION_OUT_OF_RANGE":
+        return t("分镜时长 {0} 秒超出当前模型范围（{1}–{2} 整秒）", [+(issue.durationMs / 1000).toFixed(1), issue.minSeconds, issue.maxSeconds]);
+      case "RESOLUTION_UNSUPPORTED":
+        return t("分辨率 {0} 将自动映射为 {1}", [issue.from, issue.to]);
+      case "IMAGE_LIMIT_EXCEEDED":
+        return t("参考图 {0} 张超限（上限 {1} 张，将按优先级折叠 {2} 张）", [issue.totalImages, issue.limit, issue.excess]);
+      case "FILE_LIMIT_EXCEEDED":
+        return t("参考文件共 {0} 个超限（上限 {1} 个）", [issue.totalFiles, issue.limit]);
+      case "AUDIO_COUNT_EXCEEDED":
+        return t("参考音频 {0} 段超过上限 {1} 段", [issue.count, issue.limit]);
+      case "VIDEO_COUNT_EXCEEDED":
+        return t("参考视频 {0} 段超过上限 {1} 段", [issue.count, issue.limit]);
+      case "AUDIO_ONLY_UNSUPPORTED":
+        return t("当前模型不支持仅传参考音频，请至少补充 1 张参考图或 1 段参考视频");
+      case "EXTEND_UNSUPPORTED":
+        return t("目标模型不支持视频延长，将暂存原开关设置");
+    }
+  };
 
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => {
@@ -115,6 +147,9 @@ export function SeriesDialog({ series, presetDrama, models, close, save, error }
       : (dramaTitle.trim() || null);
     setBusy(true);
     try {
+      const adapt = switchReport && switchReport.affectedClips.length > 0
+        ? { apply: applyAdapt, clampDuration }
+        : undefined;
       if (await save({
         title: get("title"),
         logline: get("logline"),
@@ -126,7 +161,7 @@ export function SeriesDialog({ series, presetDrama, models, close, save, error }
         aspectRatio,
         videoModel: videoModel || null,
         ...(!series && sourceId ? { sourceSeriesId: sourceId, inheritCastAndStyle: inherit } : {}),
-      })) close();
+      }, adapt)) close();
     } finally { setBusy(false); }
   }
 
@@ -211,6 +246,38 @@ export function SeriesDialog({ series, presetDrama, models, close, save, error }
               {available.map(model => <option key={model.id} value={model.id}>{t(model.label)}</option>)}
             </select>
           </label>
+          {switchReport && switchReport.affectedClips.length > 0 && (
+            <div className="comic-compat-box" role="status">
+              <strong>{t("模型切换兼容检查 · {0} 个分镜受影响", [switchReport.affectedClips.length])}</strong>
+              <ul>
+                {switchReport.affectedClips.slice(0, 8).map(clip => (
+                  <li key={clip.clipId}>
+                    <strong>{t("分镜 {0}", [clip.clipOrdinal])}{clip.scene ? ` · ${clip.scene}` : ""}</strong>
+                    <small>
+                      {clip.issues.length > 0
+                        ? clip.issues.map(describeSwitchIssue).join("；")
+                        : t("切回此模型后可自动恢复先前折叠的参考图与原分辨率")}
+                    </small>
+                  </li>
+                ))}
+                {switchReport.affectedClips.length > 8 && (
+                  <li><small>{t("另有 {0} 个受影响分镜…", [switchReport.affectedClips.length - 8])}</small></li>
+                )}
+              </ul>
+              {(switchReport.autoAdaptableCount > 0 || switchReport.restorableCount > 0) && (
+                <label className="comic-sequel-option">
+                  <input type="checkbox" checked={applyAdapt} onChange={event => setApplyAdapt(event.target.checked)} />
+                  {t("保存并一键兼容适配（保留原绑定，切回高规格模型可恢复）")}
+                </label>
+              )}
+              {switchReport.durationNeedsAttentionCount > 0 && (
+                <label className="comic-sequel-option">
+                  <input type="checkbox" checked={clampDuration} onChange={event => setClampDuration(event.target.checked)} />
+                  {t("同时将超长分镜时长压缩至 {0} 秒上限（不勾选则保留原时长供手动拆分）", [switchReport.targetProfile.shotMaxSeconds])}
+                </label>
+              )}
+            </div>
+          )}
           {error && <p className="comic-error" role="alert">{error}</p>}
           <div className="comic-actions">
             <button type="button" onClick={close}>{t("取消")}</button>

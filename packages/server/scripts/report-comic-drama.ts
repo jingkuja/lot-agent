@@ -3,7 +3,8 @@ import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { queryComicDramaReport } from "../src/comic-drama/operations-report.js";
+import { queryComicDramaReport, summarizeComicPilotReport } from "../src/comic-drama/operations-report.js";
+import { readDiskFreeBytes } from "../src/comic-drama/temp-cleanup.js";
 
 const database = process.env.COMIC_DRAMA_REPORT_DATABASE_URL;
 const hours = Number(process.argv[2] ?? 24);
@@ -27,10 +28,21 @@ async function temporary(root: string, pattern: RegExp) {
 try {
   const report = await queryComicDramaReport(pool, hours);
   const root = process.env.COMIC_DRAMA_REPORT_MEDIA_ROOT || fileURLToPath(new URL("../../../data/comic-drama", import.meta.url));
-  const temp = await Promise.all([temporary(root, /^\.(upload|frame|render)-/), temporary(tmpdir(), /^lot-comic-render-/)]);
+  const [uploadsTemp, rendersTemp, uploadsFreeBytes, rendersFreeBytes] = await Promise.all([
+    temporary(root, /^\.(upload|frame|render)-/),
+    temporary(tmpdir(), /^lot-comic-render-/),
+    readDiskFreeBytes(root),
+    readDiskFreeBytes(tmpdir()),
+  ]);
+  const temporarySummary = {
+    uploads: { ...uploadsTemp, freeBytes: uploadsFreeBytes },
+    renders: { ...rendersTemp, freeBytes: rendersFreeBytes },
+  };
   console.log(JSON.stringify({
-    hours, ...report,
-    temporary: { uploads: temp[0], renders: temp[1] },
+    hours,
+    pilotSummary: summarizeComicPilotReport(report, temporarySummary),
+    ...report,
+    temporary: temporarySummary,
     settlement: "Compare gateway receipts with actual bills; local totals are estimates.",
   }, null, 2));
 } catch {

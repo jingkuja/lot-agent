@@ -96,8 +96,16 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   assert.equal((await request<ComicDirectorState>(path)).quotes?.[0].confirmed, false);
   const confirm = (status = 202) => request<ComicImageRequest>(series + "/generate", "POST", { confirmationId: quote.confirmationId }, status);
   config.COMIC_DRAMA_PILOT_OWNER_IDS = owner;
+  assert.equal((await (await app.request("/api/public/product", { headers: { Authorization: "Bearer fixture-one" } })).json()).comicDramaEnabled, true);
+  assert.equal((await (await app.request("/api/public/product", { headers: { Authorization: "Bearer fixture-two" } })).json()).comicDramaEnabled, false);
+  assert.equal((await (await app.request("/api/public/product")).json()).comicDramaEnabled, false);
   assert.equal((await request<ComicDirectorState>(path)).quotes?.length, 1);
   assert.equal((await app.request(COMIC_DRAMA_API_ROOT + "/series", { headers: { Authorization: "Bearer fixture-two" } })).status, 404);
+  config.COMIC_DRAMA_ENTRY_HIDDEN = "1";
+  assert.equal((await (await app.request("/api/public/product", { headers: { Authorization: "Bearer fixture-one" } })).json()).comicDramaEnabled, false);
+  assert.equal((await request<ComicDirectorState>(path)).quotes?.length, 1);
+  assert.equal((await app.request(COMIC_DRAMA_API_ROOT + "/series", { headers: { Authorization: "Bearer fixture-two" } })).status, 404);
+  delete config.COMIC_DRAMA_ENTRY_HIDDEN;
   delete config.COMIC_DRAMA_PILOT_OWNER_IDS;
   config.COMIC_DRAMA_WRITES_PAUSED = "1";
   assert.equal((await confirm(503) as unknown as { code: string }).code, "COMIC_SUBMISSIONS_PAUSED");
@@ -158,6 +166,15 @@ export async function verifyComicRelease(app: Hono<{ Variables: { userId: string
   const speech = await request<ComicSpeechTake>(speaker + "/" + lines.lines[0].id + "/speech", "POST", {
     expectedRevision: edit.revision, expectedClipRevision: lines.clipRevision, voice: { kind: "preset", preset: "alloy" },
   });
+  config.COMIC_DRAMA_WRITES_PAUSED = "1";
+  const cachedSpeech = await request<ComicSpeechTake>(speaker + "/" + lines.lines[0].id + "/speech", "POST", {
+    expectedRevision: edit.revision, expectedClipRevision: lines.clipRevision, voice: { kind: "preset", preset: "alloy" },
+  });
+  assert.equal(cachedSpeech.cached, true);
+  assert.equal((await request<{ code: string }>(speaker + "/" + lines.lines[0].id + "/speech", "POST", {
+    expectedRevision: edit.revision, expectedClipRevision: lines.clipRevision, voice: { kind: "preset", preset: "onyx" },
+  }, 503)).code, "COMIC_SUBMISSIONS_PAUSED");
+  delete config.COMIC_DRAMA_WRITES_PAUSED;
   const music = (await request<ComicLibraryPage<ComicMaterial>>("/materials?kind=music")).entries.find(item => item.name === "W9 配乐样例");
   assert.ok(music);
   const audio = (mediaId: string, durationMs: number, volume: number, loop: boolean) => ({

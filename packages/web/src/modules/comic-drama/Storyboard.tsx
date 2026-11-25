@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  checkComicClipIssues, comicVideoDurationSupported, comicVideoProfile, rebalanceShotDurationShares,
+  adaptComicClipDraftForModel, checkComicClipIssues, COMIC_VIDEO_SAFE_COMMON_LIMITS, comicVideoDurationSupported,
+  comicVideoProfile, countComicClipFoldedReferences, rebalanceShotDurationShares, resolveComicVideoAudioMode,
   type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip,
   type ComicDramaClipDraft, type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialImageKind,
   type ComicMaterialKind, type ComicMaterialRef, type ComicMedia, type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
-  type ComicVideoMaterialRef, type ComicVideoProfile,
+  type ComicVideoAudioMode, type ComicVideoMaterialRef, type ComicVideoProfile,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
+import { describeComicClipCheckIssue } from "./clip-check-copy.js";
 import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
@@ -15,7 +17,6 @@ import { DictionaryOptions, MediaPreview, useComicChoices } from "./LibraryParts
 import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
 
 const videoInputLabels = { image: "参考图", audio: "参考音频", video: "参考视频", last_frame: "尾帧" } as const;
-const refLabels = { scene: "场景", prop: "道具", sfx: "音效", ...videoInputLabels } as const;
 
 type Props = {
   dramaTitle?: string;
@@ -64,6 +65,9 @@ export function Storyboard({
   const clipIssues = clip && activeDraft
     ? checkComicClipIssues({ videoModel: series?.videoModel ?? null }, { ...clip, draft: activeDraft }, cast)
     : [];
+  const adaptedPreview = clip && activeDraft && series?.videoModel
+    ? adaptComicClipDraftForModel(activeDraft, series.videoModel)
+    : null;
   const move = (id: string, to: number) => {
     const from = clips.findIndex(item => item.id === id);
     if (disabled || from < 0 || to < 0 || to >= clips.length || from === to) return;
@@ -140,6 +144,7 @@ export function Storyboard({
         </div>
       </header>
       {clipIssues.length > 0 && <ClipIssueBanner issues={clipIssues} cast={cast} disabled={locked}
+        onAdapt={adaptedPreview?.changed ? () => edit(clip.id, adaptedPreview.draft) : undefined}
         addCast={characterId => {
           const member = cast.find(entry => entry.snapshot.characterId === characterId);
           if (!member || (activeDraft.cast ?? []).some(a => a.characterId === characterId)) return;
@@ -153,38 +158,24 @@ export function Storyboard({
   </div>;
 }
 
-function ClipIssueBanner({ issues, cast, disabled, addCast }: {
-  issues: ComicClipCheckIssue[]; cast: readonly ComicSeriesCast[]; disabled: boolean; addCast: (characterId: string) => void;
+function ClipIssueBanner({ issues, cast, disabled, addCast, onAdapt }: {
+  issues: ComicClipCheckIssue[]; cast: readonly ComicSeriesCast[]; disabled: boolean;
+  addCast: (characterId: string) => void; onAdapt?: () => void;
 }) {
   const { t } = useI18n();
   return <div className="comic-issue-banner" role="status">
-    <strong>{t("分镜查漏提醒")}</strong>
+    <div className="comic-actions">
+      <strong>{t("分镜查漏提醒")}</strong>
+      {!disabled && onAdapt && (
+        <button type="button" onClick={onAdapt}>{t("一键兼容当前模型")}</button>
+      )}
+    </div>
     <ul>{issues.map((issue, idx) => (
       <li key={idx}>
-        {issue.code === "SPEAKER_NOT_IN_CAST" && <>
-          <span>{t("台词说话人「{0}」未在本镜出镜人物中", [issue.speaker])}</span>
-          {!disabled && issue.suggestedCharacterId && cast.some(c => c.snapshot.characterId === issue.suggestedCharacterId) && (
-            <button type="button" onClick={() => addCast(issue.suggestedCharacterId!)}>{t("一键加入出镜")}</button>
-          )}
-        </>}
-        {issue.code === "REFERENCE_LIMIT_EXCEEDED" && (
-          <span>{t("当前参考图共 {0} 张，超出模型上限（{1} 张）", [issue.count, issue.limit])}</span>
-        )}
-        {issue.code === "DIALOGUE_TOO_LONG" && (
-          <span>{t("台词估算约 {0} 秒，超出本镜时长（{1} 秒）", [+(issue.estimatedMs / 1000).toFixed(1), +(issue.durationMs / 1000).toFixed(1)])}</span>
-        )}
-        {issue.code === "CAST_UPDATED_IN_LIBRARY" && (
-          <span>{issue.reason === "generated_outdated"
-            ? t("角色「{0}」当前造型已晚于已生成版本，建议核对或重生成", [issue.characterName])
-            : t("角色「{0}」在角色库中有更新，可到选角处同步", [issue.characterName])}</span>
-        )}
-        {issue.code === "INVALID_MATERIAL_REFERENCE" && (
-          <span>{t("所绑定的{0}素材「{1}」已失效（{2}），请重新绑定或移除", [
-            t(refLabels[issue.role]),
-            issue.name ?? issue.materialId.slice(0, 8),
-            t(issue.reason === "ARCHIVED" ? "已归档" : issue.reason === "OUTDATED_VERSION" ? "已有新版"
-              : issue.reason === "WRONG_KIND" ? "类别不符" : "已缺失"),
-          ])}</span>
+        <span>{describeComicClipCheckIssue(issue, t)}</span>
+        {issue.code === "SPEAKER_NOT_IN_CAST" && !disabled && issue.suggestedCharacterId
+          && cast.some(c => c.snapshot.characterId === issue.suggestedCharacterId) && (
+          <button type="button" onClick={() => addCast(issue.suggestedCharacterId!)}>{t("一键加入出镜")}</button>
         )}
       </li>
     ))}</ul>
@@ -435,9 +426,47 @@ function ClipVideoInputs({ draft, profile, change }: {
   };
   const pickMime = pick === "last_frame" ? "image" : pick;
   const update = (value: Partial<NonNullable<ComicDramaClipDraft["videoInputs"]>>) => change({ ...input, references: refs, ...value });
+  const hasAudioRef = refs.some(ref => ref.kind === "audio");
+  const audioMode = resolveComicVideoAudioMode(input?.audioMode, hasAudioRef);
+  const foldedCount = countComicClipFoldedReferences(draft);
+  const hasAdaptation = foldedCount > 0 || Boolean(input?.modelAdaptation?.originalResolution) || Boolean(input?.modelAdaptation?.originalSourceDuration);
   return <details className="comic-video-references" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{t("分镜视频输入（{0}）", [refs.length])}</summary>
     <div className="comic-clip-fields">
+      <label>{t("音频来源模式")}
+        <select aria-label={t("音频来源模式")} value={audioMode} onChange={event => {
+          const nextMode = event.target.value as ComicVideoAudioMode;
+          update({ audioMode: nextMode });
+        }}>
+          <option value="silent_tts">{t("无声生成 + 后期配音（默认）")}</option>
+          <option value="native_audio">{t("模型原生音画对白（含人声，后期仅铺字幕）")}</option>
+          <option value="reference_audio">{t("外部参考音频驱动口型")}</option>
+        </select>
+      </label>
+      <small className="comic-safe-hint">
+        {t("跨模型安全范围：{0}–{1} 整秒 · ≤{2} 张图 · ≤{3} 个文件 · 音视频各 ≤{4} 秒 · 音频不单传", [
+          COMIC_VIDEO_SAFE_COMMON_LIMITS.minSeconds,
+          COMIC_VIDEO_SAFE_COMMON_LIMITS.maxSeconds,
+          COMIC_VIDEO_SAFE_COMMON_LIMITS.maxImages,
+          COMIC_VIDEO_SAFE_COMMON_LIMITS.maxTotalFiles,
+          COMIC_VIDEO_SAFE_COMMON_LIMITS.maxAudioTotalSeconds,
+        ])}
+      </small>
+      {hasAdaptation && (
+        <div className="comic-compat-box" role="note">
+          <small>
+            {t("已启用模型兼容适配（折叠 {0} 张超限参考图{1}），原绑定已保留，切回高规格模型可自动恢复。", [
+              foldedCount,
+              input?.modelAdaptation?.originalResolution ? ` · ${t("原分辨率 {0}", [input.modelAdaptation.originalResolution])}` : "",
+            ])}
+          </small>
+          <button type="button" onClick={() => update({
+            resolution: input?.modelAdaptation?.originalResolution ?? input?.resolution,
+            sourceDuration: input?.modelAdaptation?.originalSourceDuration ? true : input?.sourceDuration,
+            modelAdaptation: undefined,
+          })}>{t("恢复原绑定")}</button>
+        </div>
+      )}
       {profile && <>
         <small role={comicVideoDurationSupported(draft.durationMs, profile) ? undefined : "status"}>
           {t("目标时长 {0} 秒 · 允许 4–{1} 整秒", [draft.durationMs / 1000, profile.shotMaxSeconds])}

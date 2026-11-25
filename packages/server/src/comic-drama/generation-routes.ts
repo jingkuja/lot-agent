@@ -131,12 +131,27 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       return { inputs: [], skipped: clips.map(clip => ({ clipId: clip.id, reason: "REFERENCE_MODE_CONFLICT" as const })),
         replaceAdopted: [], visualReferences: [] };
     }
-    const persistedSpecs = strictFirstFrame ? [] : clips.flatMap(clip => [
-      ...(clip.draft.sceneRef ? [{ kind: "scene" as const, ...clip.draft.sceneRef, pinned: true as const }] : []),
-      ...(clip.draft.propRefs ?? []).map(ref => ({ kind: "prop" as const, ...ref, pinned: true as const })),
-    ]);
+    const foldedProps = (clip: ComicDramaDetail["clips"][number]) =>
+      new Set(isVideo ? (clip.draft.videoInputs?.modelAdaptation?.foldedPropMediaIds ?? []) : []);
+    const foldedExtras = (clip: ComicDramaDetail["clips"][number]) =>
+      new Set(isVideo ? (clip.draft.videoInputs?.modelAdaptation?.foldedExtraImageMediaIds ?? []) : []);
+    const isSceneFolded = (clip: ComicDramaDetail["clips"][number]) =>
+      isVideo && clip.draft.videoInputs?.modelAdaptation?.foldedSceneRef === true;
+    const isStyleFolded = (clip: ComicDramaDetail["clips"][number]) =>
+      isVideo && clip.draft.videoInputs?.modelAdaptation?.foldedStyleRef === true;
+    const persistedSpecs = strictFirstFrame ? [] : clips.flatMap(clip => {
+      const hiddenProps = foldedProps(clip);
+      return [
+        ...(clip.draft.sceneRef && !isSceneFolded(clip) ? [{ kind: "scene" as const, ...clip.draft.sceneRef, pinned: true as const }] : []),
+        ...(clip.draft.propRefs ?? []).filter(ref => !hiddenProps.has(ref.mediaId))
+          .map(ref => ({ kind: "prop" as const, ...ref, pinned: true as const })),
+      ];
+    });
     const uniquePersisted = [...new Map([...explicitRefs, ...persistedSpecs].map(ref => [visualReferenceKey(ref), ref])).values()];
-    const specs = isVideo ? clips.flatMap(clip => clip.draft.videoInputs?.references ?? []) : [];
+    const specs = isVideo ? clips.flatMap(clip => {
+      const hiddenExtras = foldedExtras(clip);
+      return (clip.draft.videoInputs?.references ?? []).filter(ref => ref.kind !== "image" || !hiddenExtras.has(ref.mediaId));
+    }) : [];
     const measure = createReferenceMeasurements(deps.media, owner, signal);
     const [model, styles, frames, persistedInspection, stylePreset, generationRefs] = await Promise.all([
       modelId,
@@ -164,10 +179,13 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       if (versions?.adopted && !replaceAdopted.includes(clip.id)) { skipped.push({ clipId: clip.id, reason: "ALREADY_COMPLETE" }); continue; }
       const clipRefs: ComicGenerationReference[] = [];
       const seenMedia = new Set<string>();
+      const hiddenProps = foldedProps(clip);
+      const hiddenExtras = foldedExtras(clip);
       const clipPersisted = strictFirstFrame ? [] : [
         ...explicitRefs.map(({ kind, ...ref }) => ({ role: kind, ...ref, name: undefined, pinned: undefined })),
-        ...(clip.draft.sceneRef ? [{ role: "scene" as const, ...clip.draft.sceneRef, pinned: true as const }] : []),
-        ...(clip.draft.propRefs ?? []).map(ref => ({ role: "prop" as const, ...ref, pinned: true as const })),
+        ...(clip.draft.sceneRef && !isSceneFolded(clip) ? [{ role: "scene" as const, ...clip.draft.sceneRef, pinned: true as const }] : []),
+        ...(clip.draft.propRefs ?? []).filter(ref => !hiddenProps.has(ref.mediaId))
+          .map(ref => ({ role: "prop" as const, ...ref, pinned: true as const })),
       ];
       const invalidReferences: ComicSkippedInvalidReference[] = [];
       const clipFrozen: FrozenVisualReference[] = [];
@@ -199,7 +217,9 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
       const refIssues: ComicGenerationIssue[] = [];
       const timedReferences: ComicGenerationTimedMedia[] = [];
       let lastFrame: ComicGenerationImage | undefined;
-      const manual = isVideo ? clip.draft.videoInputs?.references ?? [] : [];
+      const manual = isVideo
+        ? (clip.draft.videoInputs?.references ?? []).filter(ref => ref.kind !== "image" || !hiddenExtras.has(ref.mediaId))
+        : [];
       if (manual.some(ref => strictFirstFrame !== (ref.kind === "last_frame"))) {
         skipped.push({ clipId: clip.id, reason: "REFERENCE_MODE_CONFLICT" });
         continue;
@@ -228,7 +248,7 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
         skipped.push({ clipId: clip.id, reason: refIssues[0].code, issues: refIssues });
         continue;
       }
-      if (styleRef && stylePreset && !seenMedia.has(styleRef.mediaId)) {
+      if (styleRef && stylePreset && !isStyleFolded(clip) && !seenMedia.has(styleRef.mediaId)) {
         clipRefs.push(styleRef);
         clipFrozen.push({ materialId: null, mediaId: styleRef.mediaId, version: 1, styleKey: stylePreset.styleKey });
       }

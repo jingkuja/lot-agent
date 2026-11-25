@@ -75,13 +75,46 @@ export function layoutComicTimeline(timeline: ComicTimeline) {
   };
 }
 
+export const comicRenderFpsOptions = [24, 30] as const;
+export type ComicRenderFps = (typeof comicRenderFpsOptions)[number];
+export const comicRenderFpsModes = ["auto", "24", "30"] as const;
+export type ComicRenderFpsMode = (typeof comicRenderFpsModes)[number];
+export const comicRenderFramePolicies = ["native", "cfr_convert"] as const;
+export type ComicRenderFramePolicy = (typeof comicRenderFramePolicies)[number];
+export const COMIC_RENDER_DEFAULT_FPS: ComicRenderFps = 24;
 export const COMIC_RENDER_FPS = 30;
 export const COMIC_RENDER_MAX_MS = 300_000;
 export const COMIC_RENDER_MAX_VIDEO_CLIPS = 60;
 export const COMIC_RENDER_MAX_AUDIO_ITEMS = 240;
 /** Max inputs for a single FFmpeg composition pass (audio tracks premix into stems when total exceeds this). */
 export const COMIC_RENDER_MAX_INPUTS = 64;
-export const comicFrame = (timeMs: number) => Math.round(timeMs * COMIC_RENDER_FPS / 1000);
+export const comicFrame = (timeMs: number, fps: ComicRenderFps = COMIC_RENDER_FPS) => Math.round(timeMs * fps / 1000);
+/** One-frame output duration tolerance in ms (34 ms @ 30 fps, 42 ms @ 24 fps). */
+export const comicRenderDurationToleranceMs = (fps: ComicRenderFps = COMIC_RENDER_FPS) => Math.ceil(1000 / fps);
+/** Matches both 24.000 fps and NTSC film 23.976 fps (24000/1001). */
+export const isComic24Fps = (fps: number) => Number.isFinite(fps) && Math.abs(fps - 24) <= 0.15;
+
+export type ComicRenderFpsResolution = {
+  fps: ComicRenderFps;
+  mixedSourceFps: boolean;
+  allSources24Fps: boolean;
+  policy: ComicRenderFramePolicy;
+  sourceFpsValues: number[];
+};
+
+export function resolveComicRenderFps(
+  sourceFpsValues: readonly number[],
+  requested: ComicRenderFpsMode = "auto",
+): ComicRenderFpsResolution {
+  const valid = sourceFpsValues.filter(value => Number.isFinite(value) && value > 0);
+  const allSources24Fps = valid.length > 0 && valid.every(isComic24Fps);
+  const distinct = [...new Set(valid.map(value => (isComic24Fps(value) ? 24 : Math.round(value * 100) / 100)))];
+  const mixedSourceFps = distinct.length > 1;
+  const fps: ComicRenderFps = requested === "24" ? 24 : requested === "30" ? 30 : allSources24Fps ? 24 : 30;
+  const allMatchTarget = valid.length > 0 && valid.every(value => Math.abs(value - fps) <= 0.15);
+  const policy: ComicRenderFramePolicy = allMatchTarget ? "native" : "cfr_convert";
+  return { fps, mixedSourceFps, allSources24Fps, policy, sourceFpsValues: distinct };
+}
 
 export function comicTimelineOverflow(timeline: ComicTimeline) {
   const layout = layoutComicTimeline(timeline);
@@ -92,7 +125,7 @@ export function comicTimelineOverflow(timeline: ComicTimeline) {
   }).map(item => item.id));
 }
 
-export function comicRenderIssue(timeline: ComicTimeline) {
+export function comicRenderIssue(timeline: ComicTimeline, fps: ComicRenderFps = COMIC_RENDER_FPS) {
   const layout = layoutComicTimeline(timeline);
   if (!timeline.video.length) return "RENDER_NO_VIDEO";
   const audioCount = timeline.voice.length + timeline.sfx.length + timeline.music.length;
@@ -101,9 +134,9 @@ export function comicRenderIssue(timeline: ComicTimeline) {
     audioCount > COMIC_RENDER_MAX_AUDIO_ITEMS) return "RENDER_LIMIT";
   if (comicTimelineOverflow(timeline).length) return "RENDER_TRACK_OVERFLOW";
   if (layout.video.some((item, index) => {
-    const start = comicFrame(item.startMs), end = comicFrame(item.endMs);
-    const priorEnd = index ? comicFrame(layout.video[index - 1].endMs) : start;
-    const nextStart = index + 1 < layout.video.length ? comicFrame(layout.video[index + 1].startMs) : end;
+    const start = comicFrame(item.startMs, fps), end = comicFrame(item.endMs, fps);
+    const priorEnd = index ? comicFrame(layout.video[index - 1].endMs, fps) : start;
+    const nextStart = index + 1 < layout.video.length ? comicFrame(layout.video[index + 1].startMs, fps) : end;
     return end <= start || nextStart <= priorEnd || (timeline.video[index].transitionIn.kind !== "cut" && priorEnd <= start);
   })) return "RENDER_FRAME_RANGE";
   return null;
@@ -112,9 +145,12 @@ export function comicRenderIssue(timeline: ComicTimeline) {
 export const comicRenderRequestSchema = z.object({
   expectedRevision: z.number().int().min(1).max(2_147_483_647),
   requestId: id.transform(value => value.toLowerCase()),
+  fpsMode: z.enum(comicRenderFpsModes).optional(),
 }).strict();
 export const comicFrozenRenderSchema = z.object({
   schemaVersion: z.literal(1), editId: id, editRevision: z.number().int().positive(), timeline: comicTimelineSchema,
+  fpsMode: z.enum(comicRenderFpsModes).optional(),
+  outputFps: z.union([z.literal(24), z.literal(30)]).optional(),
 }).strict();
 export type ComicFrozenRenderInput = z.infer<typeof comicFrozenRenderSchema>;
 export type ComicRenderRequest = z.infer<typeof comicRenderRequestSchema>;
@@ -122,6 +158,8 @@ export type ComicRender = {
   id: string; editId: string; editRevision: number; durationMs: number;
   status: "pending" | "running" | "ready" | "failed" | "cancelled"; error: string | null; mediaId: string | null;
   title: string | null; createdAt: string; recoverable: boolean;
+  outputFps?: ComicRenderFps | null;
+  fpsMode?: ComicRenderFpsMode | null;
 };
 export type ComicRenderHistory = { entries: ComicRender[]; nextCursor: string | null };
 export type ComicRenderDownload = { url: string; filename: string };

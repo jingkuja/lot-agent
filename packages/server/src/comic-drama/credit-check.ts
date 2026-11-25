@@ -1,5 +1,6 @@
 import {
-  COMIC_VIDEO_RESOLUTION, comicVideoProfile, type ComicFrozenGenerationInput, type ComicVideoCreditCheck,
+  COMIC_VIDEO_RESOLUTION, comicVideoProfile, resolveComicVideoAudioMode,
+  type ComicFrozenGenerationInput, type ComicVideoCreditCheck,
 } from "@lot-agent/core/comic-drama";
 import { predictModelCost } from "../billing/model-estimate.js";
 import type { StoredUser } from "../db/database.js";
@@ -7,13 +8,14 @@ import type { ModelEstimateRequest, TokenhubClient } from "../tokenhub/client.js
 
 export function comicVideoEstimateUsage(
   input: Pick<ComicFrozenGenerationInput, "modelId" | "resolution" | "durationMs" | "aspectRatio" | "timedReferences"> &
-    Partial<Pick<ComicFrozenGenerationInput, "mode" | "sourceDuration" | "firstFrame">>,
+    Partial<Pick<ComicFrozenGenerationInput, "mode" | "sourceDuration" | "firstFrame" | "audioMode">>,
   imageCount: number,
 ): ModelEstimateRequest {
   const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
   const media = input.timedReferences ?? [];
   const videos = media.filter(ref => ref.kind === "video");
   const audio = media.filter(ref => ref.kind === "audio");
+  const generateAudio = resolveComicVideoAudioMode(input.audioMode, audio.length > 0) !== "silent_tts";
   const adaptive = input.mode === "edit" || input.mode === "extend"
     || input.mode === "from_keyframe" && comicVideoProfile(input.modelId)?.adaptiveFrame;
   const source = input.mode === "from_keyframe" ? input.firstFrame : videos[0];
@@ -27,7 +29,7 @@ export function comicVideoEstimateUsage(
       input_image_count: imageCount,
     },
     request_parameters: {
-      resolution, generate_audio: !!audio.length, ratio: adaptive ? "adaptive" : input.aspectRatio,
+      resolution, generate_audio: generateAudio, ratio: adaptive ? "adaptive" : input.aspectRatio,
       ...(adaptive ? { estimate_ratio: estimateRatio } : {}),
       ...(!Number.isInteger(outputSeconds) ? { output_video_seconds: outputSeconds } : {}),
       ...(videos.length ? { reference_video_seconds: videos.reduce((sum, ref) => sum + ref.durationMs / 1000, 0) } : {}),

@@ -134,7 +134,9 @@ export async function inspectMedia(path: string, signal?: AbortSignal) {
   const rotation = Number(video?.side_data_list?.find((d: { rotation?: number }) => d.rotation !== undefined)?.rotation ?? 0);
   return { width: Number(video?.width ?? 0), height: Number(video?.height ?? 0), fps: Number(fpsNumerator) / Number(fpsDenominator), format, duration,
     audio: has("audio"), video: has("video"), rotation: Number.isFinite(rotation) ? rotation : 0,
-    transfer: video?.color_transfer as string | undefined, videoCodec: video?.codec_name as string | undefined,
+    transfer: video?.color_transfer as string | undefined,
+    ...(typeof video?.pix_fmt === "string" ? { pixFmt: video.pix_fmt } : {}),
+    videoCodec: video?.codec_name as string | undefined,
     audioCodec: audio?.codec_name as string | undefined, sampleRate: Number(audio?.sample_rate), channels: Number(audio?.channels),
     mov: signature.slice(8, 12) === "qt  " };
 }

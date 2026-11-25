@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { comicRenderIssue, type ComicEdit, type ComicRender, type ComicRenderHistory } from "@lot-agent/core/comic-drama";
+import {
+  comicRenderIssue, type ComicEdit, type ComicRender, type ComicRenderFps, type ComicRenderFpsMode, type ComicRenderHistory,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { ApiClientError } from "../../api/client.js";
 import { comicEditApi, comicRenderError, editError } from "./edit-api.js";
@@ -16,9 +18,11 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
   const [refresh, setRefresh] = useState(0);
   const [preview, setPreview] = useState<string>();
   const [pending, setPending] = useState<string | null>(null);
+  const [fpsMode, setFpsMode] = useState<ComicRenderFpsMode>("auto");
   const running = useRef(false);
-  const request = useRef<{ revision: number; requestId: string }>(null);
-  const issue = project ? comicRenderIssue(project.timeline) : null;
+  const request = useRef<{ revision: number; fpsMode: ComicRenderFpsMode; requestId: string }>(null);
+  const targetFps: ComicRenderFps = fpsMode === "24" ? 24 : 30;
+  const issue = project ? comicRenderIssue(project.timeline, targetFps) : null;
   const edit = project?.id;
   const cursor = cursors.at(-1);
   const reload = () => setRefresh(value => value + 1);
@@ -47,10 +51,12 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
   };
   const submit = () => void action("submit", async () => {
     if (!project || dirty || issue) return;
-    const nonce = request.current?.revision === project.revision ? request.current : { revision: project.revision, requestId: crypto.randomUUID() };
+    const nonce = request.current?.revision === project.revision && request.current?.fpsMode === fpsMode
+      ? request.current
+      : { revision: project.revision, fpsMode, requestId: crypto.randomUUID() };
     request.current = nonce;
     try {
-      await comicEditApi.startRender(project.id, { expectedRevision: nonce.revision, requestId: nonce.requestId });
+      await comicEditApi.startRender(project.id, { expectedRevision: nonce.revision, requestId: nonce.requestId, fpsMode: nonce.fpsMode });
       request.current = null;
       setCursors([]);
       reload();
@@ -81,6 +87,17 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     <header>
       {project ? <h2>{t("合并导出")}</h2> : <h1>{t("导出历史")}</h1>}
       <div className="comic-actions">
+        {project && (
+          <label className="comic-render-fps">
+            <span>{t("导出帧率")}</span>
+            <select aria-label={t("导出帧率")} value={fpsMode} disabled={pending !== null}
+              onChange={event => setFpsMode(event.target.value as ComicRenderFpsMode)}>
+              <option value="auto">{t("自动（全 24 fps 原生导出，混帧转 30 fps）")}</option>
+              <option value="24">{t("24 fps（漫剧原生帧率）")}</option>
+              <option value="30">{t("30 fps（恒定帧率兼容）")}</option>
+            </select>
+          </label>
+        )}
         <button type="button" onClick={reload}>{t("重新读取导出状态")}</button>
         {project && <button type="button" className="primary" onClick={submit} disabled={dirty || pending !== null || !!issue}>
           {t(pending === "submit" ? "正在提交…" : "导出 MP4")}
@@ -95,7 +112,10 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     {history && (history.entries.length ? <ul className="comic-export-history">{history.entries.map(render => <li key={render.id} className="comic-render-result">
       <div>
         <strong>{render.title || t("未命名剪辑工程")}</strong>
-        <small>{t("导出修订 {0}", [render.editRevision])} · {t("{0} 秒", [render.durationMs / 1000])} · {new Date(render.createdAt).toLocaleString(locale)}</small>
+        <small>
+          {t("导出修订 {0}", [render.editRevision])} · {t("{0} 秒", [render.durationMs / 1000])}
+          {render.outputFps ? ` · ${render.outputFps} fps` : ""} · {new Date(render.createdAt).toLocaleString(locale)}
+        </small>
       </div>
       <span role="status">{t(render.status === "ready" ? "导出完成" : render.status === "pending" ? "等待合成" :
         render.status === "running" ? "正在合成" : render.status === "cancelled" ? "已取消" : comicRenderError(render.error ?? ""))}</span>

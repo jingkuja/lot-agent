@@ -26,7 +26,9 @@ describe("task status transitions", () => {
   it("only reads old unclaimed tasks, without declaring queue latency a failure", async () => {
     const { db, query } = fakeDb();
     await db.findStalePendingTasks(60_000);
-    expect(query.mock.calls[0][0]).toContain("queue_name IN ('lot-tasks','lot-marketing-video')");
+    expect(query.mock.calls[0][0]).toContain(
+      "queue_name IN ('lot-tasks','lot-marketing-video','lot-comic-image','lot-comic-video','lot-comic-render')",
+    );
     expect(query.mock.calls[0][0]).toContain("status = 'pending' AND attempts = 0");
     expect(query.mock.calls[0][0]).not.toContain("UPDATE");
   });

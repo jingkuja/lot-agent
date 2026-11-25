@@ -7,7 +7,8 @@ import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { Hono } from "hono";
 import {
-  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, type ComicGenerationImage, type ComicGenerationTimedMedia,
+  COMIC_MEDIA_PATH, COMIC_RENDER_MAX_MS, comicRenderDurationToleranceMs,
+  type ComicGenerationImage, type ComicGenerationTimedMedia,
   type ComicLibraryRepository, type ComicMaterialKind, type ComicMediaLinks, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { createUploadAccessGuard, privateFilesEnabled, signPrivateMaterial, type PrivateMaterialOptions } from "../generation/private-materials.js";
@@ -71,6 +72,8 @@ export class ComicMediaLibrary {
     private readonly repo: Pick<ComicLibraryRepository, "media" | "file">,
     private readonly signing: PrivateMaterialOptions = {},
   ) {}
+
+  get rootDir() { return this.root; }
 
   assertAvailable() {
     if (!privateFilesEnabled(this.signing)) throw new ComicLibraryError("MEDIA_UNAVAILABLE", 503);
@@ -185,7 +188,8 @@ export class ComicMediaLibrary {
     const mime = typedMime === "audio/x-wav" ? "audio/wav" : typedMime ?? "";
     const video = kind === "generated-video" || kind === "render";
     if (video && mime !== "video/mp4") throw new ComicLibraryError("UNSUPPORTED_MEDIA", 415);
-    const { ext, maxBytes, maxMs } = kind === "render" ? { ext: "mp4", maxBytes: 350 * MiB, maxMs: COMIC_RENDER_MAX_MS + 34 }
+    const { ext, maxBytes, maxMs } = kind === "render"
+      ? { ext: "mp4", maxBytes: 350 * MiB, maxMs: COMIC_RENDER_MAX_MS + comicRenderDurationToleranceMs(24) }
       : kind === "generated-video" ? { ext: "mp4", maxBytes: COMIC_VIDEO_MAX_BYTES, maxMs: 60_000 } : limits(kind, mime);
     if (!request.body) throw new ComicLibraryError("FILE_REQUIRED", 400);
     if (Number(request.headers.get("content-length")) > maxBytes) throw new ComicLibraryError("MEDIA_TOO_LARGE", 413);

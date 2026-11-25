@@ -25,8 +25,11 @@ import { initializePosterFonts } from "../generation/poster-render.js";
 import { DurableImageProvider, PgImageCallStore, imageCallFingerprint } from "../generation/image-receipts.js";
 import { runMarketingVideo } from "../marketing-video/run.js";
 import { runDigitalPresenter } from "../digital-presenter/run.js";
-import { COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue, marketingQueueLimits } from "../jobs/task-queues.js";
+import {
+  COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, comicQueueLimits, DIGITAL_PRESENTER_TASK, marketingQueueLimits, workerPoolIssue,
+} from "../jobs/task-queues.js";
 import { runComicRender } from "../comic-drama/render-worker.js";
+import { startComicTempCleanup } from "../comic-drama/temp-cleanup.js";
 import { createComicDirectorExtension } from "../comic-drama/director-agent.js";
 import { createComicDirectorLlmResolver, createComicDirectorModelPolicy } from "../comic-drama/director-model.js";
 import { PgComicDirector } from "../comic-drama/director-repository.js";
@@ -125,7 +128,9 @@ async function main() {
     database: process.env.PG_DATABASE ?? "lot",
     max: workerPoolMax(),
   });
-  const poolIssue = marketingPoolIssue(marketingQueueLimits(), workerPoolMax());
+  const marketingLimits = marketingQueueLimits();
+  const comicLimits = comicQueueLimits();
+  const poolIssue = workerPoolIssue(marketingLimits, comicLimits, workerPoolMax());
   if (poolIssue) throw new Error(poolIssue);
 
   // The worker intentionally does NOT run migrations: schema is owned and
@@ -135,7 +140,8 @@ async function main() {
   // no dependency on the server having migrated first.
 
   const conn = createRedisConnection(process.env.REDIS_URL);
-  const queue = new BullmqJobQueue(db, conn);
+  const queue = new BullmqJobQueue(db, conn, marketingLimits, comicLimits);
+  const stopComicTempCleanup = startComicTempCleanup({ mediaRoot: resolve(ROOT, "data/comic-drama") });
 
   // Load model pricing from config
   const configPath = resolve(ROOT, "config/default.json");
@@ -359,7 +365,7 @@ async function main() {
     db, dataRoot: resolve(ROOT, "data"), segmentConcurrency, uploads: uploadStorage, generation: (child, signal) => genDeps("video", child, signal),
   }, { id: job.id, userId: job.userId, input: job.input as Record<string, unknown> }, ctl.signal));
   const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(db.pool));
-  queue.process(COMIC_RENDER_TASK, (job, ctl) => runComicRender(db.pool, comicMedia, job, ctl.signal));
+  queue.process(COMIC_RENDER_TASK, (job, ctl) => runComicRender(db.pool, comicMedia, job, ctl.signal, ctl.heartbeat));
   queue.process(COMIC_IMAGE_TASK, (job, ctl) => runComicImageGeneration({
     pool: db.pool, media: comicMedia, receiptPath: resolve(ROOT, "data/image-receipts"),
     provider: async (owner, model) => {
@@ -474,12 +480,15 @@ async function main() {
 
   console.log("Worker started, listening for jobs");
 
-  process.on("SIGINT", async () => {
+  const shutdown = async () => {
     console.log("\nWorker shutting down...");
+    stopComicTempCleanup();
     await queue.close();
     await db.close();
     process.exit(0);
-  });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }
 
 main().catch((error) => {

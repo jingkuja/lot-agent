@@ -44,6 +44,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   const [dialogueBusy, setDialogueBusy] = useState(false);
   const [dialogueError, setDialogueError] = useState("");
   const [dialogueOverrides, setDialogueOverrides] = useState<Record<string, ComicEditAutoDialogueOverride>>({});
+  const [replaceNativeIds, setReplaceNativeIds] = useState<string[]>([]);
   const autoOpenedRef = useRef(false);
   const [position, setPosition] = useState(0);
   const [seek, setSeek] = useState({ ms: 0 });
@@ -117,7 +118,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     setExtra(values => [...values, {
       takeId, mediaId: take.mediaId!, version: take.version, durationMs: take.durationMs,
       seriesId: take.seriesId, seriesTitle: take.seriesTitle, aspectRatio: draft.timeline.aspectRatio,
-      clipId: take.targetId, scene: take.scene, adopted: null,
+      clipId: take.targetId, scene: take.scene, adopted: null, audioMode: take.audioMode,
     }]);
     apply({ ...draft.timeline, video: [...draft.timeline.video, added] });
     setSelected(added.id);
@@ -144,7 +145,11 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     apply({ ...draft.timeline, [track]: [...draft.timeline[track], entry] });
   };
 
-  const openAutoDialoguePreview = useCallback(async (targetProject: ComicEdit, overridesList?: ComicEditAutoDialogueOverride[]) => {
+  const openAutoDialoguePreview = useCallback(async (
+    targetProject: ComicEdit,
+    overridesList?: ComicEditAutoDialogueOverride[],
+    nextReplaceNativeIds?: string[],
+  ) => {
     setDialogueModalOpen(true);
     setDialogueBusy(true);
     setDialogueError("");
@@ -155,6 +160,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         includeVoice: true,
         includeSubtitles: true,
         ...(overridesList?.length ? { overrides: overridesList } : {}),
+        ...(nextReplaceNativeIds?.length ? { replaceNativeAudioVideoItemIds: nextReplaceNativeIds } : {}),
       });
       setDialoguePlan(plan);
     } catch (reason) {
@@ -168,14 +174,24 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     if (!autoOpenDialogue || autoOpenedRef.current || !project || !project.timeline.video.length) return;
     autoOpenedRef.current = true;
     onAutoDialogueOpened?.();
-    void openAutoDialoguePreview(project);
+    void openAutoDialoguePreview(project, undefined, []);
   }, [autoOpenDialogue, onAutoDialogueOpened, openAutoDialoguePreview, project]);
 
   const openAutoDialogue = () => {
     if (!project || dirty) return;
     setNotice("");
     setDialogueOverrides({});
-    void openAutoDialoguePreview(project);
+    setReplaceNativeIds([]);
+    void openAutoDialoguePreview(project, undefined, []);
+  };
+
+  const toggleReplaceNative = (videoItemId: string, checked: boolean) => {
+    if (!project || dialogueBusy) return;
+    const next = checked
+      ? [...new Set([...replaceNativeIds, videoItemId])]
+      : replaceNativeIds.filter(id => id !== videoItemId);
+    setReplaceNativeIds(next);
+    void openAutoDialoguePreview(project, Object.values(dialogueOverrides), next);
   };
 
   const executeAutoDialogue = async (overridesList?: ComicEditAutoDialogueOverride[]) => {
@@ -189,6 +205,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         includeSubtitles: true,
         overflowMode: "ask",
         ...(overridesList?.length ? { overrides: overridesList } : {}),
+        ...(replaceNativeIds.length ? { replaceNativeAudioVideoItemIds: replaceNativeIds } : {}),
       });
       receive(result.edit);
       setDialogueResult(result);
@@ -205,9 +222,12 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         }
       }
       setDialogueOverrides(nextOverrides);
-      setNotice(result.overflowCount > 0 || result.failedCount > 0
+      const mutedSuffix = result.mutedVideoItemIds?.length
+        ? ` · ${t("已自动静音 {0} 段原声避免双人声叠加", [result.mutedVideoItemIds.length])}`
+        : "";
+      setNotice((result.overflowCount > 0 || result.failedCount > 0
         ? t("批量配音已入轨 {0} 句（超长 {1} 句、失败 {2} 句待处理）", [result.voicedCount, result.overflowCount, result.failedCount])
-        : t("已批量合成 {0} 句配音、铺设 {1} 条字幕", [result.voicedCount, result.subtitledCount]));
+        : t("已批量合成 {0} 句配音、铺设 {1} 条字幕", [result.voicedCount, result.subtitledCount])) + mutedSuffix);
       if (result.overflowCount === 0 && result.failedCount === 0) {
         setDialogueModalOpen(false);
       }
@@ -320,6 +340,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
                     {meta?.episodeNo ? `${t("第 {0} 集", [meta.episodeNo])} › ` : ""}
                     {meta?.clipOrdinal ? `${t("分镜 {0}", [meta.clipOrdinal])} · ` : ""}
                     {meta?.seriesTitle} · {t("版本 {0}", [meta?.version ?? "—"])} · {t("{0} 秒", [seconds(entry.outMs - entry.inMs)])}
+                    {meta?.audioMode === "native_audio" ? ` · ${t("原生音画")}` : meta?.audioMode === "reference_audio" ? ` · ${t("参考音频")}` : ""}
                   </small>
                 </button>
                 <div className="comic-actions">
@@ -348,8 +369,14 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
       <ComicTimelineTracks timeline={timeline} videoSources={sources} audioSources={audioSources} selectedVideo={item?.id}
         positionMs={position} seek={locate} selectVideo={setSelected} update={apply} disabled={saving} />
       {item && project.timeline.video.some(saved => saved.id === item.id && saved.takeId === item.takeId) &&
-        <ComicDialogueAudio key={item.id + item.takeId} projectId={id} revision={project.revision} item={item} voice={timeline.voice}
-          change={voice => apply({ ...timeline, voice })} subtitles={timeline.subtitles}
+        <ComicDialogueAudio key={item.id + item.takeId} projectId={id} revision={project.revision} item={item} audioMode={source?.audioMode}
+          voice={timeline.voice}
+          change={(voice, opts) => apply({
+            ...timeline,
+            voice,
+            ...(opts?.muteVideo ? { video: video.map(entry => entry.id === item.id ? { ...entry, volume: 0 } : entry) } : {}),
+          })}
+          subtitles={timeline.subtitles}
           addSubtitle={cue => apply({ ...timeline, subtitles: [...timeline.subtitles, cue] })} disabled={saving} />}
       <ComicRenderPanel project={project} dirty={dirty || saving} />
     </>}
@@ -369,8 +396,10 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         plan={dialoguePlan}
         result={dialogueResult}
         overrides={dialogueOverrides}
+        replaceNativeIds={replaceNativeIds}
         busy={dialogueBusy}
         error={dialogueError}
+        toggleReplaceNative={toggleReplaceNative}
         updateOverride={(key, patch) => setDialogueOverrides(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }))}
         confirm={() => void executeAutoDialogue()}
         retry={() => void executeAutoDialogue(Object.values(dialogueOverrides))}
@@ -380,12 +409,16 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   </>;
 }
 
-function BatchDialogueDialog({ plan, result, overrides, busy, error, updateOverride, confirm, retry, close }: {
+function BatchDialogueDialog({
+  plan, result, overrides, replaceNativeIds, busy, error, toggleReplaceNative, updateOverride, confirm, retry, close,
+}: {
   plan: ComicAutoDialoguePlan | null;
   result: ComicAutoDialogueResult | null;
   overrides: Record<string, ComicEditAutoDialogueOverride>;
+  replaceNativeIds: string[];
   busy: boolean;
   error: string;
+  toggleReplaceNative: (videoItemId: string, checked: boolean) => void;
   updateOverride: (key: string, patch: Partial<ComicEditAutoDialogueOverride>) => void;
   confirm: () => void;
   retry: () => void;
@@ -400,6 +433,7 @@ function BatchDialogueDialog({ plan, result, overrides, busy, error, updateOverr
       case "already_placed": return "已入轨";
       case "cached": return "缓存命中";
       case "to_synthesize": return "待新合成";
+      case "native_audio_subtitle_only": return "原生音画仅铺字幕";
       case "unknown_blocked": return "待核实阻断";
       case "compliance_blocked": return "合规拦截";
       case "no_voice": return "暂无可用音色";
@@ -418,9 +452,30 @@ function BatchDialogueDialog({ plan, result, overrides, busy, error, updateOverr
           <span>{t("共 {0} 句台词", [plan.totalLines])}</span>
           <span>{t("缓存命中 {0} 句", [plan.cachedCount])}</span>
           <span>{t("待新合成 {0} 句", [plan.toSynthesizeCount])}</span>
+          {(plan.nativeAudioSkippedCount ?? 0) > 0 && <span>{t("原生音画跳过配音 {0} 句", [plan.nativeAudioSkippedCount ?? 0])}</span>}
           {plan.blockedCount > 0 && <span>{t("阻断 {0} 句", [plan.blockedCount])}</span>}
           {plan.overflowCount > 0 && <span>{t("预计超长 {0} 句", [plan.overflowCount])}</span>}
         </div>
+        {!!plan.nativeAudioClips?.length && (
+          <div className="comic-compat-box">
+            <strong>{t("含原生／参考音频的片段（默认仅铺字幕，不重复合成配音）")}</strong>
+            <ul>
+              {plan.nativeAudioClips.map(clip => (
+                <li key={clip.videoItemId}>
+                  <span>
+                    {clip.scene || t("未命名分镜")} · {t(clip.audioMode === "native_audio" ? "原生音画" : "参考音频")}
+                    {" · "}{t("{0} 句台词", [clip.lineCount])}
+                  </span>
+                  <label className="comic-video-replace">
+                    <input type="checkbox" disabled={busy} checked={replaceNativeIds.includes(clip.videoItemId)}
+                      onChange={event => toggleReplaceNative(clip.videoItemId, event.target.checked)} />
+                    {t("改用后期配音（自动静音原声）")}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="comic-generation-note">
           {plan.feeStatus === "free_cached"
             ? t("本次无需新增合成费用。")

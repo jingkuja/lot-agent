@@ -23,6 +23,7 @@ const reasons: Partial<Record<ComicGenerationQuote["skipped"][number]["reason"],
   MODEL_UNAVAILABLE: "请先在剧集设置中选择支持的视频模型",
   ALREADY_COMPLETE: "已有采用版，需显式选择生成新版",
   REFERENCE_UNSUPPORTED: "参考素材规格超出模型限制",
+  AUDIO_REFERENCE_REQUIRED: "当前已选外部参考音频驱动口型，请先绑定参考音频",
   INVALID_MATERIAL_REFERENCE: "分镜绑定的场景或道具素材已失效，请重新选择",
 };
 const errors: Record<string, string> = {
@@ -50,7 +51,7 @@ const fields: Record<NonNullable<ComicGenerationIssue["field"]>, string> = {
   outputSeconds: "输出时长（秒）", images: "参考图数量", audio: "参考音频数量", videos: "参考视频数量", files: "参考文件总数",
   seconds: "素材时长（秒）", audioSeconds: "音频总时长（秒）", videoSeconds: "视频总时长（秒）", bytes: "文件大小（字节）",
   edge: "边长（像素）", aspect: "宽高比", fps: "帧率", pixels: "总像素", format: "文件格式", codec: "编码",
-  resolution: "输出分辨率", prompt: "最终提示词", videoMode: "生成模式",
+  resolution: "输出分辨率", prompt: "最终提示词", videoMode: "生成模式", audioMode: "音频来源模式",
 };
 const referenceKindLabels = { image: "参考图", first_frame: "首帧", last_frame: "尾帧", audio: "参考音频", video: "参考视频" } as const;
 

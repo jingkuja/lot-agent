@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  checkComicClipIssues, COMIC_DRAMA_ROOT,
+  adaptComicClipDraftForModel, checkComicClipIssues, COMIC_DRAMA_ROOT,
   type ComicCurrencyAmount, type ComicDirectorApplyInput, type ComicDirectorDecision, type ComicDirectorProposal,
   type ComicDirectorRoleOutcome, type ComicDrama, type ComicDramaContent, type ComicDramaCreateInput, type ComicDramaDetail,
   type ComicDramaEpisodeSummary, type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicDramaTreeEntry,
@@ -13,7 +13,8 @@ import { comicDramaApi } from "./api.js";
 import { computeComicBatchPlan } from "./batch-plan.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
 import { DramaDialog } from "./DramaDialog.js";
-import { SeriesDialog, type ComicDramaModel, type PresetDramaTarget } from "./SeriesDialog.js";
+import { SeriesDialog, type ComicDramaModel, type PresetDramaTarget, type SeriesModelAdaptOptions } from "./SeriesDialog.js";
+import { describeComicClipCheckIssue } from "./clip-check-copy.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { CastPanel } from "./CastPanel.js";
 import { MediaPreview, useComicChoices } from "./LibraryParts.js";
@@ -263,10 +264,20 @@ export function ComicDramaWorkspace({
     setModalError(null);
     setDramaDialog({ mode, drama });
   });
-  const saveDialog = (fields: ComicDramaSeriesInput) => run(async () => {
+  const saveDialog = (fields: ComicDramaSeriesInput, modelAdapt?: SeriesModelAdaptOptions) => run(async () => {
     const current = getDetail();
     if (dialog === "edit" && current) {
       const updated = await comicDramaApi.update(current.series.id, fields, current.series.revision);
+      if (modelAdapt?.apply && fields.videoModel) {
+        for (const clip of current.clips) {
+          const adapted = adaptComicClipDraftForModel(clip.draft, fields.videoModel, {
+            clampDuration: modelAdapt.clampDuration,
+          });
+          if (adapted.changed) {
+            await comicDramaApi.saveClip(updated.id, clip.id, adapted.draft, clip.revision);
+          }
+        }
+      }
       const fresh = await comicDramaApi.get(updated.id).catch(() => null);
       if (fresh) {
         load(fresh);
@@ -902,6 +913,7 @@ export function ComicDramaWorkspace({
     </main>
     {dialog && <SeriesDialog
       series={dialog === "edit" ? series : undefined}
+      clips={dialog === "edit" ? detail?.clips : undefined}
       presetDrama={dialog === "addEpisode" ? presetDrama : undefined}
       models={models}
       error={modalError}
@@ -998,14 +1010,7 @@ function ClipInspectorDrawer({ detail, clip, goStoryboard, goGenerate }: {
         <div className="comic-issue-banner">
           <strong>{t("{0} 项查漏提醒", [issues.length])}</strong>
           <ul>{issues.map((issue, idx) => (
-            <li key={idx}>
-              {issue.code === "SPEAKER_NOT_IN_CAST" ? t("说话人「{0}」未在出镜人物中", [issue.speaker])
-                : issue.code === "REFERENCE_LIMIT_EXCEEDED" ? t("参考图 {0}/{1} 张超限", [issue.count, issue.limit])
-                  : issue.code === "DIALOGUE_TOO_LONG" ? t("台词约 {0} 秒超出镜头时长", [+(issue.estimatedMs / 1000).toFixed(1)])
-                    : issue.code === "INVALID_MATERIAL_REFERENCE"
-                      ? t("绑定的素材「{0}」已失效", [issue.name ?? issue.materialId.slice(0, 8)])
-                      : t("角色「{0}」造型已更新", [issue.characterName])}
-            </li>
+            <li key={idx}>{describeComicClipCheckIssue(issue, t)}</li>
           ))}</ul>
         </div>
       )}

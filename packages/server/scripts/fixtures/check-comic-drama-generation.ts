@@ -17,7 +17,7 @@ import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js
 import { quoteComicVideoPrices } from "../../src/comic-drama/pricing.js";
 import { DB } from "../../src/db/database.js";
 import { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
-import { COMIC_IMAGE_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-queues.js";
+import { COMIC_IMAGE_QUEUE, COMIC_IMAGE_TASK } from "../../src/jobs/task-queues.js";
 import { comicFixturePng } from "./check-comic-drama-library.js";
 import { mountComicVideoFixture, w6Seedance20, w6Seedance25 } from "./check-comic-drama-video.js";
 
@@ -179,7 +179,7 @@ export async function verifyComicGeneration(app: FixtureApp, pool: Pool, fixture
   assert.equal(duplicate.takes[0].id, result.takes[0].id);
   assert.equal(counts.publications, 1);
   assert.equal((await confirm(competing, 409) as unknown as { code: string }).code, "BUSY");
-  assert.equal((await pool.query("SELECT queue_name FROM tasks WHERE id=$1", [result.taskId])).rows[0].queue_name, MARKETING_VIDEO_QUEUE);
+  assert.equal((await pool.query("SELECT queue_name FROM tasks WHERE id=$1", [result.taskId])).rows[0].queue_name, COMIC_IMAGE_QUEUE);
   assert.equal((await request("/generation-requests/" + result.id, "GET", undefined, "fixture-two")).status, 404);
   let completed = await settled(result.id);
   assert.equal(completed.takes[0].state, "recoverable");

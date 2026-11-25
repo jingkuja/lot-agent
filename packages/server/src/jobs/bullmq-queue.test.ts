@@ -14,7 +14,10 @@ vi.mock("bullmq", () => ({
   },
 }));
 import { BullmqJobQueue } from "./bullmq-queue.js";
-import { DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingPoolIssue, marketingQueueLimits } from "./task-queues.js";
+import {
+  COMIC_IMAGE_QUEUE, COMIC_IMAGE_TASK, COMIC_RENDER_QUEUE, COMIC_RENDER_TASK, COMIC_VIDEO_QUEUE, COMIC_VIDEO_TASK,
+  comicQueueLimits, DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE, marketingPoolIssue, marketingQueueLimits, workerPoolIssue,
+} from "./task-queues.js";
 
 function fixture(limits = { concurrency: 2, perUser: 1, segments: 2 }) {
   const db = {
@@ -281,5 +284,50 @@ describe("isolated task workers", () => {
     await f.queue.close();
     for (const worker of workers) expect(worker.close).toHaveBeenCalledOnce();
     expect(f.ordinary.close).toHaveBeenCalledOnce(); expect(f.marketing.close).toHaveBeenCalledOnce(); expect(f.connection.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("isolates comic image/video/render queues with dedicated concurrency, non-retry, and legacy forwarding", async () => {
+    const f = fixture();
+    const comicImageId = await f.queue.enqueue(COMIC_IMAGE_TASK, { slot: 1 }, "owner");
+    const comicVideoId = await f.queue.enqueue(COMIC_VIDEO_TASK, { slot: 2 }, "owner");
+    const comicRenderId = await f.queue.enqueue(COMIC_RENDER_TASK, { slot: 3 }, "owner");
+    expect(f.db.createTask).toHaveBeenCalledWith(comicImageId, COMIC_IMAGE_TASK, { slot: 1 }, "owner", COMIC_IMAGE_QUEUE);
+    expect(f.db.createTask).toHaveBeenCalledWith(comicVideoId, COMIC_VIDEO_TASK, { slot: 2 }, "owner", COMIC_VIDEO_QUEUE);
+    expect(f.db.createTask).toHaveBeenCalledWith(comicRenderId, COMIC_RENDER_TASK, { slot: 3 }, "owner", COMIC_RENDER_QUEUE);
+    expect(mocks.queues.get(COMIC_IMAGE_QUEUE).add).toHaveBeenCalledOnce();
+    expect(mocks.queues.get(COMIC_VIDEO_QUEUE).add).toHaveBeenCalledOnce();
+    expect(mocks.queues.get(COMIC_RENDER_QUEUE).add).toHaveBeenCalledOnce();
+
+    const renderHandler = vi.fn(async () => { throw Object.assign(new Error("disk low"), { errorCode: "RENDER_DISK_SPACE_LOW" }); });
+    f.queue.process(COMIC_RENDER_TASK, renderHandler);
+    expect(mocks.workers.get(COMIC_RENDER_QUEUE).options.concurrency).toBe(1);
+
+    // Legacy comic render job sitting in lot-marketing-video is forwarded to lot-comic-render without claiming or executing.
+    f.db.getTask.mockResolvedValue({
+      id: "legacy-render", type: COMIC_RENDER_TASK, status: "pending", input: { original: true }, user_id: "owner", created_at: "now", updated_at: "now",
+    });
+    await mocks.workers.get(MARKETING_VIDEO_QUEUE).run(job("legacy-render", COMIC_RENDER_TASK));
+    expect(mocks.queues.get(COMIC_RENDER_QUEUE).add).toHaveBeenCalledWith(
+      COMIC_RENDER_TASK, { taskId: "legacy-render" }, expect.objectContaining({ jobId: "legacy-render", attempts: 1 }),
+    );
+    expect(renderHandler).not.toHaveBeenCalled();
+
+    // Isolated comic queues never automatically retry paid/render jobs even if attempts > 1.
+    const failingRender = { ...job("render-fail", COMIC_RENDER_TASK), opts: { attempts: 3 } };
+    f.db.getTask.mockResolvedValue({
+      id: "render-fail", type: COMIC_RENDER_TASK, status: "pending", input: { original: true }, user_id: "owner", created_at: "now", updated_at: "now",
+    });
+    await expect(mocks.workers.get(COMIC_RENDER_QUEUE).run(failingRender)).rejects.toThrow("disk low");
+    expect(f.db.markTaskRetryPending).not.toHaveBeenCalled();
+    expect(f.db.setTaskError).toHaveBeenCalledWith("render-fail", "disk low", "RENDER_DISK_SPACE_LOW");
+
+    expect(comicQueueLimits({})).toEqual({
+      imageConcurrency: 2, imagePerUser: 1,
+      videoConcurrency: 2, videoPerUser: 1,
+      renderConcurrency: 1, renderPerUser: 1,
+    });
+    expect(() => comicQueueLimits({ COMIC_RENDER_CONCURRENCY: "5" })).toThrow("COMIC_RENDER_CONCURRENCY must be an integer 1–4");
+    expect(workerPoolIssue(marketingQueueLimits({}), comicQueueLimits({}), 20)).toBe("");
+    expect(workerPoolIssue(marketingQueueLimits({}), comicQueueLimits({}), 15)).toContain("PG_POOL_MAX (15) must be at least 16");
   });
 });

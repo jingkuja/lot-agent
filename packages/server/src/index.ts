@@ -85,6 +85,7 @@ import { PgComicEdits } from "./comic-drama/edit-repository.js";
 import { ComicEditSpeech } from "./comic-drama/edit-speech.js";
 import { PgComicRenders } from "./comic-drama/render-repository.js";
 import { createComicRenderRoutes } from "./comic-drama/render-routes.js";
+import { startComicTempCleanup } from "./comic-drama/temp-cleanup.js";
 import { ComicDirector, createComicDirectorExtension } from "./comic-drama/director-agent.js";
 import { createComicDirectorLlmResolver, createComicDirectorModelPolicy } from "./comic-drama/director-model.js";
 import { ComicLibraryError } from "./comic-drama/library-db.js";
@@ -300,7 +301,8 @@ async function main() {
     c.header("Cache-Control", "private, no-store");
     const token = c.req.header("Authorization")?.match(/^Bearer (.+)$/)?.[1].trim();
     const session = rollout.personalized && token ? await service.sessions.resolve(token).catch(() => null) : null;
-    return { ...digitalEmployeeProductFlags(), comicDramaEnabled: rollout.showEntry(session?.userId) };
+    const ownerId = session?.userId ?? (serviceConfig.debug ? service.debugUserId : undefined);
+    return { ...digitalEmployeeProductFlags(), comicDramaEnabled: rollout.showEntry(ownerId) };
   }));
   app.route("/api/public/shares", createPublicImageShareRoutes(service));
   app.use("/api/public/feishu/*", loginRateLimit);
@@ -447,6 +449,7 @@ async function main() {
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
   const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(service.db.pool));
   app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
+  const stopComicTempCleanup = startComicTempCleanup({ mediaRoot: resolve(ROOT, "data/comic-drama") });
   let stopComicSettlementSync: (() => Promise<void>) | undefined;
   if (comicDramaEnabled) {
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
@@ -662,6 +665,7 @@ async function main() {
   const shutdown = async () => {
     console.log("\nShutting down...");
     stopPosterRefresh();
+    stopComicTempCleanup();
     await stopComicSettlementSync?.();
     await stopVirtualPayments();
     await feishuChannel?.stop();

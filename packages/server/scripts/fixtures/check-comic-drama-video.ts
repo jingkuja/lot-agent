@@ -16,7 +16,7 @@ import { runComicVideoGeneration } from "../../src/comic-drama/video-worker.js";
 import { PgComicGeneration } from "../../src/comic-drama/generation-repository.js";
 import { queryComicDramaReport } from "../../src/comic-drama/operations-report.js";
 import type { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
-import { COMIC_VIDEO_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-queues.js";
+import { COMIC_VIDEO_QUEUE, COMIC_VIDEO_TASK } from "../../src/jobs/task-queues.js";
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 import { comicFixturePng } from "./check-comic-drama-library.js";
 
@@ -198,7 +198,7 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   } finally { state.quoteExtra = 0; }
   const [created, duplicate] = await Promise.all([confirm(ep, mixedQuote), confirm(ep, mixedQuote)]);
   assert.equal(created.taskId, duplicate.taskId);
-  assert.equal((await pool.query("SELECT queue_name FROM tasks WHERE id=$1", [created.taskId])).rows[0].queue_name, MARKETING_VIDEO_QUEUE);
+  assert.equal((await pool.query("SELECT queue_name FROM tasks WHERE id=$1", [created.taskId])).rows[0].queue_name, COMIC_VIDEO_QUEUE);
   const mixed = await settled(created.id);
   assert.equal(mixed.kind, "video");
   const [good, bad, uncertain] = mixed.takes;

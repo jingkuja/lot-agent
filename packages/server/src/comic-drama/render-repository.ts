@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
-  comicDramaIdSchema, comicFrozenRenderSchema, comicRenderIssue, layoutComicTimeline, type ComicFrozenRenderInput, type ComicRender, type ComicRenderRequest,
-  type StoredComicMedia,
+  comicDramaIdSchema, comicFrozenRenderSchema, comicRenderIssue, layoutComicTimeline, type ComicFrozenRenderInput, type ComicRender,
+  type ComicRenderFps, type ComicRenderRequest, type StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
-import { COMIC_RENDER_TASK, MARKETING_VIDEO_QUEUE } from "../jobs/task-queues.js";
+import { COMIC_RENDER_TASK, taskQueueName } from "../jobs/task-queues.js";
 import { PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction, libraryTransactionOn, type ComicQuery } from "./library-db.js";
 import { insertComicMedia } from "./library-repository.js";
@@ -15,6 +15,8 @@ const view = `SELECT r.id,r.edit_id AS "editId",r.edit_revision AS "editRevision
   r.created_at::text AS stamp,r.duration_ms AS "durationMs",r.media_id AS "mediaId",
   CASE WHEN r.media_id IS NOT NULL THEN 'ready' WHEN t.status IN ('pending','running','cancelled') THEN t.status ELSE 'failed' END AS status,
   CASE WHEN t.status='failed' THEN coalesce(t.error_code,'RENDER_FAILED') END AS error,
+  CASE WHEN (r.frozen->>'outputFps') IN ('24','30') THEN (r.frozen->>'outputFps')::int END AS "outputFps",
+  r.frozen->>'fpsMode' AS "fpsMode",
   (r.media_id IS NULL AND coalesce(t.status IN ('failed','cancelled') OR
     (t.status IN ('pending','running') AND t.updated_at<now()-interval '30 seconds'),false)) AS recoverable
   FROM ${cd}.cd_renders r LEFT JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text AND t.type=$3`;
@@ -34,10 +36,11 @@ export class PgComicRenders {
       }
       accepting?.();
       const { timeline, sources, media, title, seriesId } = await this.edits.snapshot(db, owner, editId, input.expectedRevision);
-      const issue = comicRenderIssue(timeline);
+      const fpsMode = input.fpsMode ?? "auto";
+      const issue = comicRenderIssue(timeline, fpsMode === "24" ? 24 : 30);
       if (issue) throw new ComicLibraryError(issue, 400);
       const id = randomUUID();
-      const frozen: ComicFrozenRenderInput = { schemaVersion: 1, editId, editRevision: input.expectedRevision, timeline };
+      const frozen: ComicFrozenRenderInput = { schemaVersion: 1, editId, editRevision: input.expectedRevision, timeline, fpsMode };
       await db.query(`INSERT INTO ${cd}.cd_renders(id,owner_id,request_id,edit_id,edit_revision,frozen,duration_ms,project_title,series_id)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [id, owner, input.requestId, editId, input.expectedRevision, frozen, layoutComicTimeline(timeline).durationMs, title, seriesId]);
@@ -45,7 +48,8 @@ export class PgComicRenders {
       await db.query(`INSERT INTO ${cd}.cd_render_takes(owner_id,render_id,take_id,media_id)
         SELECT $1,$2,take,media FROM unnest($3::uuid[],$4::uuid[]) AS s(take,media)`,
       [owner, id, sources.map(source => source.takeId), sources.map(source => source.mediaId)]);
-      await db.query("INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,$2,'{}',$3,$4)", [id, COMIC_RENDER_TASK, owner, MARKETING_VIDEO_QUEUE]);
+      await db.query("INSERT INTO tasks(id,type,input,user_id,queue_name) VALUES($1,$2,'{}',$3,$4)",
+        [id, COMIC_RENDER_TASK, owner, taskQueueName(COMIC_RENDER_TASK)]);
       return { id, created: true };
     });
   }
@@ -125,14 +129,20 @@ export class PgComicRenders {
     return { ...row, frozen: comicFrozenRenderSchema.parse(row.frozen) };
   }
 
-  complete(id: string, file: StoredComicMedia, signal: AbortSignal) {
+  complete(id: string, file: StoredComicMedia, signal: AbortSignal, outputFps?: ComicRenderFps) {
     return libraryTransaction(this.pool, async db => {
       const task = await db.query("SELECT id FROM tasks WHERE id=$1 AND user_id=$2 AND type=$3 AND status='running' FOR UPDATE",
         [id, file.owner, COMIC_RENDER_TASK]);
       signal.throwIfAborted();
       if (!task.rowCount) throw new ComicLibraryError("RENDER_CANCELLED", 409);
       await insertComicMedia(db, file);
-      const result = await db.query(`UPDATE ${cd}.cd_renders SET media_id=$3 WHERE id=$1 AND owner_id=$2 AND media_id IS NULL`, [id, file.owner, file.id]);
+      const result = await db.query(
+        `UPDATE ${cd}.cd_renders
+         SET media_id=$3,
+             frozen=CASE WHEN $4::int IS NOT NULL THEN jsonb_set(frozen,'{outputFps}',to_jsonb($4::int),true) ELSE frozen END
+         WHERE id=$1 AND owner_id=$2 AND media_id IS NULL`,
+        [id, file.owner, file.id, outputFps ?? null],
+      );
       if (!result.rowCount) throw new ComicLibraryError("RENDER_ALREADY_PUBLISHED", 409);
       return { mediaId: file.id };
     });

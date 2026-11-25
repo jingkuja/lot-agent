@@ -27,6 +27,7 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
     expect(comicDirectorError(new ApiClientError("empty", 400, "DIRECTOR_EMPTY_SCRIPT")))
       .toBe("当前剧集暂无剧本内容，请先编写或生成剧本");
     expect(comicRenderError("RENDER_LIMIT")).toBe("导出最多支持 5 分钟、60 段视频及 240 条音频");
+    expect(comicRenderError("RENDER_DISK_SPACE_LOW")).toBe("导出临时磁盘空间不足，请稍后重试或清理磁盘空间");
 
     const requiredKeys = [
       "费用待核实",
@@ -123,6 +124,25 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       "当前制作范围",
       "删除整部剧集？其下所有分集也将被删除，已导出的正片不会删除。",
       "归档整部剧集？其下所有分集也将一并归档。",
+      "导出临时磁盘空间不足，请稍后重试或清理磁盘空间",
+      "当前已选外部参考音频驱动口型，请先绑定参考音频",
+      "音频来源模式",
+      "导出帧率",
+      "自动（全 24 fps 原生导出，混帧转 30 fps）",
+      "24 fps（漫剧原生帧率）",
+      "30 fps（恒定帧率兼容）",
+      "原生音画",
+      "后期配音",
+      "原生音画仅铺字幕",
+      "改用后期配音（自动静音原声）",
+      "一键兼容当前模型",
+      "无声生成 + 后期配音（默认）",
+      "模型原生音画对白（含人声，后期仅铺字幕）",
+      "外部参考音频驱动口型",
+      "恢复原绑定",
+      "模型切换兼容检查 · {0} 个分镜受影响",
+      "保存并一键兼容适配（保留原绑定，切回高规格模型可恢复）",
+      "同时将超长分镜时长压缩至 {0} 秒上限（不勾选则保留原时长供手动拆分）",
     ];
     for (const key of requiredKeys) {
       expect(messages[key]?.en).toBeTruthy();

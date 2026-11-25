@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ComicVideoAudioMode } from "./models.js";
 import { comicTimelineSchema, type ComicTimeline } from "./timeline.js";
 
 const id = z.string().uuid().transform(value => value.toLowerCase());
@@ -39,6 +40,7 @@ export type ComicEditSource = {
   dramaId?: string; dramaTitle?: string; episodeNo?: number | null; clipOrdinal?: number | null;
   seriesId?: string; seriesTitle: string; clipId: string | null; scene: string; version: number; durationMs: number;
   aspectRatio: ComicTimeline["aspectRatio"]; adopted: { takeId: string; version: number; durationMs: number } | null;
+  audioMode?: ComicVideoAudioMode;
 };
 export type ComicEditAudioSource = { id: string; durationMs: number };
 export type ComicEdit = ComicEditListEntry & { timeline: ComicTimeline; sources: ComicEditSource[]; audioSources: ComicEditAudioSource[] };
@@ -113,6 +115,7 @@ export const comicEditAutoDialoguePreviewSchema = z.object({
   includeSubtitles: z.boolean().default(true),
   fallbackPreset: voice.optional(),
   overrides: z.array(comicEditAutoDialogueOverrideSchema).max(300).optional(),
+  replaceNativeAudioVideoItemIds: z.array(id).max(200).optional(),
 }).strict();
 export const comicEditAutoDialogueSchema = comicEditAutoDialoguePreviewSchema.extend({
   overflowMode: z.enum(["ask", "trim"]).default("ask"),
@@ -157,7 +160,9 @@ export type ComicAutoDialoguePlanLine = {
   speaker: string | null;
   text: string;
   speed: number;
-  status: "already_placed" | "cached" | "to_synthesize" | "unknown_blocked" | "no_voice" | "compliance_blocked" | "no_room";
+  audioMode?: ComicVideoAudioMode;
+  status: "already_placed" | "cached" | "to_synthesize" | "unknown_blocked" | "no_voice"
+    | "compliance_blocked" | "no_room" | "native_audio_subtitle_only";
   remainingMs: number;
   cachedDurationMs?: number;
   overflowMs?: number;
@@ -165,6 +170,14 @@ export type ComicAutoDialoguePlanLine = {
   errorCode?: string;
 };
 export const COMIC_SPEECH_ESTIMATE_POINTS = 100;
+
+export type ComicAutoDialogueNativeClip = {
+  videoItemId: string;
+  scene: string;
+  audioMode: Exclude<ComicVideoAudioMode, "silent_tts">;
+  lineCount: number;
+  replaceWithTts: boolean;
+};
 
 export type ComicAutoDialoguePlan = {
   totalLines: number;
@@ -174,6 +187,8 @@ export type ComicAutoDialoguePlan = {
   blockedCount: number;
   skippedCount: number;
   overflowCount: number;
+  nativeAudioSkippedCount?: number;
+  nativeAudioClips?: ComicAutoDialogueNativeClip[];
   feeStatus: "free_cached" | "fixed_points";
   estimatedPoints: number;
   lines: ComicAutoDialoguePlanLine[];
@@ -185,7 +200,8 @@ export type ComicAutoDialogueItemOutcome = {
   speaker: string | null;
   text: string;
   speed: number;
-  status: "applied" | "trimmed" | "overflow" | "failed" | "skipped";
+  audioMode?: ComicVideoAudioMode;
+  status: "applied" | "trimmed" | "overflow" | "failed" | "skipped" | "subtitle_only";
   cached: boolean;
   audioDurationMs?: number;
   remainingMs?: number;
@@ -201,5 +217,7 @@ export type ComicAutoDialogueResult = {
   skippedLines: number;
   overflowCount: number;
   failedCount: number;
+  nativeAudioSkippedCount?: number;
+  mutedVideoItemIds?: string[];
   items: ComicAutoDialogueItemOutcome[];
 };

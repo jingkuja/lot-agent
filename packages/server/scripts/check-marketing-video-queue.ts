@@ -9,7 +9,10 @@ import { runMigrations } from "../src/db/migration-runner.js";
 import { migrations } from "../src/db/migrations/index.js";
 import { BullmqJobQueue } from "../src/jobs/bullmq-queue.js";
 import { createRedisConnection } from "../src/jobs/redis.js";
-import { COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE } from "../src/jobs/task-queues.js";
+import {
+  COMIC_IMAGE_QUEUE, COMIC_IMAGE_TASK, COMIC_RENDER_QUEUE, COMIC_RENDER_TASK, COMIC_VIDEO_QUEUE, COMIC_VIDEO_TASK,
+  DEFAULT_TASK_QUEUE, DIGITAL_PRESENTER_TASK, MARKETING_VIDEO_QUEUE,
+} from "../src/jobs/task-queues.js";
 import { checkMixedMediaQueue } from "./fixtures/check-mixed-media-queue.js";
 import { checkComicWorkerRestart, startComicCrashWorker } from "./fixtures/check-comic-worker-restart.js";
 
@@ -193,25 +196,35 @@ try {
 
   await consumer.close(); consumer = undefined;
 
-  // Two render slots, one per owner: the owner's second render waits (delayed,
-  // not failed) while another owner's render takes the free slot.
+  // Two render slots, one per owner in lot-marketing-video; comic workloads run in their own isolated queues.
   const otherOwner = randomUUID();
   await db.pool.query("INSERT INTO users(id,name) VALUES($1,'other queue fixture')", [otherOwner]);
   const fairStarts: string[] = [];
+  const isolatedStarts: string[] = [];
   consumer = new BullmqJobQueue(db, createRedisConnection(redisRaw), { concurrency: 2, perUser: 1, segments: 2 });
-  for (const type of ["marketing.video", COMIC_VIDEO_TASK, COMIC_IMAGE_TASK]) {
+  for (const type of ["marketing.video", DIGITAL_PRESENTER_TASK]) {
     consumer.process(type, async job => { fairStarts.push(job.id); await releaseFair.promise; return { fair: job.id }; });
   }
-  const ownerRenders = await Promise.all(["marketing.video", COMIC_VIDEO_TASK].map(type => publisher!.enqueue(type, { kind: "fair" }, owner)));
-  const otherRender = await publisher.enqueue(COMIC_IMAGE_TASK, { kind: "fair" }, otherOwner);
+  for (const type of [COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, COMIC_RENDER_TASK]) {
+    consumer.process(type, async job => { isolatedStarts.push(job.id); return { isolated: job.id }; });
+  }
+  const ownerRenders = await Promise.all(["marketing.video", DIGITAL_PRESENTER_TASK].map(type => publisher!.enqueue(type, { kind: "fair" }, owner)));
+  const otherRender = await publisher.enqueue("marketing.video", { kind: "fair" }, otherOwner);
+  const comicIsolated = await Promise.all([COMIC_IMAGE_TASK, COMIC_VIDEO_TASK, COMIC_RENDER_TASK].map(type => publisher!.enqueue(type, {}, owner)));
   await until(async () => fairStarts.includes(otherRender) && fairStarts.length === 2, "another owner uses the free slot");
+  await until(async () => isolatedStarts.length === 3, "isolated comic queues finish without waiting for marketing.video");
+  const comicQueueRows = await db.pool.query<{ id: string; queue_name: string }>("SELECT id,queue_name FROM tasks WHERE id=ANY($1::uuid[])", [comicIsolated]);
+  assert.deepEqual(
+    comicIsolated.map(id => comicQueueRows.rows.find(row => row.id === id)?.queue_name),
+    [COMIC_IMAGE_QUEUE, COMIC_VIDEO_QUEUE, COMIC_RENDER_QUEUE],
+  );
   const waiting = ownerRenders.find(id => !fairStarts.includes(id))!;
   assert.equal(fairStarts.filter(id => ownerRenders.includes(id)).length, 1, "one render per owner");
-  await until(async () => await (await marketingQueue!.getJob(waiting))?.getState() === "delayed", "same owner delayed across media types");
+  await until(async () => await (await marketingQueue!.getJob(waiting))?.getState() === "delayed", "same owner delayed across shared marketing queue");
   assert.deepEqual([await db.getTaskStatus(waiting), (await db.getTask(waiting))?.stage], ["pending", "排队中：同账号已有视频在制作"]);
   releaseFair.resolve();
   await until(async () => await db.getTaskStatus(waiting) === "succeeded", "delayed render runs after the owner's slot frees", 30_000);
-  assert.ok((await Promise.all([...ownerRenders, otherRender].map(id => db.getTaskStatus(id)))).every(status => status === "succeeded"));
+  assert.ok((await Promise.all([...ownerRenders, otherRender, ...comicIsolated].map(id => db.getTaskStatus(id)))).every(status => status === "succeeded"));
   await consumer.close(); consumer = undefined;
   if (process.argv.includes("--baseline")) {
     const count = 24;

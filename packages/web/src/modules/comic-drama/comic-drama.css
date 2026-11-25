@@ -3666,6 +3666,46 @@ ul.comic-version-list pre {
   margin-bottom: 2px;
 }
 
+.comic-compat-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  font-size: 12.5px;
+}
+
+.comic-compat-box ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.comic-compat-box li {
+  display: grid;
+  gap: 2px;
+}
+
+.comic-compat-box small {
+  color: var(--text-secondary);
+}
+
+.comic-safe-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.comic-render-fps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 820px) {
   .comic-nav-episodes {
     display: none;

@@ -4,10 +4,10 @@ import { ProviderError, type SpeechProvider, type SpeechRequest, type SpeechResu
 import {
   COMIC_SPEECH_ESTIMATE_POINTS, COMIC_SPEECH_PRESET_CATALOG, comicDramaClipDraftSchema, comicSpeechPresets, comicVoiceBindSchema,
   estimateComicDialogueMs, matchComicCharacters,
-  type ComicAutoDialogueItemOutcome, type ComicAutoDialoguePlan, type ComicAutoDialoguePlanLine, type ComicAutoDialogueResult,
-  type ComicEditAutoDialogue, type ComicEditAutoDialogueOverride, type ComicEditAutoDialoguePreview, type ComicSpeechLines,
-  type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline, type ComicVoiceAudition, type ComicVoiceBind, type ComicVoiceSettings,
-  type ComicSpeechPresetId, type ComicSpeechPresetMeta,
+  type ComicAutoDialogueItemOutcome, type ComicAutoDialogueNativeClip, type ComicAutoDialoguePlan, type ComicAutoDialoguePlanLine,
+  type ComicAutoDialogueResult, type ComicEditAutoDialogue, type ComicEditAutoDialogueOverride, type ComicEditAutoDialoguePreview,
+  type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline, type ComicVoiceAudition,
+  type ComicVoiceBind, type ComicVoiceSettings, type ComicSpeechPresetId, type ComicSpeechPresetMeta,
 } from "@lot-agent/core/comic-drama";
 import { readComicDictionary } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
@@ -390,7 +390,9 @@ export class ComicEditSpeech {
     const overrideMap = new Map<string, ComicEditAutoDialogueOverride>(
       (fields.overrides ?? []).map(entry => [`${entry.videoItemId}:${entry.lineId}`, entry]),
     );
+    const replaceNativeSet = new Set(fields.replaceNativeAudioVideoItemIds ?? []);
     const lines: ComicAutoDialoguePlanLine[] = [];
+    const nativeAudioClips: ComicAutoDialogueNativeClip[] = [];
     const newSyntheses = new Set<string>();
     let alreadyPlacedCount = 0;
     let cachedCount = 0;
@@ -398,11 +400,24 @@ export class ComicEditSpeech {
     let blockedCount = 0;
     let skippedCount = 0;
     let overflowCount = 0;
+    let nativeAudioSkippedCount = 0;
 
     for (const item of edit.timeline.video) {
       const source = edit.sources.find(entry => entry.takeId === item.takeId);
+      const audioMode = source?.audioMode ?? "silent_tts";
+      const hasNativeAudio = audioMode === "native_audio" || audioMode === "reference_audio";
+      const replaceWithTts = !hasNativeAudio || replaceNativeSet.has(item.id);
       const clipLines = await this.linesForClip(owner, source?.clipId ?? null);
       if (!clipLines.lines.length) continue;
+      if (hasNativeAudio) {
+        nativeAudioClips.push({
+          videoItemId: item.id,
+          scene: source?.scene ?? "",
+          audioMode,
+          lineCount: clipLines.lines.length,
+          replaceWithTts: replaceNativeSet.has(item.id),
+        });
+      }
       const clipDuration = item.outMs - item.inMs;
       let cursorMs = Math.max(0, ...edit.timeline.voice
         .filter(entry => entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id)
@@ -415,7 +430,10 @@ export class ComicEditSpeech {
           entry.lineId === line.id && entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
         const startOffset = existingVoice?.anchor.offsetMs ?? cursorMs;
         const remainingMs = Math.max(0, clipDuration - startOffset);
-        const base = { videoItemId: item.id, clipId: source?.clipId ?? null, lineId: line.id, speaker: line.speaker, text, speed, remainingMs };
+        const base = {
+          videoItemId: item.id, clipId: source?.clipId ?? null, lineId: line.id,
+          speaker: line.speaker, text, speed, audioMode, remainingMs,
+        };
         if (existingVoice) {
           alreadyPlacedCount += 1;
           lines.push({ ...base, status: "already_placed", cachedDurationMs: existingVoice.durationMs });
@@ -424,6 +442,13 @@ export class ComicEditSpeech {
         if (remainingMs <= 0 || override?.overflowAction === "skip") {
           skippedCount += 1;
           lines.push({ ...base, status: "no_room" });
+          continue;
+        }
+        if (fields.includeVoice && hasNativeAudio && !replaceWithTts) {
+          const est = Math.min(remainingMs, Math.max(800, estimateComicDialogueMs([{ ...line, text, speed }])));
+          nativeAudioSkippedCount += 1;
+          lines.push({ ...base, status: "native_audio_subtitle_only", cachedDurationMs: est });
+          cursorMs = Math.max(cursorMs, startOffset + est);
           continue;
         }
         if (!fields.includeVoice) {
@@ -494,6 +519,8 @@ export class ComicEditSpeech {
       blockedCount,
       skippedCount,
       overflowCount,
+      nativeAudioSkippedCount,
+      nativeAudioClips,
       feeStatus: newSyntheses.size > 0 ? "fixed_points" : "free_cached",
       estimatedPoints: newSyntheses.size * COMIC_SPEECH_ESTIMATE_POINTS,
       lines,
@@ -509,8 +536,11 @@ export class ComicEditSpeech {
     const overrideMap = new Map<string, ComicEditAutoDialogueOverride>(
       (fields.overrides ?? []).map(entry => [`${entry.videoItemId}:${entry.lineId}`, entry]),
     );
+    const replaceNativeSet = new Set(fields.replaceNativeAudioVideoItemIds ?? []);
+    const nextVideo: ComicTimeline["video"] = edit.timeline.video.map(item => ({ ...item }));
     const nextVoice: ComicTimeline["voice"] = [...edit.timeline.voice];
     const nextSubtitles: ComicTimeline["subtitles"] = [...edit.timeline.subtitles];
+    const mutedVideoItemIds = new Set<string>();
     const items: ComicAutoDialogueItemOutcome[] = [];
     let voicedCount = 0;
     let subtitledCount = 0;
@@ -519,10 +549,14 @@ export class ComicEditSpeech {
     let skippedLines = 0;
     let overflowCount = 0;
     let failedCount = 0;
+    let nativeAudioSkippedCount = 0;
 
     for (const item of edit.timeline.video) {
       signal.throwIfAborted();
       const source = edit.sources.find(entry => entry.takeId === item.takeId);
+      const audioMode = source?.audioMode ?? "silent_tts";
+      const hasNativeAudio = audioMode === "native_audio" || audioMode === "reference_audio";
+      const replaceWithTts = !hasNativeAudio || replaceNativeSet.has(item.id);
       const clipLines = await this.linesForClip(owner, source?.clipId ?? null);
       if (!clipLines.lines.length) continue;
       const clipDuration = item.outMs - item.inMs;
@@ -538,9 +572,12 @@ export class ComicEditSpeech {
           entry.lineId === line.id && entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
         const existingSub = nextSubtitles.find(entry =>
           entry.lineId === line.id && entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
-        const startOffset = existingVoice?.anchor.offsetMs ?? cursorMs;
+        const startOffset = existingVoice?.anchor.offsetMs ?? existingSub?.anchor.offsetMs ?? cursorMs;
         const remaining = clipDuration - startOffset;
-        const base = { videoItemId: item.id, clipId: source?.clipId ?? null, lineId: line.id, speaker: line.speaker, text, speed };
+        const base = {
+          videoItemId: item.id, clipId: source?.clipId ?? null, lineId: line.id,
+          speaker: line.speaker, text, speed, audioMode,
+        };
 
         if (override?.overflowAction === "skip") {
           skippedLines += 1;
@@ -558,7 +595,28 @@ export class ComicEditSpeech {
         let wasTrimmed = false;
         let lineCached = !!existingVoice;
 
-        if (fields.includeVoice && !existingVoice) {
+        if (fields.includeVoice && !existingVoice && hasNativeAudio && !replaceWithTts) {
+          nativeAudioSkippedCount += 1;
+          if (fields.includeSubtitles && !existingSub) {
+            nextSubtitles.push({
+              id: randomUUID(), lineId: line.id, text,
+              anchor: { kind: "clip", videoItemId: item.id, offsetMs: startOffset },
+              durationMs: Math.max(1, Math.min(remaining, lineDurationMs)),
+            });
+            subtitledCount += 1;
+          }
+          items.push({
+            ...base,
+            status: "subtitle_only",
+            cached: false,
+            audioDurationMs: lineDurationMs,
+            remainingMs: remaining,
+          });
+          cursorMs = Math.max(cursorMs, startOffset + lineDurationMs);
+          continue;
+        }
+
+        if (fields.includeVoice && !existingVoice && replaceWithTts) {
           const scope = this.resolveLineVoiceScope(line.speaker, clipLines, fields.fallbackPreset);
           if (!scope) {
             skippedLines += 1;
@@ -603,6 +661,14 @@ export class ComicEditSpeech {
             });
             voicedCount += 1;
             linePlaced = true;
+            // Automatically mute the original native/reference-audio video track when explicitly replaced by TTS.
+            if (hasNativeAudio && replaceNativeSet.has(item.id)) {
+              const videoEntry = nextVideo.find(entry => entry.id === item.id);
+              if (videoEntry && videoEntry.volume > 0) {
+                videoEntry.volume = 0;
+                mutedVideoItemIds.add(item.id);
+              }
+            }
           } catch (error) {
             if (signal.aborted) throw error;
             failedCount += 1;
@@ -632,11 +698,11 @@ export class ComicEditSpeech {
         if (!existingVoice && linePlaced) cursorMs = Math.max(cursorMs, startOffset + lineDurationMs);
       }
     }
-    const updated = voicedCount > 0 || subtitledCount > 0
+    const updated = voicedCount > 0 || subtitledCount > 0 || mutedVideoItemIds.size > 0
       ? await this.edits.update(owner, editId, {
         expectedRevision: fields.expectedRevision,
         title: edit.title,
-        timeline: { ...edit.timeline, voice: nextVoice, subtitles: nextSubtitles },
+        timeline: { ...edit.timeline, video: nextVideo, voice: nextVoice, subtitles: nextSubtitles },
       })
       : edit;
     return {
@@ -648,6 +714,8 @@ export class ComicEditSpeech {
       skippedLines,
       overflowCount,
       failedCount,
+      nativeAudioSkippedCount,
+      mutedVideoItemIds: [...mutedVideoItemIds],
       items,
     };
   }

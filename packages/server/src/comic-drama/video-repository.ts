@@ -19,7 +19,10 @@ const videoColumns = `${takeColumns},r.series_id AS "seriesId",s.drama_id AS "dr
   c.selection_revision AS "clipSelectionRevision",
   t.video_version AS version,t.input->>'modelId' AS "modelId",
   coalesce(m.duration_ms,(t.input->>'durationMs')::int) AS "durationMs",t.completed_at AS "completedAt",
-  coalesce(c.keyframe_media_id, kt.media_id) AS "posterMediaId"`;
+  coalesce(c.keyframe_media_id, kt.media_id) AS "posterMediaId",
+  coalesce(t.input->>'audioMode', CASE WHEN EXISTS (
+    SELECT 1 FROM jsonb_array_elements(coalesce(t.input->'timedReferences','[]'::jsonb)) tr WHERE tr->>'kind'='audio'
+  ) THEN 'reference_audio' ELSE 'silent_tts' END) AS "audioMode"`;
 const joinVideos = `${joinTakes} JOIN ${tables}.cd_series s ON (s.owner_id,s.id)=(r.owner_id,r.series_id)
   LEFT JOIN ${tables}.cd_dramas d ON (d.owner_id,d.id)=(s.owner_id,s.drama_id)
   LEFT JOIN ${tables}.cd_clips c ON c.id=t.target_id AND c.series_id=r.series_id

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   COMIC_SPEECH_ESTIMATE_POINTS, comicSpeechPresets, matchComicCharacters,
-  type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline,
+  type ComicSpeechLines, type ComicSpeechRequest, type ComicSpeechTake, type ComicTimeline, type ComicVideoAudioMode,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -12,8 +12,9 @@ import { MediaPreview } from "./LibraryParts.js";
 type Video = ComicTimeline["video"][number];
 type Audio = ComicTimeline["voice"][number];
 
-export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles, change, addSubtitle, disabled }: {
-  projectId: string; revision: number; item: Video; voice: Audio[]; change: (voice: Audio[]) => void; disabled: boolean;
+export function ComicDialogueAudio({ projectId, revision, item, audioMode, voice, subtitles, change, addSubtitle, disabled }: {
+  projectId: string; revision: number; item: Video; audioMode?: ComicVideoAudioMode;
+  voice: Audio[]; change: (voice: Audio[], opts?: { muteVideo?: boolean }) => void; disabled: boolean;
   subtitles: ComicTimeline["subtitles"]; addSubtitle: (subtitle: ComicTimeline["subtitles"][number]) => void;
 }) {
   const { t } = useI18n();
@@ -29,8 +30,16 @@ export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles
     return () => controller.abort();
   }, [projectId, item.id, item.takeId, revision, attempt]);
   const local = voice.filter(entry => entry.anchor.kind === "clip" && entry.anchor.videoItemId === item.id);
+  const hasNativeAudio = audioMode === "native_audio" || audioMode === "reference_audio";
   return <section className="comic-edit-card">
     <header><h2>{t("逐句配音")}</h2><button type="button" onClick={retry}>{t("重新读取台词")}</button></header>
+    {hasNativeAudio && (
+      <p className="comic-generation-note" role="note">
+        {item.volume > 0
+          ? t("当前片段含模型原生或参考音频，默认仅需铺字幕；如手动加入后期配音，将自动把片源原声静音以避免双人声叠加。")
+          : t("当前片段含模型原生或参考音频，片源原声已静音，可直接叠加后期配音。")}
+      </p>
+    )}
     {data === "error" ? <p role="alert">{t("操作失败，请重试")}</p> : data === null ? <p role="status">{t("加载中…")}</p> :
       !data.lines.length ? <p>{t("源分镜暂无台词")}</p> : <>
         <p className="comic-generation-note">{t("新合成约 {0} 积分/次，命中缓存为 0 积分。", [COMIC_SPEECH_ESTIMATE_POINTS])}</p>
@@ -53,7 +62,10 @@ export function ComicDialogueAudio({ projectId, revision, item, voice, subtitles
               const entry: Audio = { id: attached?.id ?? crypto.randomUUID(), mediaId: take.mediaId, lineId: line.id,
                 anchor: { kind: "clip", videoItemId: item.id, offsetMs: offset }, durationMs, sourceInMs: 0,
                 volume: 1, fadeInMs: 0, fadeOutMs: 0, loop: false };
-              change(attached ? voice.map(value => value.id === attached.id ? entry : value) : [...voice, entry]);
+              change(
+                attached ? voice.map(value => value.id === attached.id ? entry : value) : [...voice, entry],
+                hasNativeAudio && item.volume > 0 ? { muteVideo: true } : undefined,
+              );
             }} remove={() => change(voice.filter(value => value.id !== attached?.id))} />;
         })}
       </>}

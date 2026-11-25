@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,8 +7,12 @@ import { describe, expect, it } from "vitest";
 import { COMIC_RENDER_MAX_INPUTS, comicTimelineSchema, layoutComicTimeline } from "@lot-agent/core/comic-drama";
 import { ffmpeg, inspectMedia, mediaCapabilities, mediaProcess } from "../marketing-video/media.js";
 import {
-  COMIC_RENDER_PREMIX_BATCH, composeComicRender, planAudioStemPremix, shouldPremixComicAudio, type PremixClipEntry,
+  COMIC_RENDER_PREMIX_BATCH, ComicRenderFailure, composeComicRender, estimateComicRenderTempBytes, isHighSpecVideoSource,
+  planAudioStemPremix, shouldPremixComicAudio, shouldPretranscodeComicVideo, type PremixClipEntry,
 } from "./render-media.js";
+import {
+  checkDiskFreeSpace, cleanupComicOrphanTempDirs, registerActiveComicTempDir, unregisterActiveComicTempDir,
+} from "./temp-cleanup.js";
 
 const uuid = (n: number) => `12345678-1234-4234-8234-${String(n).padStart(12, "0")}`;
 
@@ -167,4 +171,147 @@ describe("comic render audio stem premixing", () => {
       await rm(folder, { recursive: true, force: true });
     }
   }, 45_000);
+
+  it("P1: exports all-24fps natively at 24fps, converts mixed 24+30fps to CFR 30fps, and runs segmented pre-transcoding with disk guard", async () => {
+    expect(isHighSpecVideoSource({ width: 2160, height: 3840, videoCodec: "hevc", pixFmt: "yuv420p10le" })).toBe(true);
+    expect(isHighSpecVideoSource({ width: 1080, height: 1920, videoCodec: "h264", pixFmt: "yuv420p" })).toBe(false);
+    expect(estimateComicRenderTempBytes(300_000, true, 1_073_741_824)).toBeGreaterThan(1_500_000_000);
+
+    const caps = await mediaCapabilities();
+    if (!caps.composition) return;
+    const folder = await mkdtemp(join(tmpdir(), "lot-comic-p1-render-"));
+    try {
+      const clip24a = join(folder, "a-24.mp4");
+      const clip24b = join(folder, "b-24.mp4");
+      const clip30 = join(folder, "c-30.mp4");
+      await mediaProcess(ffmpeg(), [
+        "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=0x224466:s=320x568:r=24:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-threads", "1", clip24a,
+      ], { timeoutMs: 20_000 });
+      await mediaProcess(ffmpeg(), [
+        "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=0x883322:s=320x568:r=24:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-threads", "1", clip24b,
+      ], { timeoutMs: 20_000 });
+      await mediaProcess(ffmpeg(), [
+        "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=0x337744:s=320x568:r=30:d=2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-threads", "1", clip30,
+      ], { timeoutMs: 20_000 });
+
+      const info24a = await inspectMedia(clip24a);
+      const info24b = await inspectMedia(clip24b);
+      const info30 = await inspectMedia(clip30);
+      const d24a = Math.round(info24a.duration * 1000);
+      const d24b = Math.round(info24b.duration * 1000);
+      const d30 = Math.round(info30.duration * 1000);
+
+      // 1. All-24fps timeline with crossfade + forcePretranscode -> native 24fps & heartbeat invoked
+      const t24a = uuid(950), t24b = uuid(951);
+      const timeline24 = comicTimelineSchema.parse({
+        schemaVersion: 1, aspectRatio: "9:16",
+        video: [
+          { id: uuid(952), takeId: t24a, sourceDurationMs: d24a, inMs: 0, outMs: d24a, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+          { id: uuid(953), takeId: t24b, sourceDurationMs: d24b, inMs: 0, outMs: d24b, volume: 1, transitionIn: { kind: "crossfade", durationMs: 500 } },
+        ],
+        voice: [], sfx: [], music: [], subtitles: [],
+      });
+      expect(shouldPretranscodeComicVideo(timeline24, new Map([
+        [t24a, { info: { width: 2160, height: 3840, videoCodec: "hevc", pixFmt: "yuv420p10le" } }],
+        [t24b, { info: { width: 2160, height: 3840, videoCodec: "hevc", pixFmt: "yuv420p10le" } }],
+      ]))).toBe(true);
+
+      // Disk space guard rejects before render when free space is below threshold.
+      const lowStatfs = (async () => ({ bavail: 100, bsize: 4096 })) as unknown as Parameters<typeof checkDiskFreeSpace>[2];
+      await expect(composeComicRender(timeline24, {
+        videos: new Map([[t24a, { path: clip24a, durationMs: d24a }], [t24b, { path: clip24b, durationMs: d24b }]]),
+        audio: new Map(),
+      }, AbortSignal.timeout(30_000), { statfs: lowStatfs })).rejects.toMatchObject({ errorCode: "RENDER_DISK_SPACE_LOW" });
+      expect(new ComicRenderFailure("RENDER_DISK_SPACE_LOW").errorCode).toBe("RENDER_DISK_SPACE_LOW");
+
+      let heartbeats = 0;
+      const out24 = await composeComicRender(timeline24, {
+        videos: new Map([[t24a, { path: clip24a, durationMs: d24a }], [t24b, { path: clip24b, durationMs: d24b }]]),
+        audio: new Map(),
+      }, AbortSignal.timeout(60_000), { fpsMode: "auto", forcePretranscode: true, onHeartbeat: () => { heartbeats += 1; } });
+      try {
+        expect(out24.outputFps).toBe(24);
+        expect(out24.fpsPolicy).toBe("native");
+        expect(out24.pretranscoded).toBe(true);
+        expect(heartbeats).toBeGreaterThanOrEqual(4);
+        const probed = await inspectMedia(out24.file);
+        expect(Math.abs(probed.fps - 24)).toBeLessThanOrEqual(0.15);
+        expect(Math.abs(probed.duration * 1000 - (d24a + d24b - 500))).toBeLessThanOrEqual(42);
+      } finally {
+        await out24.dispose();
+      }
+
+      // 2. Mixed 24fps + 30fps timeline -> CFR 30fps
+      const t30 = uuid(954);
+      const mixedTimeline = comicTimelineSchema.parse({
+        schemaVersion: 1, aspectRatio: "9:16",
+        video: [
+          { id: uuid(955), takeId: t24a, sourceDurationMs: d24a, inMs: 0, outMs: d24a, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+          { id: uuid(956), takeId: t30, sourceDurationMs: d30, inMs: 0, outMs: d30, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+        ],
+        voice: [], sfx: [], music: [], subtitles: [],
+      });
+      const outMixed = await composeComicRender(mixedTimeline, {
+        videos: new Map([[t24a, { path: clip24a, durationMs: d24a }], [t30, { path: clip30, durationMs: d30 }]]),
+        audio: new Map(),
+      }, AbortSignal.timeout(60_000), { fpsMode: "auto" });
+      try {
+        expect(outMixed.outputFps).toBe(30);
+        expect(outMixed.fpsPolicy).toBe("cfr_convert");
+        expect(outMixed.mixedSourceFps).toBe(true);
+        const probed = await inspectMedia(outMixed.file);
+        expect(Math.abs(probed.fps - 30)).toBeLessThanOrEqual(0.15);
+      } finally {
+        await outMixed.dispose();
+      }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("P1: cleans aged orphan render/upload temp dirs while protecting fresh and active dirs", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "lot-comic-cleanup-test-"));
+    const tempRoot = join(sandbox, "tmp");
+    const mediaRoot = join(sandbox, "media");
+    await mkdir(tempRoot, { recursive: true });
+    await mkdir(mediaRoot, { recursive: true });
+    try {
+      const oldRender = join(tempRoot, "lot-comic-render-old");
+      const freshRender = join(tempRoot, "lot-comic-render-fresh");
+      const activeRender = join(tempRoot, "lot-comic-render-active");
+      const unrelated = join(tempRoot, "other-dir");
+      const oldUpload = join(mediaRoot, ".upload-old");
+      for (const dir of [oldRender, freshRender, activeRender, unrelated, oldUpload]) {
+        await mkdir(dir, { recursive: true });
+        await writeFile(join(dir, "part.bin"), Buffer.alloc(1024, 1));
+      }
+      const now = Date.now();
+      const threeHoursAgo = new Date(now - 3 * 60 * 60_000);
+      for (const dir of [oldRender, activeRender, oldUpload]) {
+        await utimes(join(dir, "part.bin"), threeHoursAgo, threeHoursAgo);
+        await utimes(dir, threeHoursAgo, threeHoursAgo);
+      }
+      registerActiveComicTempDir(activeRender);
+      try {
+        const res = await cleanupComicOrphanTempDirs({ tempRoot, mediaRoot, maxAgeMs: 2 * 60 * 60_000, nowMs: now });
+        expect(res.removed).toBe(2);
+        expect(res.skippedActive).toBe(1);
+        expect(res.reclaimedBytes).toBeGreaterThanOrEqual(2048);
+        await expect(stat(oldRender)).rejects.toThrow();
+        await expect(stat(oldUpload)).rejects.toThrow();
+        await expect(stat(freshRender)).resolves.toBeTruthy();
+        await expect(stat(activeRender)).resolves.toBeTruthy();
+        await expect(stat(unrelated)).resolves.toBeTruthy();
+      } finally {
+        unregisterActiveComicTempDir(activeRender);
+      }
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
 });

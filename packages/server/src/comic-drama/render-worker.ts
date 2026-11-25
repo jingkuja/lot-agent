@@ -5,7 +5,13 @@ import type { ComicMediaLibrary } from "./media-library.js";
 import { ComicRenderFailure, composeComicRender, type ComicRenderSource } from "./render-media.js";
 import { PgComicRenders } from "./render-repository.js";
 
-export async function runComicRender(pool: Pool, media: ComicMediaLibrary, job: { id: string; userId: string }, signal: AbortSignal) {
+export async function runComicRender(
+  pool: Pool,
+  media: ComicMediaLibrary,
+  job: { id: string; userId: string },
+  signal: AbortSignal,
+  heartbeat?: () => void,
+) {
   return withComicGenerationLock(pool, job.id, async () => {
     const repo = new PgComicRenders(pool);
     const owner = job.userId;
@@ -26,8 +32,12 @@ export async function runComicRender(pool: Pool, media: ComicMediaLibrary, job: 
           if (!audio.has(clip.mediaId)) audio.set(clip.mediaId, await media.renderSource(owner, clip.mediaId, "audio"));
         }
       }
-      const film = await composeComicRender(frozen.timeline, { videos, audio }, signal);
-      try { return await media.publishRender(owner, film.file, signal, file => repo.complete(job.id, file, signal)); }
+      const film = await composeComicRender(frozen.timeline, { videos, audio }, signal, {
+        fpsMode: frozen.fpsMode ?? "auto",
+        onHeartbeat: heartbeat,
+        mediaRoot: media.rootDir,
+      });
+      try { return await media.publishRender(owner, film.file, signal, file => repo.complete(job.id, file, signal, film.outputFps)); }
       finally { await film.dispose(); }
     } catch (error) {
       signal.throwIfAborted();

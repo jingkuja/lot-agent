@@ -75,6 +75,7 @@ const errors: Record<string, string> = {
   RENDER_SOURCE_UNAVAILABLE: "导出源文件不可用",
   RENDER_SOURCE_CHANGED: "导出源文件时长有变化",
   RENDER_FFMPEG_UNAVAILABLE: "导出工具缺少视频、转场或字幕支持",
+  RENDER_DISK_SPACE_LOW: "导出临时磁盘空间不足，请稍后重试或清理磁盘空间",
   RENDER_FAILED: "合成失败，请检查素材后重新导出",
   RENDER_CANCEL_UNAVAILABLE: "该导出已结束，无法取消",
   RENDER_CONTROL_BUSY: "导出状态正在更新，请稍后重试",

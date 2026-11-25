@@ -40,6 +40,9 @@ export class PgComicEdits {
       CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS "clipOrdinal",
       coalesce(c.draft->>'scene','') AS scene,
       t.video_version AS version,m.duration_ms AS "durationMs",t.input->>'aspectRatio' AS "aspectRatio",
+      coalesce(t.input->>'audioMode', CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements(coalesce(t.input->'timedReferences','[]'::jsonb)) tr WHERE tr->>'kind'='audio'
+      ) THEN 'reference_audio' ELSE 'silent_tts' END) AS "audioMode",
       CASE WHEN a.id IS NOT NULL AND am.duration_ms IS NOT NULL
         THEN jsonb_build_object('takeId',a.id,'version',a.video_version,'durationMs',am.duration_ms) END AS adopted
       FROM ${cd}.cd_takes t JOIN ${cd}.cd_generation_requests r ON (r.owner_id,r.id)=(t.owner_id,t.request_id)

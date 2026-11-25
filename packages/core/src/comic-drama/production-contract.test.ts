@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyComicScriptEnhancements, buildComicDramaHierarchy, buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues,
+  adaptComicClipDraftForModel, analyzeComicModelSwitch, applyComicScriptEnhancements, buildComicDramaHierarchy,
+  buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues,
   COMIC_SPEECH_PRESET_CATALOG, comicDirectorApplySchema, comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema,
   comicDramaClipDraftSchema, comicDramaSchema, comicDramaSeriesSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions,
-  comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema, comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile,
-  comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, createComicDramaSchema, estimateComicDialogueMs, extractComicScriptExcerptSegments,
-  layoutComicTimeline, matchComicCharacters, normalizeShotDurationShares, planClipSfxPlacements, rebalanceShotDurationShares, selectComicImageModel,
+  comicRenderDurationToleranceMs, comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema, comicUserPreferencesSchema, comicVideoOptions,
+  comicVideoProfile, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, countComicClipFoldedReferences, countComicClipReferences,
+  createComicDramaSchema, estimateComicDialogueMs, extractComicScriptExcerptSegments,
+  layoutComicTimeline, mapComicVideoResolution, matchComicCharacters, normalizeShotDurationShares, planClipSfxPlacements,
+  rebalanceShotDurationShares, resolveComicRenderFps, resolveComicVideoAudioMode, selectComicImageModel,
   selectComicVideoModel, splitComicScriptSegments, validateComicVideoInput, type ComicGenerationTimedMedia, type ComicCastSnapshot,
   type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
@@ -544,5 +547,123 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
       `1:${uuid(2)}:门口风铃:4000`,
       `2:${uuid(2)}:柜台重逢:5000`,
     ]);
+  });
+});
+
+describe("P1 audio modes, 24fps export policy, real-time checks, and one-click model compatibility", () => {
+  it("validates 3 audio modes and generates native_audio prompt without requiring reference audio", () => {
+    expect(resolveComicVideoAudioMode(undefined, false)).toBe("silent_tts");
+    expect(resolveComicVideoAudioMode(undefined, true)).toBe("reference_audio");
+    expect(resolveComicVideoAudioMode("native_audio", false)).toBe("native_audio");
+
+    const nativeClip: ComicDramaClip = {
+      ...clip,
+      draft: comicDramaClipDraftSchema.parse({
+        ...clip.draft,
+        lines: [{ id: uuid(801), speaker: "Lin", text: "Hello there.", emotionKey: null, speed: 1 }],
+        videoInputs: { references: [], audioMode: "native_audio" },
+      }),
+    };
+    const builtNative = buildComicGenerationInput({
+      series, clip: nativeClip, cast, modelId: "doubao-seedance-2-5", mode: "references",
+    });
+    expect(builtNative.ok).toBe(true);
+    if (builtNative.ok) {
+      expect(builtNative.input.audioMode).toBe("native_audio");
+      expect(builtNative.input.prompt).toContain("synchronized spoken dialogue");
+    }
+
+    const refAudioMissingClip: ComicDramaClip = {
+      ...clip,
+      draft: comicDramaClipDraftSchema.parse({
+        ...clip.draft,
+        videoInputs: { references: [], audioMode: "reference_audio" },
+      }),
+    };
+    const builtMissing = buildComicGenerationInput({
+      series, clip: refAudioMissingClip, cast, modelId: "doubao-seedance-2-5", mode: "references",
+    });
+    expect(builtMissing).toMatchObject({ ok: false, issues: [{ code: "AUDIO_REFERENCE_REQUIRED", field: "audioMode" }] });
+  });
+
+  it("resolves 24fps native export for all-24fps/23.976fps sources and 30fps CFR for mixed fps", () => {
+    expect(resolveComicRenderFps([24, 24], "auto")).toMatchObject({ fps: 24, policy: "native", allSources24Fps: true, mixedSourceFps: false });
+    expect(resolveComicRenderFps([24000 / 1001, 24], "auto")).toMatchObject({ fps: 24, policy: "native", allSources24Fps: true });
+    expect(resolveComicRenderFps([24, 30], "auto")).toMatchObject({ fps: 30, policy: "cfr_convert", allSources24Fps: false, mixedSourceFps: true });
+    expect(resolveComicRenderFps([24, 30], "24")).toMatchObject({ fps: 24, policy: "cfr_convert", mixedSourceFps: true });
+    expect(resolveComicRenderFps([24, 24], "30")).toMatchObject({ fps: 30, policy: "cfr_convert", mixedSourceFps: false });
+    expect(comicRenderDurationToleranceMs(24)).toBe(42);
+    expect(comicRenderDurationToleranceMs(30)).toBe(34);
+  });
+
+  it("flags model incompatibilities in real time and non-destructively adapts & restores across Seedance 2.5 <-> MiniMax H3", () => {
+    const h3 = comicVideoProfile("MiniMax-H3")!;
+    const s25 = comicVideoProfile("doubao-seedance-2-5")!;
+    expect(mapComicVideoResolution("720p", h3)).toBe("768P");
+    expect(mapComicVideoResolution("4k", h3)).toBe("2K");
+    expect(mapComicVideoResolution("768P", s25)).toBe("720p");
+    expect(mapComicVideoResolution("2K", s25)).toBe("1080p");
+
+    // Seedance 2.5 clip with 20s, 4k, extend sourceDuration, 2 cast refs + 1 scene + 1 style + 4 props + 4 extra images = 12 images
+    const heavyClip: ComicDramaClip = {
+      ...clip,
+      draft: comicDramaClipDraftSchema.parse({
+        ...clip.draft,
+        durationMs: 20_000,
+        cast: [{ characterId: snapshot.characterId, slotKey: "front", expressionKey: "smile" }],
+        sceneRef: { materialId: uuid(810), mediaId: uuid(811), name: "雨夜街道" },
+        propRefs: Array.from({ length: 4 }, (_, i) => ({ materialId: uuid(820 + i), mediaId: uuid(830 + i), name: `道具${i + 1}` })),
+        videoInputs: {
+          resolution: "4k",
+          sourceDuration: true,
+          references: Array.from({ length: 4 }, (_, i) => ({
+            kind: "image" as const, materialId: uuid(840 + i), mediaId: uuid(850 + i), name: `附加图${i + 1}`,
+          })),
+        },
+      }),
+    };
+
+    // Real-time checks against MiniMax H3 catch duration, resolution, image count, extend
+    const liveIssues = checkComicClipIssues(
+      { videoModel: "MiniMax-H3" }, heavyClip, [{ ...cast[0], hasUpdates: false }], { hasStyleRef: true },
+    );
+    expect(liveIssues.map(i => i.code)).toEqual(expect.arrayContaining([
+      "REFERENCE_LIMIT_EXCEEDED",
+      "DURATION_OUT_OF_RANGE",
+      "RESOLUTION_UNSUPPORTED",
+      "VIDEO_MODE_UNSUPPORTED",
+    ]));
+
+    // Switch analysis reports affected clip and non-destructive adaptation without silently clamping >15s duration
+    const report = analyzeComicModelSwitch([heavyClip], "MiniMax-H3", { hasStyleRef: true });
+    expect(report?.affectedClips).toHaveLength(1);
+    expect(report?.autoAdaptableCount).toBe(1);
+    expect(report?.durationNeedsAttentionCount).toBe(1);
+    const adapted = report!.affectedClips[0].adaptedDraft;
+    expect(adapted.durationMs).toBe(20_000);
+    expect(adapted.videoInputs?.resolution).toBe("2K");
+    expect(adapted.videoInputs?.sourceDuration).toBeUndefined();
+    expect(adapted.videoInputs?.modelAdaptation?.originalResolution).toBe("4k");
+    expect(adapted.videoInputs?.modelAdaptation?.originalSourceDuration).toBe(true);
+    // 12 images -> 9 kept (cast slot+expr=2, scene=1, style=1, 4 props=4, 1 extra=1), 3 lowest-priority extra images folded!
+    expect(adapted.videoInputs?.modelAdaptation?.foldedExtraImageMediaIds).toEqual([uuid(851), uuid(852), uuid(853)]);
+    expect(adapted.videoInputs?.modelAdaptation?.foldedPropMediaIds).toBeUndefined();
+    expect(adapted.videoInputs?.modelAdaptation?.foldedSceneRef).toBeUndefined();
+    expect(countComicClipFoldedReferences(adapted, { hasStyleRef: true })).toBe(3);
+    expect(countComicClipReferences({ ...heavyClip, draft: adapted }, { hasStyleRef: true })).toBe(9);
+    // Original extra references remain intact in draft.videoInputs.references!
+    expect(adapted.videoInputs?.references).toHaveLength(4);
+
+    // Explicit clampDuration compresses 20s -> 15s when requested
+    const clamped = adaptComicClipDraftForModel(heavyClip.draft, "MiniMax-H3", { hasStyleRef: true, clampDuration: true });
+    expect(clamped.draft.durationMs).toBe(15_000);
+
+    // Switching back to Seedance 2.5 restores original 4k resolution, sourceDuration=true, and unfolds all 3 images!
+    const restored = adaptComicClipDraftForModel(adapted, "doubao-seedance-2-5", { hasStyleRef: true });
+    expect(restored.changed).toBe(true);
+    expect(restored.draft.videoInputs?.resolution).toBe("4k");
+    expect(restored.draft.videoInputs?.sourceDuration).toBe(true);
+    expect(restored.draft.videoInputs?.modelAdaptation).toBeUndefined();
+    expect(countComicClipReferences({ ...heavyClip, draft: restored.draft }, { hasStyleRef: true })).toBe(12);
   });
 });

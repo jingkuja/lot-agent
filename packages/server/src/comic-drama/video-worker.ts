@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import { withPublicDownload, ProviderError, type VideoGenerationProvider, type VideoGenerationRequest } from "@lot-agent/core";
-import { COMIC_VIDEO_RESOLUTION, comicVideoModel, comicVideoProfile } from "@lot-agent/core/comic-drama";
+import { COMIC_VIDEO_RESOLUTION, comicVideoModel, comicVideoProfile, resolveComicVideoAudioMode } from "@lot-agent/core/comic-drama";
 import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import type { createComicVideoCreditCheck } from "./credit-check.js";
 import { withComicGenerationLock } from "./generation-worker.js";
@@ -50,10 +50,11 @@ export async function prepareComicVideoRequest(
   const operation = input.mode === "edit" || input.mode === "extend" ? input.mode : "reference";
   const explicitTaskType = comicVideoModel(input.modelId)?.label === "Seedance 2.5";
   const adaptiveFrame = !!first && comicVideoProfile(input.modelId)?.adaptiveFrame;
+  const audioMode = resolveComicVideoAudioMode(input.audioMode, audio.length > 0);
   return {
     model: input.modelId, prompt: input.prompt, durationSec: input.durationMs / 1000,
     ...(adaptiveFrame ? { ratio: "adaptive" } : { size: sizes[resolution][input.aspectRatio], ratio: input.aspectRatio }),
-    resolution, quality: resolution, generate_audio: !!audio.length,
+    resolution, quality: resolution, generate_audio: audioMode !== "silent_tts",
     ...(refs.length ? { input_reference: refs } : {}), ...(first ? { first_frame: first } : {}), ...(last ? { last_frame: last } : {}),
     ...(audio.length ? { reference_audio: audio } : {}),
     ...(video.length ? { reference_video: video, seedanceReference: { operation, followsSource: !!input.sourceDuration, explicitTaskType } } : {}),

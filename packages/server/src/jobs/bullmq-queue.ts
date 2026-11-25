@@ -5,7 +5,11 @@ import type Redis from "ioredis";
 import type { EnqueueOpts, JobControl, JobQueue, JobRecord } from "@lot-agent/core";
 import type { DB } from "../db/database.js";
 import { GENERATION_QUEUE_FAILED } from "../generation/errors.js";
-import { DEFAULT_TASK_QUEUE, isComicMediaTask, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName, type MarketingQueueLimits } from "./task-queues.js";
+import {
+  COMIC_IMAGE_QUEUE, COMIC_RENDER_QUEUE, COMIC_VIDEO_QUEUE, comicQueueLimits, DEFAULT_TASK_QUEUE, isComicMediaTask,
+  isIsolatedMediaQueue, MANAGED_TASK_QUEUES, MARKETING_VIDEO_QUEUE, marketingQueueLimits, taskQueueName,
+  type ComicQueueLimits, type MarketingQueueLimits,
+} from "./task-queues.js";
 
 // A render that waits for the same owner's earlier render frees its slot for
 // other users, then retries after this delay (plus jitter).
@@ -34,11 +38,28 @@ export class BullmqJobQueue implements JobQueue {
   constructor(
     private readonly db: DB,
     private readonly connection: Redis,
-    private readonly marketingLimits: MarketingQueueLimits = marketingQueueLimits()
+    private readonly marketingLimits: MarketingQueueLimits = marketingQueueLimits(),
+    private readonly comicLimits: ComicQueueLimits = comicQueueLimits(),
   ) {
-    for (const name of [DEFAULT_TASK_QUEUE, MARKETING_VIDEO_QUEUE]) {
+    for (const name of MANAGED_TASK_QUEUES) {
       this.queues.set(name, new Queue(name, { connection: bullConnection(connection) }));
     }
+  }
+
+  private queueConcurrency(name: string): number {
+    if (name === MARKETING_VIDEO_QUEUE) return this.marketingLimits.concurrency;
+    if (name === COMIC_IMAGE_QUEUE) return this.comicLimits.imageConcurrency;
+    if (name === COMIC_VIDEO_QUEUE) return this.comicLimits.videoConcurrency;
+    if (name === COMIC_RENDER_QUEUE) return this.comicLimits.renderConcurrency;
+    return 1;
+  }
+
+  private queueOwnerLimit(name: string): number {
+    if (name === MARKETING_VIDEO_QUEUE) return this.marketingLimits.perUser;
+    if (name === COMIC_IMAGE_QUEUE) return this.comicLimits.imagePerUser;
+    if (name === COMIC_VIDEO_QUEUE) return this.comicLimits.videoPerUser;
+    if (name === COMIC_RENDER_QUEUE) return this.comicLimits.renderPerUser;
+    return 1;
   }
 
   async enqueue<I>(
@@ -64,9 +85,9 @@ export class BullmqJobQueue implements JobQueue {
     );
 
     this.startWorker(taskQueueName(type));
-    // Also drain legacy marketing entries from the old shared queue. This
-    // worker only forwards those entries; the render runs on its own worker.
+    // Also drain legacy entries from previously shared queues without claiming them.
     if (type === "marketing.video") this.startWorker(DEFAULT_TASK_QUEUE);
+    if (isComicMediaTask(type)) this.startWorker(MARKETING_VIDEO_QUEUE);
   }
 
   private startWorker(name: string): void {
@@ -80,10 +101,11 @@ export class BullmqJobQueue implements JobQueue {
           const persisted = await this.db.getTask(taskId);
           if (persisted?.type !== jobType || !["pending", "running"].includes(persisted.status)) return;
 
-          if (name === DEFAULT_TASK_QUEUE && jobType === "marketing.video") {
+          if ((name === DEFAULT_TASK_QUEUE && jobType === "marketing.video")
+            || (name === MARKETING_VIDEO_QUEUE && isComicMediaTask(jobType))) {
             // No DB claim and no business handler here. Adding with the same
             // ID is idempotent and never retries an existing failed target.
-            await publishPersistedJob(this.queues.get(MARKETING_VIDEO_QUEUE)!, taskId, jobType, { maxAttempts: 1 });
+            await publishPersistedJob(this.queues.get(taskQueueName(jobType))!, taskId, jobType, { maxAttempts: 1 });
             return;
           }
           if (taskQueueName(jobType) !== name) return;
@@ -99,9 +121,9 @@ export class BullmqJobQueue implements JobQueue {
           // A false claim means the task reached a terminal state (typically
           // cancelled while queued) before we got here — never run the handler.
           let claimed: boolean;
-          if (name === MARKETING_VIDEO_QUEUE) {
+          if (isIsolatedMediaQueue(name)) {
             const live = () => queueDeadline(async () => (await this.queues.get(name)!.getActive(0, -1)).flatMap(job => job.id ? [job.id] : []));
-            const claim = await this.db.claimTaskWithinOwnerLimit(taskId, attempts, persisted.user_id, live, this.marketingLimits.perUser)
+            const claim = await this.db.claimTaskWithinOwnerLimit(taskId, attempts, persisted.user_id, live, this.queueOwnerLimit(name))
               .catch(() => "unavailable" as const);
             if (claim === "busy" || claim === "unavailable") {
               await bullJob.moveToDelayed(Date.now() + OWNER_BUSY_DELAY_MS + Math.floor(Math.random() * 5000), token);
@@ -109,7 +131,10 @@ export class BullmqJobQueue implements JobQueue {
             }
             claimed = claim === "claimed";
             // Queue wait for P95 tracking: first run only, as resumes keep the original timestamp.
-            if (claimed && bullJob.attemptsMade === 0) console.info("[queue] marketing render started", { taskId, waitMs: Date.now() - bullJob.timestamp });
+            if (claimed && bullJob.attemptsMade === 0) {
+              console.info(name === MARKETING_VIDEO_QUEUE ? "[queue] marketing render started" : "[queue] comic task started",
+                { queue: name, type: jobType, taskId, waitMs: Date.now() - bullJob.timestamp });
+            }
           } else claimed = await this.db.markTaskRunning(taskId, attempts);
           if (!claimed) return;
           const row = await this.db.getTask(taskId);
@@ -159,7 +184,7 @@ export class BullmqJobQueue implements JobQueue {
             return output;
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            const retry = taskQueueName(jobType) !== MARKETING_VIDEO_QUEUE && attempts < (bullJob.opts.attempts ?? 1)
+            const retry = !isIsolatedMediaQueue(taskQueueName(jobType)) && attempts < (bullJob.opts.attempts ?? 1)
               && (err as Error)?.name !== "UnrecoverableError";
             // Typed worker errors carry a cause code the UI can act on without parsing the message.
             const errorCode = typeof (err as { errorCode?: unknown })?.errorCode === "string" ? (err as { errorCode: string }).errorCode : undefined;
@@ -171,7 +196,7 @@ export class BullmqJobQueue implements JobQueue {
             this.running.delete(taskId);
           }
         },
-        { connection: bullConnection(this.connection), concurrency: name === MARKETING_VIDEO_QUEUE ? this.marketingLimits.concurrency : 1 }
+        { connection: bullConnection(this.connection), concurrency: this.queueConcurrency(name) }
       );
       this.workers.set(name, worker);
     }
@@ -218,11 +243,12 @@ export class BullmqJobQueue implements JobQueue {
     const row = await this.db.getTask(id);
     if (!row || row.type !== type || !["pending", "running"].includes(row.status)) return;
     const name = taskQueueName(type);
-    if (name === MARKETING_VIDEO_QUEUE) {
-      const legacy = await this.queues.get(DEFAULT_TASK_QUEUE)!.getJob(id);
+    const legacyQueueName = name === MARKETING_VIDEO_QUEUE ? DEFAULT_TASK_QUEUE : isComicMediaTask(type) ? MARKETING_VIDEO_QUEUE : null;
+    if (legacyQueueName) {
+      const legacy = await this.queues.get(legacyQueueName)!.getJob(id);
       if (legacy) {
         // An older deployed worker may still be finishing this task. Never
-        // start a second render until it releases its BullMQ lock.
+        // start a second run until it releases its BullMQ lock.
         if (await legacy.getState() === "active") return;
         // remove() fails if a worker claims it during this race. Let delivery
         // fail safely instead of publishing a duplicate to the new queue.

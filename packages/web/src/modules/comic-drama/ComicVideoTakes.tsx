@@ -189,7 +189,10 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
       {t("版本 {0}", [take.version])}{take.adopted && " · " + t("已采用")}
     </strong>
     {(open || selected) && take.scene && <small>{take.scene}</small>}
-    <small>{take.modelId} · {t("{0} 秒视频", [+(take.durationMs / 1000).toFixed(2)])}</small>
+    <small>
+      {take.modelId} · {t("{0} 秒视频", [+(take.durationMs / 1000).toFixed(2)])}
+      {take.audioMode && ` · ${t(take.audioMode === "native_audio" ? "原生音画" : take.audioMode === "reference_audio" ? "参考音频" : "后期配音")}`}
+    </small>
     <small>{new Date(take.completedAt ?? take.createdAt).toLocaleString(locale)}</small>
     {!selected && <><ComicTakeStatus take={take} /><VideoTakeActions take={take} refresh={refresh} /></>}
     {take.state === "ready" && !selected && <div className="comic-actions">

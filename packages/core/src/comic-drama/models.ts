@@ -27,6 +27,8 @@ export function selectComicImageModel(models: readonly { id: string }[], preferr
 type ReferenceImage = MarketingVideoProfile["referenceImage"] & { maxEdge?: number };
 export const comicVideoResolutions = ["480p", "720p", "768P", "1080p", "2K", "4k"] as const;
 export type ComicVideoResolution = typeof comicVideoResolutions[number];
+export const comicVideoAudioModes = ["silent_tts", "native_audio", "reference_audio"] as const;
+export type ComicVideoAudioMode = typeof comicVideoAudioModes[number];
 export type ComicVideoOperation = "reference" | "edit" | "extend";
 export type ComicVideoProfile = {
   referenceImages: { total: number };
@@ -114,4 +116,57 @@ export function comicVideoDurationSupported(durationMs: number, profile: Pick<Co
 export function comicReferenceImageInvalid(profile: ComicVideoProfile, image: { mime: string; size: number; width: number; height: number }) {
   const max = profile.referenceImage.maxEdge;
   return Boolean((max && Math.max(image.width, image.height) > max) || marketingReferenceImageIssue(profile, image));
+}
+
+export function resolveComicVideoAudioMode(
+  audioMode: ComicVideoAudioMode | undefined,
+  hasReferenceAudio: boolean,
+): ComicVideoAudioMode {
+  return audioMode ?? (hasReferenceAudio ? "reference_audio" : "silent_tts");
+}
+
+/** Cross-model safe common denominator across Seedance 2.5, Seedance 2.0, and MiniMax H3. */
+export const COMIC_VIDEO_SAFE_COMMON_LIMITS = {
+  minSeconds: 4,
+  maxSeconds: 15,
+  maxImages: 9,
+  maxTotalFiles: 12,
+  maxAudioCount: 3,
+  maxVideoCount: 3,
+  maxAudioTotalSeconds: 15,
+  maxVideoTotalSeconds: 15,
+  audioOnlyAllowed: false,
+} as const;
+
+const resolutionRank: Record<ComicVideoResolution, number> = {
+  "480p": 480,
+  "720p": 720,
+  "768P": 768,
+  "1080p": 1080,
+  "2K": 1440,
+  "4k": 2160,
+};
+
+/** Maps a resolution to the nearest option supported by the target video model. */
+export function mapComicVideoResolution(
+  resolution: ComicVideoResolution | undefined,
+  targetProfile: Pick<ComicVideoProfile, "resolutions" | "resolution">,
+): ComicVideoResolution | undefined {
+  if (!resolution) return undefined;
+  if (targetProfile.resolutions.includes(resolution)) return resolution;
+  const preferred: Partial<Record<ComicVideoResolution, readonly ComicVideoResolution[]>> = {
+    "480p": ["768P", "720p"],
+    "720p": ["768P", "1080p", "480p"],
+    "768P": ["720p", "1080p"],
+    "1080p": ["2K", "768P", "720p"],
+    "2K": ["1080p", "4k", "720p"],
+    "4k": ["2K", "1080p"],
+  };
+  for (const candidate of preferred[resolution] ?? []) {
+    if (targetProfile.resolutions.includes(candidate)) return candidate;
+  }
+  const sourceRank = resolutionRank[resolution];
+  return [...targetProfile.resolutions].sort(
+    (a, b) => Math.abs(resolutionRank[a] - sourceRank) - Math.abs(resolutionRank[b] - sourceRank),
+  )[0] ?? targetProfile.resolution;
 }

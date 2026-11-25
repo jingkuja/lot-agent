@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { comicVideoResolutions } from "./models.js";
+import { comicVideoAudioModes, comicVideoResolutions } from "./models.js";
 import { comicClipCastingSchema, type ComicCastChange, type ComicSeriesCast } from "./cast.js";
 
 export const COMIC_DRAMA_ROOT = "/comic-drama";
@@ -111,11 +111,27 @@ export const comicVideoMaterialRefSchema = comicMaterialRefSchema.extend({
   kind: z.enum(["image", "audio", "video", "last_frame"]),
 }).strict();
 export type ComicVideoMaterialRef = z.infer<typeof comicVideoMaterialRefSchema>;
+export const comicClipModelAdaptationSchema = z.object({
+  targetModelId: z.string().trim().min(1).max(128),
+  originalResolution: z.enum(comicVideoResolutions).optional(),
+  originalSourceDuration: z.literal(true).optional(),
+  foldedCastRefs: z.array(z.object({
+    characterId: id,
+    kind: z.enum(["slot", "expression"]),
+  }).strict()).max(64).optional(),
+  foldedSceneRef: z.literal(true).optional(),
+  foldedStyleRef: z.literal(true).optional(),
+  foldedPropMediaIds: z.array(id).max(10).optional(),
+  foldedExtraImageMediaIds: z.array(id).max(50).optional(),
+}).strict();
+export type ComicClipModelAdaptation = z.infer<typeof comicClipModelAdaptationSchema>;
 export const comicClipVideoInputsSchema = z.object({
   references: z.array(comicVideoMaterialRefSchema).max(51).refine(refs =>
     new Set(refs.map(ref => `${ref.kind}:${ref.mediaId}`)).size === refs.length && refs.filter(ref => ref.kind === "last_frame").length <= 1),
   resolution: z.enum(comicVideoResolutions).optional(),
   sourceDuration: z.literal(true).optional(),
+  audioMode: z.enum(comicVideoAudioModes).optional(),
+  modelAdaptation: comicClipModelAdaptationSchema.optional(),
 }).strict();
 
 const shot = z.object({
@@ -424,3 +440,4 @@ export * from "./timeline.js";
 export * from "./edit.js";
 export * from "./director.js";
 export * from "./checks.js";
+export * from "./compatibility.js";

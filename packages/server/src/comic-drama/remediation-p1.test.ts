@@ -18,6 +18,8 @@ import type { ComicMediaLibrary } from "./media-library.js";
 import { PgComicDramaRepository, summarizeEpisodeCosts, type EpisodeSpendRow } from "./repository.js";
 import { PgComicSettings } from "./settings-repository.js";
 import { PgComicVideo, visualReferenceKey } from "./video-repository.js";
+import { comicVideoEstimateUsage } from "./credit-check.js";
+import { prepareComicVideoRequest } from "./video-worker.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const ownerId = uuid(1);
@@ -903,5 +905,156 @@ describe("P2 #8: shot-level SFX initialization into edit project and sync after 
     const shot2Pos = layoutAfterDrag.sfx.find(entry => entry.id === shot2Sfx!.id);
     expect(shot1Pos?.startMs).toBe(4000);
     expect(shot2Pos?.startMs).toBe(10000);
+  });
+});
+
+describe("P1 audio modes: native_audio request flag and editor auto-dialogue skip/mute", () => {
+  it("sends generate_audio=true for native_audio without reference audio and matches credit estimate", async () => {
+    const media = {
+      videoReference: vi.fn(async (_owner: string, id: string) => `https://cdn.example.invalid/${id}`),
+    };
+    const baseInput = {
+      schemaVersion: 1 as const, promptVersion: 1 as const, seriesId, styleKey: "thick_painting",
+      clipId: clipA, clipRevision: 2, seriesRevision: 1,
+      mode: "references" as const, modelId: "doubao-seedance-2-5", aspectRatio: "9:16" as const,
+      resolution: "1080p" as const, durationMs: 6000, references: [], firstFrame: null, prompt: "Scene",
+    };
+
+    const nativeReq = await prepareComicVideoRequest(media, ownerId, {
+      id: take1, input: { ...baseInput, audioMode: "native_audio" },
+    });
+    expect(nativeReq.generate_audio).toBe(true);
+    expect(nativeReq.reference_audio).toBeUndefined();
+    expect(comicVideoEstimateUsage({ ...baseInput, audioMode: "native_audio" }, 0).request_parameters?.generate_audio).toBe(true);
+
+    const silentReq = await prepareComicVideoRequest(media, ownerId, {
+      id: take2, input: { ...baseInput, audioMode: "silent_tts" },
+    });
+    expect(silentReq.generate_audio).toBe(false);
+    expect(comicVideoEstimateUsage({ ...baseInput, audioMode: "silent_tts" }, 0).request_parameters?.generate_audio).toBe(false);
+  });
+
+  it("skips TTS for native_audio clips by default (subtitles only, 0 credits) and auto-mutes clip volume when explicitly replaced", async () => {
+    const videoItemNative = uuid(960);
+    const videoItemSilent = uuid(961);
+    const lineNative = uuid(962);
+    const lineSilent = uuid(963);
+    const editId = uuid(964);
+    const speechMedia = uuid(965);
+    const editState: ComicEdit = {
+      id: editId, seriesId, title: "混音测试", revision: 1, updatedAt: new Date().toISOString(),
+      timeline: {
+        schemaVersion: 1, aspectRatio: "9:16",
+        video: [
+          { id: videoItemNative, takeId: take1, sourceDurationMs: 6000, inMs: 0, outMs: 6000, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+          { id: videoItemSilent, takeId: take2, sourceDurationMs: 6000, inMs: 0, outMs: 6000, volume: 1, transitionIn: { kind: "cut", durationMs: 0 } },
+        ],
+        voice: [], sfx: [], music: [], subtitles: [],
+      },
+      sources: [
+        {
+          takeId: take1, mediaId: uuid(966), seriesTitle: "S1", clipId: clipA, scene: "原生镜头",
+          version: 1, durationMs: 6000, aspectRatio: "9:16", adopted: null, audioMode: "native_audio",
+        },
+        {
+          takeId: take2, mediaId: uuid(967), seriesTitle: "S1", clipId: clipB, scene: "后期配音镜头",
+          version: 1, durationMs: 6000, aspectRatio: "9:16", adopted: null, audioMode: "silent_tts",
+        },
+      ],
+      audioSources: [],
+    };
+    const clipDrafts: Record<string, unknown> = {
+      [clipA]: {
+        schemaVersion: 1, durationMs: 6000, scene: "原生镜头",
+        shots: [{ id: uuid(968), framingKey: "medium", movementKey: "fixed", description: "a", durationShare: 100 }],
+        lines: [{ id: lineNative, speaker: "林夏", text: "原生台词一句。", emotionKey: null, speed: 1 }],
+      },
+      [clipB]: {
+        schemaVersion: 1, durationMs: 6000, scene: "后期配音镜头",
+        shots: [{ id: uuid(969), framingKey: "medium", movementKey: "fixed", description: "b", durationShare: 100 }],
+        lines: [{ id: lineSilent, speaker: "林夏", text: "后期配音一句。", emotionKey: null, speed: 1 }],
+      },
+    };
+    const cache = new Map<string, { status: string; mediaId: string | null; durationMs: number | null; attemptId: string | null }>();
+    const execQuery = async (sql: string, params: unknown[] = []) => {
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM lot_comic_drama.cd_clips c JOIN")) {
+        const draft = clipDrafts[String(params[0])];
+        return draft ? { rows: [{ revision: 1, draft, characters: [] }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("FROM lot_comic_drama.cd_speech_cache c LEFT JOIN")) {
+        const entry = cache.get(`${params[0]}:${params[1]}`);
+        return entry ? { rows: [{ ...entry, activeAttemptId: entry.attemptId }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("INSERT INTO lot_comic_drama.cd_speech_cache")) {
+        const key = `${params[0]}:${params[1]}`;
+        cache.set(key, { status: "submitting", mediaId: null, durationMs: null, attemptId: String(params[3]) });
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes("UPDATE lot_comic_drama.cd_speech_cache SET status='ready'")) {
+        const key = `${params[0]}:${params[1]}`;
+        cache.set(key, { status: "ready", mediaId: String(params[2]), durationMs: 1200, attemptId: String(params[4]) });
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    };
+    const pool = {
+      query: vi.fn(execQuery),
+      connect: vi.fn(async () => ({ query: vi.fn(execQuery), release: vi.fn() })),
+    } as unknown as Pool;
+    let savedTimeline: ComicEdit["timeline"] | null = null;
+    const edits = {
+      get: vi.fn(async () => ({ ...editState, timeline: savedTimeline ?? editState.timeline })),
+      update: vi.fn(async (_owner: string, _id: string, input: { timeline: ComicEdit["timeline"] }) => {
+        savedTimeline = input.timeline;
+        editState.revision += 1;
+        return { ...editState, timeline: savedTimeline };
+      }),
+    } as unknown as PgComicEdits;
+    const media = {
+      assertAvailable: vi.fn(),
+      upload: vi.fn(async (_req: Request, _owner: string, _kind: string, persist: (file: unknown) => Promise<unknown>) =>
+        persist({ id: speechMedia, owner: ownerId, storageKey: `${speechMedia}.wav`, thumbnailKey: null,
+          mime: "audio/wav", sizeBytes: 1200, hasThumbnail: false, width: null, height: null, durationMs: 1200 })),
+    } as unknown as ComicMediaLibrary;
+    const synthesize = vi.fn(async () => ({ audio: Buffer.from("RIFF"), mime: "audio/wav", gatewayRequestId: "gw-tts" }));
+    const speech = new ComicEditSpeech(pool, edits, media, {
+      presetModel: "tts-test",
+      ownerSpeech: async () => ({ synthesize } as unknown as SpeechProvider),
+    });
+
+    // 1. Default preview skips native_audio clip (only silent_tts clip costs 100 points).
+    const planDefault = await speech.previewAutoDialogue(ownerId, editId, {
+      expectedRevision: 1, includeVoice: true, includeSubtitles: true,
+    });
+    expect(planDefault.nativeAudioSkippedCount).toBe(1);
+    expect(planDefault.toSynthesizeCount).toBe(1);
+    expect(planDefault.estimatedPoints).toBe(100);
+    expect(planDefault.nativeAudioClips).toEqual([
+      { videoItemId: videoItemNative, scene: "原生镜头", audioMode: "native_audio", lineCount: 1, replaceWithTts: false },
+    ]);
+    expect(planDefault.lines.find(line => line.lineId === lineNative)?.status).toBe("native_audio_subtitle_only");
+
+    // 2. Default execution skips TTS on native_audio clip, places subtitles on both, keeps native clip volume = 1.
+    const resDefault = await speech.autoDialogue(ownerId, editId, {
+      expectedRevision: 1, includeVoice: true, includeSubtitles: true, overflowMode: "ask",
+    }, new AbortController().signal);
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    expect(resDefault.voicedCount).toBe(1);
+    expect(resDefault.subtitledCount).toBe(2);
+    expect(resDefault.nativeAudioSkippedCount).toBe(1);
+    expect(resDefault.mutedVideoItemIds).toEqual([]);
+    expect(resDefault.edit.timeline.video.find(v => v.id === videoItemNative)?.volume).toBe(1);
+
+    // 3. Explicit override replaces native_audio clip with post-TTS and automatically sets its video volume to 0!
+    const resReplace = await speech.autoDialogue(ownerId, editId, {
+      expectedRevision: resDefault.edit.revision, includeVoice: true, includeSubtitles: true,
+      overflowMode: "ask", replaceNativeAudioVideoItemIds: [videoItemNative],
+    }, new AbortController().signal);
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(resReplace.voicedCount).toBe(1);
+    expect(resReplace.mutedVideoItemIds).toEqual([videoItemNative]);
+    expect(resReplace.edit.timeline.video.find(v => v.id === videoItemNative)?.volume).toBe(0);
+    expect(resReplace.edit.timeline.video.find(v => v.id === videoItemSilent)?.volume).toBe(1);
   });
 });

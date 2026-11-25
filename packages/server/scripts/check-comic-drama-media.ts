@@ -20,15 +20,18 @@ const folder = await mkdtemp(join(tmpdir(), "lot-comic-drama-w1-"));
 const run = (args: string[]) =>
   mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-filter_complex_threads", "2", ...args], { cwd: folder, timeoutMs: 90_000 });
 
-async function check(file: string, seconds: number) {
+async function check(file: string, seconds: number, expectedFps = fps) {
   const data = await mediaProcess(ffprobe(), ["-v", "error", "-show_streams", "-show_format", "-of", "json", resolve(folder, file)]);
   const report = JSON.parse(data);
   const duration = Number(report.format.duration);
   const video = report.streams.find((stream: { codec_type: string }) => stream.codec_type === "video");
   const audio = report.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio");
   assert.deepEqual([video?.codec_name, video?.width, video?.height, audio?.codec_name], ["h264", width, height, "aac"]);
-  assert.ok(Math.abs(duration - seconds) <= 1 / fps, `${file}: expected ${seconds}s, got ${duration}s`);
-  console.log(`${file} ${duration.toFixed(3)}s ${size} H.264/AAC`);
+  const [num, den = "1"] = String(video?.avg_frame_rate ?? "0/1").split("/");
+  const actualFps = Number(num) / Number(den);
+  assert.ok(Math.abs(actualFps - expectedFps) <= 0.15, `${file}: expected ${expectedFps}fps, got ${actualFps}fps`);
+  assert.ok(Math.abs(duration - seconds) <= 1 / expectedFps, `${file}: expected ${seconds}s, got ${duration}s`);
+  console.log(`${file} ${duration.toFixed(3)}s ${size} ${actualFps.toFixed(2)}fps H.264/AAC`);
 }
 
 async function verifyHighSpec() {
@@ -63,7 +66,10 @@ async function verifyHighSpec() {
   }, AbortSignal.timeout(180_000));
   const seconds = (performance.now() - started) / 1000;
   try {
-    await check(output.file, 37.5);
+    assert.equal(output.outputFps, 24, "All-24fps 4K HEVC timeline should export natively at 24 fps");
+    assert.equal(output.fpsPolicy, "native");
+    assert.equal(output.pretranscoded, true, "Multi-clip 4K HEVC timeline should use segmented pre-transcoding");
+    await check(output.file, 37.5, 24);
     const sample = async (file: string, at: number, key = "AVG", crop = "64:64:16:16") => {
       const stats = await run(["-ss", String(at), "-i", file, "-frames:v", "1",
         "-vf", `crop=${crop},format=yuv444p,signalstats,metadata=print:file=-`, "-f", "null", "-"]);
@@ -80,8 +86,32 @@ async function verifyHighSpec() {
     assert.ok(maxDelta <= 6, `Unexpected BT.709 color shift on a solid patch: ${maxDelta}`);
     const [captions, clear] = await Promise.all([sample(output.file, 1.5, "MAX", "1080:960:0:960"), sample(output.file, 0.5, "MAX", "1080:960:0:960")]);
     assert.ok(captions[0] > clear[0] + 50, "Subtitle burn-in must change the picture");
-    console.log(`PASS 4K HEVC Main10: 30s + 8s, subtitles and crossfade, 1080p export in ${seconds.toFixed(2)}s, max YUV delta ${maxDelta.toFixed(2)}`);
+    console.log(`PASS 4K HEVC Main10 (native 24fps, pretranscoded): 30s + 8s, subtitles and crossfade, 1080p export in ${seconds.toFixed(2)}s, max YUV delta ${maxDelta.toFixed(2)}`);
   } finally { await output.dispose(); }
+  // Verify mixed-fps (24fps + 30fps) timeline converts explicitly to CFR 30fps.
+  const clip30Path = join(folder, "mixed-30fps-2s.mp4");
+  const clip30TakeId = randomUUID();
+  await run(["-f", "lavfi", "-i", "color=c=0x287e99:s=1080x1920:r=30:d=2", ...outputOptions, clip30Path]);
+  const mixedTimeline = comicTimelineSchema.parse({
+    schemaVersion: 1, aspectRatio: "9:16", voice: [], sfx: [], music: [], subtitles: [],
+    video: [
+      { id: randomUUID(), takeId: sources[1].takeId, sourceDurationMs: 8000, inMs: 0, outMs: 2000, volume: 1,
+        transitionIn: { kind: "cut", durationMs: 0 } },
+      { id: randomUUID(), takeId: clip30TakeId, sourceDurationMs: 2000, inMs: 0, outMs: 2000, volume: 1,
+        transitionIn: { kind: "cut", durationMs: 0 } },
+    ],
+  });
+  const mixed = await composeComicRender(mixedTimeline, {
+    videos: new Map([[sources[1].takeId, sources[1]], [clip30TakeId, { path: clip30Path, durationMs: 2000 }]]),
+    audio: new Map(),
+  }, AbortSignal.timeout(120_000), { fpsMode: "auto" });
+  try {
+    assert.equal(mixed.outputFps, 30);
+    assert.equal(mixed.fpsPolicy, "cfr_convert");
+    assert.equal(mixed.mixedSourceFps, true);
+    await check(mixed.file, 4, 30);
+    console.log("PASS mixed-fps (24fps + 30fps → CFR 30fps): 4.000s");
+  } finally { await mixed.dispose(); }
 }
 
 try {

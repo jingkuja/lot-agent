@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
-  comicVideoDurationSupported, comicVideoProfile, comicVideoResolutions,
+  comicVideoAudioModes, comicVideoDurationSupported, comicVideoProfile, comicVideoResolutions, resolveComicVideoAudioMode,
+  type ComicVideoAudioMode,
 } from "./models.js";
 import { comicCastAsset, type ComicSeriesCast } from "./cast.js";
 import { comicCharacterUpload, comicMaterialInput, comicSystemDictionary } from "./library.js";
@@ -87,6 +88,7 @@ export const comicFrozenGenerationSchema = z.object({
   lastFrame: image.optional(),
   timedReferences: z.array(timedMedia).max(20).optional(),
   sourceDuration: z.literal(true).optional(),
+  audioMode: z.enum(comicVideoAudioModes).optional(),
 }).strict().refine(item => !!item.firstFrame === (item.mode === "from_keyframe"));
 
 export type ComicGenerationImage = z.infer<typeof image>;
@@ -229,6 +231,7 @@ export type ComicVideoTake = ComicTake & {
   version: number; modelId: string; durationMs: number; completedAt: string | null;
   posterMediaId?: string | null;
   clipSelectionRevision?: number | null;
+  audioMode?: ComicVideoAudioMode;
 };
 export type ComicVideoHistory = { entries: ComicVideoTake[]; nextCursor: string | null };
 export type ComicVideoReceipt = {
@@ -239,7 +242,7 @@ export type ComicGenerationIssue = {
   code: "MODEL_UNAVAILABLE" | "DURATION_UNSUPPORTED" | "NO_SHOTS" | "KEYFRAME_NOT_CONFIRMED" |
     "CAST_REFERENCE_MISSING" | "REFERENCE_LIMIT" | "REFERENCE_UNSUPPORTED" | "REFERENCE_MODE_CONFLICT" |
     "PROMPT_TOO_LONG" | "PROMPT_REFERENCE_UNBOUND" | "REFERENCE_UNVERIFIED" | "RESOLUTION_UNSUPPORTED" |
-    "VIDEO_SOURCE_REQUIRED" | "VIDEO_MODE_UNSUPPORTED" | "INVALID_GENERATION_REFERENCE";
+    "VIDEO_SOURCE_REQUIRED" | "VIDEO_MODE_UNSUPPORTED" | "INVALID_GENERATION_REFERENCE" | "AUDIO_REFERENCE_REQUIRED";
   characterId?: string;
   mediaId?: string;
   label?: string;
@@ -250,7 +253,7 @@ export type ComicGenerationIssue = {
   allowed?: string;
 };
 type ComicGenerationField = "outputSeconds" | "images" | "audio" | "videos" | "files" | "seconds" | "audioSeconds" | "videoSeconds" |
-  "bytes" | "edge" | "aspect" | "fps" | "pixels" | "format" | "codec" | "resolution" | "prompt" | "videoMode";
+  "bytes" | "edge" | "aspect" | "fps" | "pixels" | "format" | "codec" | "resolution" | "prompt" | "videoMode" | "audioMode";
 export type ComicGenerationNotice = {
   code: "PROMPT_LIMIT_UNVERIFIED" | "PROMPT_RECOMMENDATION"; actual?: number; max?: number; unit?: "chars" | "words";
 };
@@ -295,13 +298,17 @@ export function buildComicGenerationInput(input: ResolvedInputs):
     const rule = isVideo ? profile?.imagePromptTag : undefined;
     return rule?.prefix ? rule.prefix + (index + rule.firstNumber) + rule.suffix : `reference image ${index + 1}`;
   };
+  const foldedCast = new Set(
+    (isVideo ? draft.videoInputs?.modelAdaptation?.foldedCastRefs ?? [] : [])
+      .map(entry => `${entry.characterId}:${entry.kind}`),
+  );
   for (const actor of draft.cast ?? []) {
     const snapshot = cast.find(entry => entry.snapshot.characterId === actor.characterId)?.snapshot;
     if (!snapshot) { issues.push({ code: "CAST_REFERENCE_MISSING", characterId: actor.characterId }); continue; }
     const detail = [snapshot.name, snapshot.age, snapshot.appearance, snapshot.personality, snapshot.outfitName].filter(Boolean).join(", ");
     const actorReferences: string[] = [];
     for (const [kind, key] of [["slot", actor.slotKey], ["expression", actor.expressionKey]] as const) {
-      if (!key || strictFirstFrame) continue;
+      if (!key || strictFirstFrame || foldedCast.has(`${actor.characterId}:${kind}`)) continue;
       const asset = comicCastAsset(snapshot, kind, key);
       if (!asset) { issues.push({ code: "CAST_REFERENCE_MISSING", characterId: actor.characterId }); continue; }
       const { id: mediaId, mime, sizeBytes, width, height } = asset.media;
@@ -319,6 +326,8 @@ export function buildComicGenerationInput(input: ResolvedInputs):
     references.push({ ...frozenImage(reference), kind: reference.kind, label: reference.label });
   }
   const timedReferences = input.timedReferences ?? [];
+  const hasReferenceAudio = timedReferences.some(ref => ref.kind === "audio");
+  const audioMode = isVideo ? resolveComicVideoAudioMode(draft.videoInputs?.audioMode, hasReferenceAudio) : undefined;
   for (const kind of ["audio", "video"] as const) {
     timedReferences.filter(ref => ref.kind === kind).forEach((ref, index) => {
       const name = kind === "audio" ? "Audio" : "Video";
@@ -333,6 +342,7 @@ export function buildComicGenerationInput(input: ResolvedInputs):
     ...(lastFrame ? ["End on the supplied last frame."] : []),
     ...(mode === "edit" ? ["Edit the supplied source video according to the following shots and dialogue."] : []),
     ...(mode === "extend" ? ["Continue the supplied source video according to the following shots and dialogue."] : []),
+    ...(audioMode === "native_audio" ? ["Generate synchronized spoken dialogue and natural ambient audio matching the scene and lines."] : []),
     "Keep each character's appearance and outfit consistent. Keep reference identities separate.",
     ...descriptions,
     ...(draft.scene ? [`Scene: ${draft.scene}.`] : []),
@@ -351,6 +361,7 @@ export function buildComicGenerationInput(input: ResolvedInputs):
     ...(lastFrame ? { lastFrame } : {}),
     ...(timedReferences.length ? { timedReferences } : {}),
     ...(sourceDuration ? { sourceDuration: true } : {}),
+    ...(audioMode ? { audioMode } : {}),
   };
   if (isVideo && profile) issues.push(...validateComicVideoInput(frozen, profile, forecastFirstFrame));
   return issues.length ? { ok: false, issues } : { ok: true, input: frozen };
@@ -386,6 +397,13 @@ export function validateComicVideoInput(
     || firstFrame && mode !== "from_keyframe"
     || audio.length && !rules.audioOnly && !references.length && !videos.length) {
     issues.push({ code: "REFERENCE_MODE_CONFLICT" });
+  }
+  const effectiveAudioMode = resolveComicVideoAudioMode(input.audioMode, audio.length > 0);
+  if (effectiveAudioMode === "reference_audio" && !audio.length) {
+    issues.push({ code: "AUDIO_REFERENCE_REQUIRED", field: "audioMode", actual: 0, min: 1 });
+  }
+  if ((input.audioMode === "silent_tts" || input.audioMode === "native_audio") && audio.length > 0) {
+    issues.push({ code: "REFERENCE_MODE_CONFLICT", field: "audioMode", actual: input.audioMode });
   }
   if ((mode === "edit" || mode === "extend") && videos.length !== 1) {
     issues.push({ code: "VIDEO_SOURCE_REQUIRED", field: "videos", actual: videos.length, min: 1, max: 1 });

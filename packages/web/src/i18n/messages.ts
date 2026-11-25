@@ -5144,4 +5144,137 @@ export const messages: Record<string, { en: string; id: string }> = {
     "id": "Arsipkan serial drama ini beserta semua episodenya?",
   },
   "该剧集下暂无分集": {"en": "No episodes in this drama yet", "id": "Belum ada episode dalam serial ini"},
+  "导出临时磁盘空间不足，请稍后重试或清理磁盘空间": {
+    "en": "Not enough free temporary disk space for export. Free up disk space or try again later.",
+    "id": "Ruang disk sementara untuk ekspor tidak mencukupi. Kosongkan ruang disk atau coba lagi nanti.",
+  },
+  "当前已选外部参考音频驱动口型，请先绑定参考音频": {
+    "en": "Reference-audio lip-sync mode is selected. Bind a reference audio file first.",
+    "id": "Mode sinkronisasi bibir audio referensi dipilih. Kaitkan berkas audio referensi terlebih dahulu.",
+  },
+  "音频来源模式": {"en": "Audio source mode", "id": "Mode sumber audio"},
+  "导出帧率": {"en": "Export frame rate", "id": "Laju bingkai ekspor"},
+  "自动（全 24 fps 原生导出，混帧转 30 fps）": {
+    "en": "Auto (native 24 fps for all-24 fps clips, 30 fps CFR for mixed)",
+    "id": "Otomatis (24 fps asli jika semua 24 fps, 30 fps CFR jika campuran)",
+  },
+  "24 fps（漫剧原生帧率）": {"en": "24 fps (native anime cadence)", "id": "24 fps (laju bingkai asli)"},
+  "30 fps（恒定帧率兼容）": {"en": "30 fps (CFR compatibility)", "id": "30 fps (kompatibilitas CFR)"},
+  "当前片段含模型原生或参考音频，默认仅需铺字幕；如手动加入后期配音，将自动把片源原声静音以避免双人声叠加。": {
+    "en": "This clip already has native or reference audio and defaults to subtitles only. Adding post-production TTS will automatically mute the clip audio to avoid double voices.",
+    "id": "Klip ini sudah memiliki audio asli atau referensi dan bawaannya hanya subtitel. Menambahkan TTS pascaproduksi akan otomatis membisukan suara asli klip agar tidak dobel.",
+  },
+  "当前片段含模型原生或参考音频，片源原声已静音，可直接叠加后期配音。": {
+    "en": "This clip has native or reference audio with clip volume muted. You can safely layer post-production TTS.",
+    "id": "Klip ini memiliki audio asli atau referensi dengan volume dibisukan. Anda dapat menambahkan TTS pascaproduksi dengan aman.",
+  },
+  "原生音画": {"en": "Native audio", "id": "Audio asli"},
+  "后期配音": {"en": "Post-TTS", "id": "TTS pasca"},
+  "已自动静音 {0} 段原声避免双人声叠加": {
+    "en": "Automatically muted {0} clip(s) to prevent overlapping voices",
+    "id": "Otomatis membisukan {0} klip agar suara tidak bertumpuk",
+  },
+  "原生音画仅铺字幕": {"en": "Native audio (subtitles only)", "id": "Audio asli (hanya subtitel)"},
+  "原生音画跳过配音 {0} 句": {"en": "{0} native-audio line(s) skipped TTS", "id": "{0} baris audio asli lewati TTS"},
+  "含原生／参考音频的片段（默认仅铺字幕，不重复合成配音）": {
+    "en": "Clips with native or reference audio (subtitles only by default, no duplicate TTS)",
+    "id": "Klip dengan audio asli atau referensi (bawaannya hanya subtitel, tanpa TTS ganda)",
+  },
+  "{0} 句台词": {"en": "{0} line(s)", "id": "{0} baris dialog"},
+  "改用后期配音（自动静音原声）": {
+    "en": "Replace with post-TTS (auto-mute clip audio)",
+    "id": "Ganti dengan TTS pasca (bisukan suara asli otomatis)",
+  },
+  "一键兼容当前模型": {"en": "Auto-adapt for current model", "id": "Sesuaikan otomatis untuk model ini"},
+  "无声生成 + 后期配音（默认）": {"en": "Silent video + post-production TTS (default)", "id": "Video senyap + TTS pascaproduksi (bawaan)"},
+  "模型原生音画对白（含人声，后期仅铺字幕）": {
+    "en": "Native model audio-visual dialogue (subtitles only in post)",
+    "id": "Dialog audio-visual asli model (hanya subtitel di pasca)",
+  },
+  "外部参考音频驱动口型": {"en": "External reference audio lip-sync", "id": "Sinkronisasi bibir audio referensi eksternal"},
+  "跨模型安全范围：{0}–{1} 整秒 · ≤{2} 张图 · ≤{3} 个文件 · 音视频各 ≤{4} 秒 · 音频不单传": {
+    "en": "Cross-model safe range: {0}–{1}s integer · ≤{2} images · ≤{3} files · ≤{4}s audio/video each · no audio-only",
+    "id": "Rentang aman lintas model: {0}–{1} dtk bulat · ≤{2} gambar · ≤{3} berkas · audio/video ≤{4} dtk · tanpa audio saja",
+  },
+  "已启用模型兼容适配（折叠 {0} 张超限参考图{1}），原绑定已保留，切回高规格模型可自动恢复。": {
+    "en": "Model compatibility adaptation active ({0} extra image(s) folded{1}). Original bindings are preserved and restore when switching back.",
+    "id": "Adaptasi kompatibilitas model aktif ({0} gambar berlebih dilipat{1}). Tautan asli tetap tersimpan dan pulih saat kembali.",
+  },
+  "原分辨率 {0}": {"en": "original resolution {0}", "id": "resolusi asli {0}"},
+  "恢复原绑定": {"en": "Restore original bindings", "id": "Pulihkan tautan asli"},
+  "分镜时长 {0} 秒超出当前模型范围（{1}–{2} 整秒）": {
+    "en": "Clip duration {0}s is outside this model's range ({1}–{2} integer seconds)",
+    "id": "Durasi klip {0} dtk di luar rentang model ini ({1}–{2} detik bulat)",
+  },
+  "输出分辨率 {0} 不被当前模型支持（建议映射为 {1}）": {
+    "en": "Output resolution {0} is unsupported by this model (suggested: {1})",
+    "id": "Resolusi keluaran {0} tidak didukung model ini (disarankan: {1})",
+  },
+  "输出分辨率 {0} 不被当前模型支持（允许 {1}）": {
+    "en": "Output resolution {0} is unsupported by this model (allowed: {1})",
+    "id": "Resolusi keluaran {0} tidak didukung model ini (diizinkan: {1})",
+  },
+  "{0}共 {1} 个，超出模型上限（{2} 个）": {
+    "en": "{0} count ({1}) exceeds this model's limit ({2})",
+    "id": "Jumlah {0} ({1}) melebihi batas model ini ({2})",
+  },
+  "当前视频模型不支持「{0}」模式": {
+    "en": "The selected video model does not support \"{0}\" mode",
+    "id": "Model video ini tidak mendukung mode \"{0}\"",
+  },
+  "视频延长": {"en": "Video extend", "id": "Perpanjang video"},
+  "视频编辑": {"en": "Video edit", "id": "Edit video"},
+  "当前模型不支持仅传参考音频，请至少补充 1 张参考图或 1 段参考视频": {
+    "en": "This model does not allow audio-only references. Add at least 1 reference image or video.",
+    "id": "Model ini tidak mendukung referensi audio saja. Tambahkan minimal 1 gambar atau video referensi.",
+  },
+  "已绑定 {0} 段参考音频，但音频模式设为「{1}」，建议切换为外部参考音频或移除音频引用": {
+    "en": "{0} reference audio file(s) attached while audio mode is \"{1}\". Switch to reference-audio mode or remove the audio reference.",
+    "id": "{0} audio referensi terpasang saat mode audio adalah \"{1}\". Ganti ke mode audio referensi atau hapus referensi audio.",
+  },
+  "时长 {0} 秒超过上限 {1} 秒（建议压缩或手动拆分）": {
+    "en": "Duration {0}s exceeds max {1}s (compress or split manually)",
+    "id": "Durasi {0} dtk melebihi maks {1} dtk (padatkan atau pisah manual)",
+  },
+  "分辨率 {0} 将自动映射为 {1}": {
+    "en": "Resolution {0} will map to {1}",
+    "id": "Resolusi {0} akan dipetakan ke {1}",
+  },
+  "参考图 {0} 张超限（上限 {1} 张，将按优先级折叠 {2} 张）": {
+    "en": "{0} reference images exceed limit {1} ({2} will be folded by priority)",
+    "id": "{0} gambar referensi melebihi batas {1} ({2} akan dilipat berdasarkan prioritas)",
+  },
+  "参考文件共 {0} 个超限（上限 {1} 个）": {
+    "en": "{0} total reference files exceed limit {1}",
+    "id": "Total {0} berkas referensi melebihi batas {1}",
+  },
+  "参考音频 {0} 段超过上限 {1} 段": {
+    "en": "{0} reference audio clips exceed limit {1}",
+    "id": "{0} klip audio referensi melebihi batas {1}",
+  },
+  "参考视频 {0} 段超过上限 {1} 段": {
+    "en": "{0} reference video clips exceed limit {1}",
+    "id": "{0} klip video referensi melebihi batas {1}",
+  },
+  "目标模型不支持视频延长，将暂存原开关设置": {
+    "en": "Target model does not support video extend; the original toggle will be preserved",
+    "id": "Model tujuan tidak mendukung perpanjang video; pengaturan asli tetap disimpan",
+  },
+  "模型切换兼容检查 · {0} 个分镜受影响": {
+    "en": "Model switch compatibility check · {0} clip(s) affected",
+    "id": "Pemeriksaan kompatibilitas ganti model · {0} klip terdampak",
+  },
+  "切回此模型后可自动恢复先前折叠的参考图与原分辨率": {
+    "en": "Switching back to this model will restore previously folded references and original resolution",
+    "id": "Kembali ke model ini akan memulihkan referensi yang dilipat dan resolusi asli",
+  },
+  "另有 {0} 个受影响分镜…": {"en": "{0} more affected clip(s)…", "id": "{0} klip terdampak lainnya…"},
+  "保存并一键兼容适配（保留原绑定，切回高规格模型可恢复）": {
+    "en": "Save and auto-adapt clips (preserves original bindings for switching back)",
+    "id": "Simpan dan sesuaikan klip otomatis (tautan asli disimpan untuk kembali)",
+  },
+  "同时将超长分镜时长压缩至 {0} 秒上限（不勾选则保留原时长供手动拆分）": {
+    "en": "Also clamp overlong clips to the {0}s max (leave unchecked to split manually)",
+    "id": "Padatkan juga klip terlalu panjang ke batas {0} dtk (kosongkan untuk pisah manual)",
+  },
 };

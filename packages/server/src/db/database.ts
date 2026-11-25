@@ -1938,7 +1938,8 @@ export class DB {
   async findStalePendingTasks(staleMs: number): Promise<StoredTask[]> {
     const { rows } = await this.pool.query(
       `SELECT * FROM tasks
-       WHERE status = 'pending' AND attempts = 0 AND queue_name IN ('lot-tasks','lot-marketing-video')
+       WHERE status = 'pending' AND attempts = 0
+         AND queue_name IN ('lot-tasks','lot-marketing-video','lot-comic-image','lot-comic-video','lot-comic-render')
          AND created_at < now() - make_interval(secs => $1::double precision / 1000)
        ORDER BY updated_at, id LIMIT 100`,
       [staleMs]

@@ -4,14 +4,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DB } from "../../src/db/database.js";
 import { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
 import { createRedisConnection } from "../../src/jobs/redis.js";
-import { COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, marketingPoolIssue } from "../../src/jobs/task-queues.js";
+import {
+  COMIC_IMAGE_TASK, COMIC_RENDER_TASK, COMIC_VIDEO_TASK, DIGITAL_PRESENTER_TASK, workerPoolIssue,
+} from "../../src/jobs/task-queues.js";
 import { ffmpeg, mediaProcess } from "../../src/marketing-video/media.js";
 
 export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: URL, redis: string) {
   const limits = { concurrency: 2, perUser: 1, segments: 2 };
-  const poolMax = 6;
-  assert.ok(marketingPoolIssue(limits, poolMax - 1));
-  assert.equal(marketingPoolIssue(limits, poolMax), "");
+  const comicLimits = {
+    imageConcurrency: 1, imagePerUser: 1,
+    videoConcurrency: 1, videoPerUser: 1,
+    renderConcurrency: 1, renderPerUser: 1,
+  };
+  const totalSlots = limits.concurrency + comicLimits.imageConcurrency + comicLimits.videoConcurrency + comicLimits.renderConcurrency;
+  const poolMax = totalSlots * 2 + 2;
+  assert.ok(workerPoolIssue(limits, comicLimits, poolMax - 1));
+  assert.equal(workerPoolIssue(limits, comicLimits, poolMax), "");
   const db = new DB({ host: database.hostname, port: Number(database.port), user: decodeURIComponent(database.username),
     password: decodeURIComponent(database.password), database: database.pathname.slice(1), max: poolMax });
   const all = ["marketing.video", COMIC_VIDEO_TASK, COMIC_IMAGE_TASK, COMIC_RENDER_TASK, DIGITAL_PRESENTER_TASK];
@@ -25,8 +33,8 @@ export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: 
   async function phase(label: string, jobs: string[], real: boolean) {
     const owners = jobs.map(() => randomUUID());
     await db.pool.query("INSERT INTO users(id,name) SELECT unnest($1::uuid[]),'mixed media fixture'", [owners]);
-    const worker = new BullmqJobQueue(db, createRedisConnection(redis), limits);
-    let processes = 0, peakFfmpeg = 0, peakPool = 0, peakWaiting = 0, handlers = 0, peakHandlers = 0;
+    const worker = new BullmqJobQueue(db, createRedisConnection(redis), limits, comicLimits);
+    let processes = 0, peakFfmpeg = 0, renderProcesses = 0, peakRenderFfmpeg = 0, peakPool = 0, peakWaiting = 0, handlers = 0, peakHandlers = 0;
     const sample = () => {
       peakPool = Math.max(peakPool, db.pool.totalCount - db.pool.idleCount);
       peakWaiting = Math.max(peakWaiting, db.pool.waitingCount);
@@ -44,10 +52,14 @@ export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: 
             await db.pool.query("SELECT 1");
             if (real) {
               peakFfmpeg = Math.max(peakFfmpeg, ++processes);
+              if (type === COMIC_RENDER_TASK) peakRenderFfmpeg = Math.max(peakRenderFfmpeg, ++renderProcesses);
               try {
                 await mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=2",
                   "-vf", "scale=640:360", "-c:v", "libx264", "-threads", "1", "-f", "null", "-"], { signal: control.signal, timeoutMs: 15_000 });
-              } finally { processes--; }
+              } finally {
+                processes--;
+                if (type === COMIC_RENDER_TASK) renderProcesses--;
+              }
             } else await delay(100, undefined, { signal: control.signal });
             await db.pool.query("SELECT 1");
             return { type, waitMs };
@@ -72,12 +84,16 @@ export async function checkMixedMediaQueue(publisher: BullmqJobQueue, database: 
         const ordinaryDone = rows.find(row => row.id === ordinary)!;
         const marketing = rows.filter(row => row.id !== ordinary && row.output.type === "marketing.video").map(row => row.output.waitMs).sort((a, b) => a - b);
         const samplePercentile = (p: number) => marketing[Math.ceil(p * marketing.length) - 1];
-        assert.equal(peakHandlers, limits.concurrency);
+        assert.ok(peakHandlers <= totalSlots);
         assert.ok(peakPool <= poolMax);
-        if (real) assert.equal(peakFfmpeg, limits.concurrency);
+        if (real) {
+          assert.ok(peakFfmpeg <= totalSlots);
+          assert.ok(peakRenderFfmpeg <= comicLimits.renderConcurrency);
+        }
         assert.ok(rows.some(row => row.updated_at > ordinaryDone.updated_at && row.id !== ordinary), "ordinary work finishes before the media wave");
         console.log("W7_QUEUE", JSON.stringify({ label, total: jobs.length, marketing: marketing.length, p50Ms: samplePercentile(.50),
-          p95Ms: samplePercentile(.95), wallMs: Date.now() - start, peakPool, peakWaiting, peakFfmpeg, ordinaryDoneMs: +ordinaryDone.updated_at - start }));
+          p95Ms: samplePercentile(.95), wallMs: Date.now() - start, peakPool, peakWaiting, peakFfmpeg, peakRenderFfmpeg,
+          ordinaryDoneMs: +ordinaryDone.updated_at - start }));
       } finally { await metricsDb.close(); }
     } finally { clearInterval(timer); await worker.close(); }
   }

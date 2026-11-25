@@ -9,6 +9,7 @@ import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { ComicEnhanceForm, EnhanceProposalCard, type DirectorEnhanceIntent } from "./ComicEnhanceProposal.js";
 import { comicDirectorApi, comicDirectorError } from "./director-api.js";
+import { describeComicClipCheckIssue } from "./clip-check-copy.js";
 import { DirectorGeneration, DirectorRoleChoice, type DirectorRoleChoiceInput } from "./DirectorConfirmations.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
@@ -246,14 +247,7 @@ export function ComicDirectorPanel({
           {checkIssues.map((issue, idx) => (
             <li key={idx}>
               <button type="button" onClick={() => openClip(issue.clipId)}>{t("分镜 {0}", [issue.clipOrdinal])}</button>
-              <span>
-                {issue.code === "SPEAKER_NOT_IN_CAST" ? t("说话人「{0}」未在出镜人物中", [issue.speaker])
-                  : issue.code === "REFERENCE_LIMIT_EXCEEDED" ? t("参考图 {0}/{1} 张超限", [issue.count, issue.limit])
-                    : issue.code === "DIALOGUE_TOO_LONG" ? t("台词约 {0} 秒超出镜头时长", [+(issue.estimatedMs / 1000).toFixed(1)])
-                      : issue.code === "INVALID_MATERIAL_REFERENCE"
-                        ? t("绑定的素材「{0}」已失效", [issue.name ?? issue.materialId.slice(0, 8)])
-                        : t("角色「{0}」造型已更新", [issue.characterName])}
-              </span>
+              <span>{describeComicClipCheckIssue(issue, t)}</span>
             </li>
           ))}
         </ul>}

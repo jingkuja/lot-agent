@@ -1,6 +1,10 @@
 import type { ComicSeriesCast } from "./cast.js";
-import { comicVideoModel, comicVideoProfile } from "./models.js";
-import type { ComicDramaClip, ComicDramaDetail, ComicDramaSeries } from "./index.js";
+import {
+  comicVideoDurationSupported, comicVideoModel, comicVideoProfile, mapComicVideoResolution, resolveComicVideoAudioMode,
+  type ComicVideoAudioMode, type ComicVideoOperation, type ComicVideoResolution,
+} from "./models.js";
+import type { ComicGenerationMode } from "./generation.js";
+import type { ComicDramaClip, ComicDramaClipDraft, ComicDramaDetail, ComicDramaSeries } from "./index.js";
 
 /** Matches MAX_IMAGE_EDIT_REFERENCES (5) without importing Node-only provider modules into browser bundles. */
 export const COMIC_KEYFRAME_MAX_REFERENCES = 5;
@@ -45,6 +49,62 @@ export type ComicClipCheckIssue =
     mediaId: string;
     name?: string;
     reason: "MISSING" | "ARCHIVED" | "WRONG_KIND" | "OUTDATED_VERSION";
+  }
+  | {
+    code: "DURATION_OUT_OF_RANGE";
+    clipId: string;
+    clipOrdinal: number;
+    durationMs: number;
+    minSeconds: number;
+    maxSeconds: number;
+    modelId: string | null;
+  }
+  | {
+    code: "RESOLUTION_UNSUPPORTED";
+    clipId: string;
+    clipOrdinal: number;
+    resolution: ComicVideoResolution;
+    allowed: ComicVideoResolution[];
+    suggestedResolution?: ComicVideoResolution;
+    modelId: string | null;
+  }
+  | {
+    code: "MEDIA_REFERENCE_LIMIT_EXCEEDED";
+    clipId: string;
+    clipOrdinal: number;
+    field: "audio" | "videos" | "files";
+    count: number;
+    limit: number;
+    modelId: string | null;
+  }
+  | {
+    code: "VIDEO_MODE_UNSUPPORTED";
+    clipId: string;
+    clipOrdinal: number;
+    operation: Extract<ComicVideoOperation, "edit" | "extend">;
+    allowed: ComicVideoOperation[];
+    modelId: string | null;
+  }
+  | {
+    code: "AUDIO_ONLY_UNSUPPORTED";
+    clipId: string;
+    clipOrdinal: number;
+    audioCount: number;
+    modelId: string | null;
+  }
+  | {
+    code: "AUDIO_REFERENCE_REQUIRED";
+    clipId: string;
+    clipOrdinal: number;
+    modelId: string | null;
+  }
+  | {
+    code: "AUDIO_MODE_CONFLICT";
+    clipId: string;
+    clipOrdinal: number;
+    audioMode: Exclude<ComicVideoAudioMode, "reference_audio">;
+    audioCount: number;
+    modelId: string | null;
   };
 
 /** Loose normalization for character name / alias matching across CJK & Latin punctuation. */
@@ -104,29 +164,60 @@ export function estimateComicDialogueMs(lines: readonly ComicDramaClip["draft"][
   return totalMs > 0 ? totalMs - 200 : 0;
 }
 
-/** Count references that a clip will send to generation (cast slots/expressions + persisted scene/props + optional style/keyframe). */
+export function countComicClipFoldedReferences(draft: ComicDramaClipDraft, opts?: { hasStyleRef?: boolean }): number {
+  const adaptation = draft.videoInputs?.modelAdaptation;
+  if (!adaptation) return 0;
+  let folded = 0;
+  const foldedCast = new Set((adaptation.foldedCastRefs ?? []).map(entry => `${entry.characterId}:${entry.kind}`));
+  for (const actor of draft.cast ?? []) {
+    if (actor.slotKey && foldedCast.has(`${actor.characterId}:slot`)) folded += 1;
+    if (actor.expressionKey && foldedCast.has(`${actor.characterId}:expression`)) folded += 1;
+  }
+  if (draft.sceneRef && adaptation.foldedSceneRef) folded += 1;
+  if (opts?.hasStyleRef && adaptation.foldedStyleRef) folded += 1;
+  const foldedProps = new Set(adaptation.foldedPropMediaIds ?? []);
+  for (const ref of draft.propRefs ?? []) {
+    if (foldedProps.has(ref.mediaId)) folded += 1;
+  }
+  const foldedExtra = new Set(adaptation.foldedExtraImageMediaIds ?? []);
+  for (const ref of draft.videoInputs?.references ?? []) {
+    if (ref.kind === "image" && foldedExtra.has(ref.mediaId)) folded += 1;
+  }
+  return folded;
+}
+
+/** Count active image references that a clip will send to generation (respecting non-destructive model folding). */
 export function countComicClipReferences(
   clip: ComicDramaClip,
-  opts?: { hasStyleRef?: boolean; includeKeyframe?: boolean },
+  opts?: { hasStyleRef?: boolean; includeKeyframe?: boolean; ignoreModelFolding?: boolean },
 ): number {
+  const adaptation = opts?.ignoreModelFolding ? undefined : clip.draft.videoInputs?.modelAdaptation;
+  const foldedCast = new Set((adaptation?.foldedCastRefs ?? []).map(entry => `${entry.characterId}:${entry.kind}`));
+  const foldedProps = new Set(adaptation?.foldedPropMediaIds ?? []);
+  const foldedExtra = new Set(adaptation?.foldedExtraImageMediaIds ?? []);
   let count = 0;
   for (const actor of clip.draft.cast ?? []) {
-    if (actor.slotKey) count += 1;
-    if (actor.expressionKey) count += 1;
+    if (actor.slotKey && !foldedCast.has(`${actor.characterId}:slot`)) count += 1;
+    if (actor.expressionKey && !foldedCast.has(`${actor.characterId}:expression`)) count += 1;
   }
-  if (clip.draft.sceneRef) count += 1;
-  count += clip.draft.propRefs?.length ?? 0;
-  if (opts?.hasStyleRef) count += 1;
+  if (clip.draft.sceneRef && !adaptation?.foldedSceneRef) count += 1;
+  for (const ref of clip.draft.propRefs ?? []) {
+    if (!foldedProps.has(ref.mediaId)) count += 1;
+  }
+  for (const ref of clip.draft.videoInputs?.references ?? []) {
+    if (ref.kind === "image" && !foldedExtra.has(ref.mediaId)) count += 1;
+  }
+  if (opts?.hasStyleRef && !adaptation?.foldedStyleRef) count += 1;
   if (opts?.includeKeyframe && clip.progress?.keyframeMediaId) count += 1;
   return count;
 }
 
-/** Run the 4 product-spec §4.2 / §5.3 quality checks on a single clip. */
+/** Run real-time quality and model compatibility checks on a single clip. */
 export function checkComicClipIssues(
   series: Pick<ComicDramaSeries, "videoModel">,
   clip: ComicDramaClip,
   cast: readonly ComicSeriesCast[],
-  opts?: { hasStyleRef?: boolean },
+  opts?: { hasStyleRef?: boolean; generationMode?: ComicGenerationMode },
 ): ComicClipCheckIssue[] {
   const issues: ComicClipCheckIssue[] = [];
   const castInClip = new Set((clip.draft.cast ?? []).map(actor => actor.characterId));
@@ -227,13 +318,130 @@ export function checkComicClipIssues(
     });
   }
 
+  // 6-10. Video model duration, resolution, multimodal counts, audio mode, and edit/extend checks
+  if (profile) {
+    const videoInputs = clip.draft.videoInputs;
+    const manualRefs = videoInputs?.references ?? [];
+    const audioCount = manualRefs.filter(ref => ref.kind === "audio").length;
+    const videoCount = manualRefs.filter(ref => ref.kind === "video").length;
+    const totalFiles = count + audioCount + videoCount;
+
+    if (!comicVideoDurationSupported(clip.draft.durationMs, profile)) {
+      issues.push({
+        code: "DURATION_OUT_OF_RANGE",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        durationMs: clip.draft.durationMs,
+        minSeconds: 4,
+        maxSeconds: profile.shotMaxSeconds,
+        modelId: series.videoModel,
+      });
+    }
+
+    if (videoInputs?.resolution && !profile.resolutions.includes(videoInputs.resolution)) {
+      issues.push({
+        code: "RESOLUTION_UNSUPPORTED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        resolution: videoInputs.resolution,
+        allowed: [...profile.resolutions],
+        suggestedResolution: mapComicVideoResolution(videoInputs.resolution, profile),
+        modelId: series.videoModel,
+      });
+    }
+
+    if (audioCount > profile.referenceMedia.count) {
+      issues.push({
+        code: "MEDIA_REFERENCE_LIMIT_EXCEEDED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        field: "audio",
+        count: audioCount,
+        limit: profile.referenceMedia.count,
+        modelId: series.videoModel,
+      });
+    }
+    if (videoCount > profile.referenceMedia.count) {
+      issues.push({
+        code: "MEDIA_REFERENCE_LIMIT_EXCEEDED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        field: "videos",
+        count: videoCount,
+        limit: profile.referenceMedia.count,
+        modelId: series.videoModel,
+      });
+    }
+    if (totalFiles > profile.referenceMedia.totalFiles) {
+      issues.push({
+        code: "MEDIA_REFERENCE_LIMIT_EXCEEDED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        field: "files",
+        count: totalFiles,
+        limit: profile.referenceMedia.totalFiles,
+        modelId: series.videoModel,
+      });
+    }
+
+    if (audioCount > 0 && !profile.referenceMedia.audioOnly && count === 0 && videoCount === 0) {
+      issues.push({
+        code: "AUDIO_ONLY_UNSUPPORTED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        audioCount,
+        modelId: series.videoModel,
+      });
+    }
+
+    const effectiveAudioMode = resolveComicVideoAudioMode(videoInputs?.audioMode, audioCount > 0);
+    if (effectiveAudioMode === "reference_audio" && audioCount === 0) {
+      issues.push({
+        code: "AUDIO_REFERENCE_REQUIRED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        modelId: series.videoModel,
+      });
+    } else if ((videoInputs?.audioMode === "silent_tts" || videoInputs?.audioMode === "native_audio") && audioCount > 0) {
+      issues.push({
+        code: "AUDIO_MODE_CONFLICT",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        audioMode: videoInputs.audioMode,
+        audioCount,
+        modelId: series.videoModel,
+      });
+    }
+
+    const modeOp = opts?.generationMode === "edit" || opts?.generationMode === "extend" ? opts.generationMode : undefined;
+    if (modeOp && !profile.operations.includes(modeOp)) {
+      issues.push({
+        code: "VIDEO_MODE_UNSUPPORTED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        operation: modeOp,
+        allowed: [...profile.operations],
+        modelId: series.videoModel,
+      });
+    } else if (videoInputs?.sourceDuration && !profile.operations.includes("extend")) {
+      issues.push({
+        code: "VIDEO_MODE_UNSUPPORTED",
+        clipId: clip.id,
+        clipOrdinal: clip.ordinal,
+        operation: "extend",
+        allowed: [...profile.operations],
+        modelId: series.videoModel,
+      });
+    }
+  }
+
   return issues;
 }
 
-/** Run all 4 spec checks across every clip in an episode. */
+/** Run all quality and model compatibility checks across every clip in an episode. */
 export function checkComicSeriesIssues(
   detail: Pick<ComicDramaDetail, "series" | "clips" | "cast">,
-  opts?: { hasStyleRef?: boolean },
+  opts?: { hasStyleRef?: boolean; generationMode?: ComicGenerationMode },
 ): ComicClipCheckIssue[] {
   return detail.clips.flatMap(clip => checkComicClipIssues(detail.series, clip, detail.cast, opts));
 }
