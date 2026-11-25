@@ -404,6 +404,8 @@ export function createComicDirectorTools(
           id: detail.series.dramaId,
           title: dramaTitle,
           synopsis: detail.series.logline,
+          outline: "",
+          scriptContent: "",
           revision: 1,
         };
         const hierarchy = detail.hierarchy
@@ -412,7 +414,11 @@ export function createComicDirectorTools(
           name, ok: true,
           summary: `已读取《${dramaTitle}》第 ${epNo} 集「${detail.series.title}」（${detail.clips.length} 个分镜，${detail.cast.length} 名角色）`,
           data: {
-            drama: detail.drama ?? dramaObj,
+            drama: {
+              ...dramaObj,
+              outline: (dramaObj.outline ?? "").slice(0, 6000),
+              scriptExcerpt: (dramaObj.scriptContent ?? "").slice(0, 6000),
+            },
             episode: detail.series,
             siblingEpisodes: detail.episodes ?? [],
             hierarchy,
@@ -719,9 +725,12 @@ export class ComicDirector {
         ...(enhance ? { enhance } : {}),
       }, signal),
     });
+    const dramaOutlinePreview = initialDetail.drama?.outline?.trim().slice(0, 1200) ?? "";
     const hierarchyNote = `Current workspace hierarchy: Drama "${initialDetail.drama?.title ?? initialDetail.series.seriesGroup ?? initialDetail.series.title}" `
       + `(${initialDetail.episodes?.length ?? 1} episode(s)), Episode #${initialDetail.series.episodeNo ?? 1} "${initialDetail.series.title}", `
-      + `${initialDetail.clips.length} clip(s). Always keep drama / episode / clip context clear.`;
+      + `${initialDetail.clips.length} clip(s).`
+      + (dramaOutlinePreview ? ` Whole-drama outline summary: ${dramaOutlinePreview}` : "")
+      + " Always keep drama / episode / clip context clear.";
     const messages: Message[] = [
       {
         role: "system",

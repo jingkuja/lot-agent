@@ -144,7 +144,7 @@ describe("comic director §8.5 tools and default text model resolver", () => {
 
   const detail: ComicDramaDetail = {
     drama: {
-      id: "99999999-1111-4111-8111-111111111111", title: "雨夜", synopsis: "雨夜奇幻短剧",
+      id: "99999999-1111-4111-8111-111111111111", title: "雨夜", synopsis: "雨夜奇幻短剧", outline: "", scriptContent: "",
       styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
     },
     episodes: [

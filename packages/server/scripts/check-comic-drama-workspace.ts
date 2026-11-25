@@ -227,9 +227,13 @@ try {
           console.error("comic tab unavailable", { url: page.url(), body: (await page.locator("body").innerText()).slice(0, 600) });
           throw error;
         });
-        await page.getByRole("button", { name: /新建剧集/ }).first().click();
-        await page.getByLabel("剧集名称").fill("W2 浏览器剧集");
-        await page.getByRole("button", { name: "创建并打开" }).click();
+        await page.getByRole("button", { name: /新建新剧/ }).first().click();
+        await page.getByLabel("剧名").fill("W2 浏览器剧集");
+        await page.getByRole("button", { name: "创建新剧", exact: true }).click();
+        await page.getByRole("heading", { name: "《W2 浏览器剧集》" }).waitFor();
+        await page.getByRole("button", { name: /创建第 1 集/ }).first().click();
+        await page.getByLabel("分集名称").fill("W2 浏览器剧集");
+        await page.getByRole("button", { name: "创建并进入本集", exact: true }).click();
         await page.getByRole("heading", { name: "W2 浏览器剧集" }).waitFor();
         for (const scene of ["雨夜进店", "柜台相遇"]) {
           await page.getByRole("button", { name: /添加分镜/ }).click();

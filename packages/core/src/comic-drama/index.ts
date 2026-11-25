@@ -4,6 +4,8 @@ import { comicClipCastingSchema, type ComicCastChange, type ComicSeriesCast } fr
 
 export const COMIC_DRAMA_ROOT = "/comic-drama";
 export const COMIC_DRAMA_API_ROOT = "/api/comic-drama";
+export const COMIC_DRAMA_OUTLINE_MAX_CHARS = 20_000;
+export const COMIC_DRAMA_SCRIPT_MAX_CHARS = 50_000;
 
 const id = z.string().uuid().transform(value => value.toLowerCase());
 const revision = z.number().int().min(1).max(2_147_483_647);
@@ -27,17 +29,35 @@ export const createComicDramaSchema = comicDramaFieldsSchema.partial({
   synopsis: true,
   videoModel: true,
 }).extend({
+  outline: z.string().max(COMIC_DRAMA_OUTLINE_MAX_CHARS).optional(),
+  scriptContent: z.string().max(COMIC_DRAMA_SCRIPT_MAX_CHARS).optional(),
   firstEpisodeTitle: title.optional(),
   firstEpisodeLogline: z.string().trim().max(2000).optional(),
   createFirstEpisode: z.boolean().optional(),
 }).strict();
 
 export const updateComicDramaSchema = comicDramaFieldsSchema.extend({
+  outline: z.string().max(COMIC_DRAMA_OUTLINE_MAX_CHARS).optional(),
+  scriptContent: z.string().max(COMIC_DRAMA_SCRIPT_MAX_CHARS).optional(),
   expectedRevision: revision,
 }).strict();
 
+export const comicDramaOutlineWriteSchema = z.object({
+  expectedRevision: revision,
+  outline: z.string().max(COMIC_DRAMA_OUTLINE_MAX_CHARS),
+}).strict();
+
+export const comicDramaMasterScriptWriteSchema = z.object({
+  expectedRevision: revision,
+  content: z.string().max(COMIC_DRAMA_SCRIPT_MAX_CHARS),
+}).strict();
+
+export const comicDramaSetCurrentDramaSchema = z.object({ dramaId: id }).strict();
+
 export const comicDramaSchema = comicDramaFieldsSchema.extend({
   id,
+  outline: z.string().default(""),
+  scriptContent: z.string().default(""),
   revision,
   archivedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime().optional(),
@@ -77,6 +97,7 @@ export const createComicEpisodeSchema = comicDramaSeriesFieldsSchema.partial({
 }).extend({
   sourceSeriesId: id.optional(),
   inheritCastAndStyle: z.boolean().optional(),
+  initialScript: z.string().max(20_000).optional(),
 }).strict();
 
 export const updateComicDramaSeriesSchema = comicDramaSeriesFieldsSchema.extend({
@@ -334,10 +355,29 @@ export type ComicDramaTreeEntry = ComicDrama & {
   coverMediaId: string | null;
   status: ComicDramaSeriesStatus;
   episodes: ComicDramaEpisodeBrief[];
+  castCount?: number;
+  hasOutline?: boolean;
+  hasScript?: boolean;
 };
 export type ComicDramaTreeListing = {
   dramas: ComicDramaTreeEntry[];
   nextCursor: string | null;
+};
+export type ComicDramaView = {
+  drama: ComicDrama;
+  episodes: ComicDramaEpisodeBrief[];
+  cast: ComicSeriesCast[];
+};
+export type ComicDramaCastContent = {
+  cast: ComicSeriesCast[];
+  dramaRevision: number;
+};
+export type ComicDramaCurrentState = {
+  dramaId: string | null;
+  seriesId: string | null;
+  drama: ComicDrama | null;
+  episodeCount: number;
+  castCount: number;
 };
 export type ComicDramaDetailHierarchy = {
   drama: { id: string; title: string; synopsis: string; revision: number; episodeCount: number };
@@ -386,6 +426,7 @@ export type ComicDramaDetail = {
   clips: ComicDramaClip[];
   script: ComicDramaScript | null;
   cast: ComicSeriesCast[];
+  dramaCastCount?: number;
   summary?: ComicDramaEpisodeSummary;
 };
 export type ComicDramaListing = {
@@ -405,12 +446,19 @@ export type ComicDramaContent = Pick<ComicDramaDetail, "clips" | "script" | "cas
 
 export interface ComicDramaRepository {
   listDramas?(owner: string, query: ComicDramaHierarchyListQuery): Promise<ComicDramaTreeListing>;
-  getDrama?(owner: string, dramaId: string): Promise<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[] }>;
+  getDrama?(owner: string, dramaId: string): Promise<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[]; cast?: ComicSeriesCast[] }>;
+  openDrama?(owner: string, dramaId: string): Promise<ComicDramaView>;
+  currentDrama?(owner: string): Promise<ComicDramaCurrentState>;
   createDrama?(owner: string, input: ComicDramaCreateInput): Promise<{ drama: ComicDrama; detail: ComicDramaDetail | null }>;
   updateDrama?(owner: string, dramaId: string, input: ComicDramaUpdateInput): Promise<ComicDrama>;
+  saveDramaOutline?(owner: string, dramaId: string, expectedRevision: number, outline: string): Promise<ComicDrama>;
+  saveDramaScript?(owner: string, dramaId: string, expectedRevision: number, content: string): Promise<ComicDrama>;
+  readDramaCast?(owner: string, dramaId: string): Promise<ComicDramaCastContent>;
+  changeDramaCast?(owner: string, dramaId: string, expectedRevision: number, change: ComicCastChange): Promise<ComicDramaCastContent>;
   createEpisode?(owner: string, dramaId: string, input: ComicDramaEpisodeCreateInput): Promise<ComicDramaDetail>;
   archiveDrama?(owner: string, dramaId: string, expectedRevision: number): Promise<void>;
   removeDrama?(owner: string, dramaId: string, expectedRevision: number): Promise<void>;
+  syncEpisodeCastFromDrama?(owner: string, seriesId: string, expectedRevision: number): Promise<ComicDramaContent>;
   list(owner: string, query: ComicDramaListQuery): Promise<ComicDramaListing>;
   get(owner: string, seriesId: string): Promise<ComicDramaDetail>;
   current(owner: string): Promise<string | null>;

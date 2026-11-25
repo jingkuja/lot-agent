@@ -167,7 +167,11 @@ export class PgComicLibrary implements ComicLibraryRepository {
       await this.character(db, owner, characterId, true);
       const inUse = await db.query(
         `SELECT 1 FROM ${tables}.cd_series_cast sc JOIN ${tables}.cd_series s ON s.id=sc.series_id
-         WHERE sc.owner_id=$1 AND sc.character_id=$2 AND sc.outfit_id=$3 AND s.deleted_at IS NULL LIMIT 1`,
+         WHERE sc.owner_id=$1 AND sc.character_id=$2 AND sc.outfit_id=$3 AND s.deleted_at IS NULL
+         UNION ALL
+         SELECT 1 FROM ${tables}.cd_drama_cast dc JOIN ${tables}.cd_dramas d ON d.id=dc.drama_id
+         WHERE dc.owner_id=$1 AND dc.character_id=$2 AND dc.outfit_id=$3 AND d.deleted_at IS NULL
+         LIMIT 1`,
         [owner, characterId, outfitId],
       );
       if (inUse.rowCount) throw new ComicLibraryError("OUTFIT_IN_USE", 409);

@@ -4,12 +4,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   comicSystemDictionary,
-  type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaSeries, type ComicDramaTreeListing,
+  type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaSeries, type ComicDramaTreeListing, type ComicDramaView,
 } from "@lot-agent/core/comic-drama";
 import { api } from "../../api/client.js";
 import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
+import { DramaDialog } from "./DramaDialog.js";
+import { DramaHub } from "./DramaHub.js";
+import { SeriesDialog } from "./SeriesDialog.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { Storyboard } from "./Storyboard.js";
 import { comicDramaApi } from "./api.js";
@@ -226,6 +229,8 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
         id: dramaId,
         title: "雨夜便利店",
         synopsis: "都会夜归人的奇幻便利店",
+        outline: "全剧大纲",
+        scriptContent: "总剧本",
         styleKey: "thick_painting",
         aspectRatio: "9:16",
         videoModel: "doubao-seedance-2-5",
@@ -240,6 +245,9 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
         coverMediaId: null,
         status: "in_progress",
         episodes,
+        castCount: 2,
+        hasOutline: true,
+        hasScript: true,
       }],
       nextCursor: null,
     };
@@ -276,5 +284,99 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
     expect(group?.textContent).toContain("第一夜：风铃");
     expect(group?.textContent).toContain("第 2 集");
     expect(group?.textContent).toContain("第二夜：热咖啡");
+  });
+
+  it("renders DramaHub 4-step preparation (outline -> cast -> script -> episodes) and clean episode creation flow", async () => {
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async (domain) => [
+      ...(comicSystemDictionary[domain] ?? []),
+    ] as never);
+    vi.spyOn(comicLibraryApi, "settings").mockResolvedValue({
+      preferences: { defaultVideoModel: "doubao-seedance-2-0", defaultImageModel: null },
+      stylePresets: [],
+    });
+    vi.spyOn(comicDramaApi, "listDramas").mockResolvedValue({ dramas: [], nextCursor: null });
+    vi.spyOn(comicDramaApi, "dramaCast").mockResolvedValue({ cast: [], dramaRevision: 1 });
+
+    // 1. DramaDialog creates a new drama cleanly without episode fields
+    const saveDrama = vi.fn(async () => true);
+    const dialogHost = await mount(createElement(DramaDialog, {
+      models: [{ id: "doubao-seedance-2-0", name: "Seedance 2.0" }],
+      close: vi.fn(),
+      save: saveDrama,
+      error: null,
+    }), "zh");
+    expect(dialogHost.textContent).toContain("新建新剧");
+    expect(dialogHost.textContent).not.toContain("所属整部剧集");
+    expect(dialogHost.textContent).not.toContain("第 1 集名称");
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+
+    // 2. DramaHub guides outline -> cast -> script -> Episode 1
+    const dramaId = uuid(100);
+    const view: ComicDramaView = {
+      drama: {
+        id: dramaId,
+        title: "雨夜便利店",
+        synopsis: "都市奇幻短剧",
+        outline: "全剧共 10 集，围绕雨夜便利店的来客展开。",
+        scriptContent: "【第 1 集】雨夜风铃响起。",
+        styleKey: "thick_painting",
+        aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-0",
+        revision: 1,
+        archivedAt: null,
+      },
+      episodes: [],
+      cast: [],
+    };
+    const onAddEpisode = vi.fn();
+    const hubHost = await mount(createElement(DramaHub, {
+      view,
+      busy: false,
+      onUpdated: vi.fn(),
+      onReload: vi.fn(async () => {}),
+      onEditDrama: vi.fn(),
+      onAddEpisode,
+      onOpenEpisode: vi.fn(),
+      onDeriveEpisode: vi.fn(async () => true),
+      onChangeEpisode: vi.fn(async () => true),
+      onOpenHistory: vi.fn(),
+      onOpenCharacters: vi.fn(),
+    }), "zh");
+
+    expect(hubHost.textContent).toContain("《雨夜便利店》");
+    expect(hubHost.textContent).toContain("全剧大纲");
+    expect(hubHost.textContent).toContain("创建第 1 集");
+
+    const epStepBtn = Array.from(hubHost.querySelectorAll("nav button")).find(btn => btn.textContent?.includes("分集"));
+    expect(epStepBtn).toBeTruthy();
+    act(() => { epStepBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(hubHost.textContent).toContain("从第 1 集开始创建分集");
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+
+    // 3. SeriesDialog in addEpisode mode focuses strictly on Episode 1 with parent drama pill
+    const epHost = await mount(createElement(SeriesDialog, {
+      presetDrama: {
+        id: dramaId,
+        title: "雨夜便利店",
+        styleKey: "thick_painting",
+        aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-0",
+        nextEpisodeNo: 1,
+        castCount: 3,
+        episodes: [],
+      },
+      models: [{ id: "doubao-seedance-2-0", name: "Seedance 2.0" }],
+      close: vi.fn(),
+      save: vi.fn(async () => true),
+      error: null,
+    }), "zh");
+    expect(epHost.textContent).toContain("创建第 1 集");
+    expect(epHost.textContent).toContain("《雨夜便利店》");
+    expect(epHost.textContent).toContain("自动带入全剧角色（3 名）");
+    expect(epHost.textContent).not.toContain("新建整部剧集");
   });
 });

@@ -5,15 +5,26 @@ import { comicDramaApi } from "./api.js";
 import { comicLibraryApi } from "./library-api.js";
 import { LibraryDialog, LibraryPagination, MediaPreview, useComicChoices } from "./LibraryParts.js";
 
-export function CastPanel({ seriesId, revision, cast, disabled, change }: {
-  seriesId: string; revision: number; cast: ComicSeriesCast[]; disabled: boolean; change: (action: ComicCastChange) => Promise<boolean>;
+export function CastPanel({
+  seriesId, revision, cast, disabled, change, scope = "episode", dramaCastCount = 0, onSyncDramaCast, onOpenLibrary,
+}: {
+  seriesId: string;
+  revision: number;
+  cast: ComicSeriesCast[];
+  disabled: boolean;
+  change: (action: ComicCastChange) => Promise<boolean>;
+  scope?: "episode" | "drama";
+  dramaCastCount?: number;
+  onSyncDramaCast?: () => Promise<boolean>;
+  onOpenLibrary?: () => void;
 }) {
   const { t, locale } = useI18n();
   const [edit, setEdit] = useState<ComicSeriesCast | "new" | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [status, setStatus] = useState<{ cast: ComicSeriesCast[]; seriesRevision: number } | "failed" | null>(null);
+  const [status, setStatus] = useState<{ cast: ComicSeriesCast[]; revision: number } | "failed" | null>(null);
   const slots = useComicChoices("slot");
   const expressions = useComicChoices("expression");
+  const isDrama = scope === "drama";
   useEffect(() => {
     const focus = () => setRefresh(value => value + 1);
     window.addEventListener("focus", focus);
@@ -22,25 +33,39 @@ export function CastPanel({ seriesId, revision, cast, disabled, change }: {
   useEffect(() => {
     const controller = new AbortController();
     setStatus(null);
-    void comicDramaApi.cast(seriesId, controller.signal).then(result => {
+    const load = isDrama
+      ? comicDramaApi.dramaCast(seriesId, controller.signal).then(res => ({ cast: res.cast, revision: res.dramaRevision }))
+      : comicDramaApi.cast(seriesId, controller.signal).then(res => ({ cast: res.cast, revision: res.seriesRevision }));
+    void load.then(result => {
       if (!controller.signal.aborted) setStatus(result);
     }).catch(() => { if (!controller.signal.aborted) setStatus("failed"); });
     return () => controller.abort();
-  }, [seriesId, revision, refresh]);
-  const current = status && status !== "failed" && status.seriesRevision === revision ? status.cast : cast;
+  }, [isDrama, seriesId, revision, refresh]);
+  const current = status && status !== "failed" && status.revision === revision ? status.cast : cast;
   return <section>
     <header className="comic-cast-heading">
-      <h2>{t("本集角色")}</h2>
+      <div>
+        <h2>{t(isDrama ? "全剧角色" : "本集角色")}</h2>
+        {isDrama && <small>{t("在此锁定整部戏的主要角色与默认造型，新建分集时将自动带入。")}</small>}
+      </div>
       <div className="comic-actions">
+        {!isDrama && onSyncDramaCast && dramaCastCount > 0 && (
+          <button disabled={disabled} type="button" onClick={() => void onSyncDramaCast()}>
+            {t("同步全剧角色（{0}）", [dramaCastCount])}
+          </button>
+        )}
+        {onOpenLibrary && (
+          <button type="button" onClick={onOpenLibrary}>{t("管理角色库")}</button>
+        )}
         <button disabled={disabled} type="button" onClick={() => setRefresh(value => value + 1)}>{t("检查更新")}</button>
         <button disabled={disabled} type="button" className="primary" onClick={() => setEdit("new")}>＋ {t("选择角色")}</button>
       </div>
     </header>
     {status === "failed" && <p className="comic-error" role="alert">{t("角色更新检查失败，请重试")}</p>}
-    {status && status !== "failed" && status.seriesRevision !== revision && <p className="comic-error" role="status">
-      {t("其他窗口修改了本集，请刷新查看")}
+    {status && status !== "failed" && status.revision !== revision && <p className="comic-error" role="status">
+      {t(isDrama ? "其他窗口修改了整部剧，请刷新查看" : "其他窗口修改了本集，请刷新查看")}
     </p>}
-    {current.length === 0 && <p className="comic-empty">{t("尚未为本集选角")}</p>}
+    {current.length === 0 && <p className="comic-empty">{t(isDrama ? "尚未设定全剧角色" : "尚未为本集选角")}</p>}
     <div className="comic-cast-list">
       {current.map(entry => {
         const { snapshot, hasUpdates, archived } = entry;
@@ -68,8 +93,11 @@ export function CastPanel({ seriesId, revision, cast, disabled, change }: {
               </button>
             </>}
             <button type="button" onClick={() => {
-              if (window.confirm(t("移除角色，同时从本集分镜移除此角色？"))) void change({ action: "remove", characterId: snapshot.characterId });
-            }}>{t("移出本集")}</button>
+              const confirmMsg = isDrama
+                ? t("将此角色移出全剧角色表？已创建分集中的快照不受影响。")
+                : t("移除角色，同时从本集分镜移除此角色？");
+              if (window.confirm(confirmMsg)) void change({ action: "remove", characterId: snapshot.characterId });
+            }}>{t(isDrama ? "移出本剧" : "移出本集")}</button>
           </div>}
         </article>;
       })}

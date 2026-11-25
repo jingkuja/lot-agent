@@ -1,16 +1,18 @@
 import type { Pool, PoolClient } from "pg";
 import {
   buildComicDramaHierarchy, comicDramaClipSchema, comicDramaIdSchema, comicDramaSchema, comicDramaSeriesSchema,
-  type ComicClipProgress, type ComicCurrencyAmount, type ComicDrama, type ComicDramaClip, type ComicDramaClipDraft,
-  type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent, type ComicDramaCreateInput, type ComicDramaDetail,
-  type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput, type ComicDramaEpisodeSummary, type ComicDramaHierarchyListQuery,
-  type ComicDramaListQuery, type ComicDramaListing, type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion,
-  type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate,
-  type ComicDramaTreeEntry, type ComicDramaTreeListing, type ComicDramaUpdateInput, type ComicEpisodeCostSummary,
-  type ComicInvalidMaterialRef, type ComicSeriesCast,
+  type ComicClipProgress, type ComicCurrencyAmount, type ComicDrama, type ComicDramaCastContent, type ComicDramaClip,
+  type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent, type ComicDramaCreateInput,
+  type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput,
+  type ComicDramaEpisodeSummary, type ComicDramaHierarchyListQuery, type ComicDramaListQuery, type ComicDramaListing,
+  type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion, type ComicDramaSeries, type ComicDramaSeriesInput,
+  type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate, type ComicDramaTreeEntry, type ComicDramaTreeListing,
+  type ComicDramaUpdateInput, type ComicDramaView, type ComicEpisodeCostSummary, type ComicInvalidMaterialRef, type ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 
-import { editSeriesCast, readSeriesCast, requireClipCast } from "./cast-store.js";
+import {
+  editDramaCast, editSeriesCast, readDramaCast, readSeriesCast, requireClipCast, syncDramaCastToSeries,
+} from "./cast-store.js";
 import { readComicDictionary, requireComicChoice } from "./dictionary.js";
 import { comicBatchCreditPaused } from "./generation-repository.js";
 import type { ComicQuery } from "./library-db.js";
@@ -28,7 +30,8 @@ export type ComicEpisodeCostEstimator = (
   db?: ComicQuery,
 ) => Promise<ComicEpisodeCostEstimate>;
 
-const dramaFields = `id, title, synopsis, style_key AS "styleKey", aspect_ratio AS "aspectRatio", video_model AS "videoModel",
+const dramaFields = `id, title, synopsis, outline, script_content AS "scriptContent",
+  style_key AS "styleKey", aspect_ratio AS "aspectRatio", video_model AS "videoModel",
   revision, archived_at AS "archivedAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
 const seriesFields = `id, drama_id AS "dramaId", parent_id AS "parentId", title, logline, series_group AS "seriesGroup",
   episode_no AS "episodeNo", style_key AS "styleKey", aspect_ratio AS "aspectRatio", video_model AS "videoModel",
@@ -470,6 +473,8 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       id: series.dramaId,
       title: series.seriesGroup ?? series.title,
       synopsis: series.logline,
+      outline: "",
+      scriptContent: "",
       styleKey: series.styleKey,
       aspectRatio: series.aspectRatio,
       videoModel: series.videoModel,
@@ -656,10 +661,15 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     const episodes = queriedEpisodes.length
       ? queriedEpisodes
       : [this.fallbackEpisodeBrief(series, rawClips.length, completedCount, generatingCount)];
+    const { rows: [castCountRow] } = await client.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM lot_comic_drama.cd_drama_cast WHERE owner_id=$1 AND drama_id=$2",
+      [owner, series.dramaId],
+    );
+    const dramaCastCount = Number(castCountRow?.n ?? 0);
     const clips = rawClips.map(clip => ({ ...clip, dramaId: series.dramaId, episodeId: clip.episodeId ?? series.id }));
     const hierarchy = buildComicDramaHierarchy(drama, series, clips, episodes.length);
     const summary = await this.buildSummary(client, owner, series, clips, completedCount, generatingCount, drama.title, episodes.length);
-    return { drama, episodes, hierarchy, series, clips, script, cast, summary };
+    return { drama, episodes, hierarchy, series, clips, script, cast, dramaCastCount, summary };
   }
 
   async recordTakeSettlement(
@@ -708,6 +718,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       episodeCount: number;
       exportedEpisodeCount: number;
       hasInProgressEpisode: boolean;
+      castCount?: number;
     };
     const { rows } = await this.pool.query<DramaListRow>(
       `WITH ep_stats AS (
@@ -726,7 +737,8 @@ export class PgComicDramaRepository implements ComicDramaRepository {
          SELECT ${dramaFields},
            (SELECT count(*)::int FROM ep_stats es WHERE es.drama_id=d.id) AS "episodeCount",
            (SELECT count(*)::int FROM ep_stats es WHERE es.drama_id=d.id AND es.has_render) AS "exportedEpisodeCount",
-           EXISTS (SELECT 1 FROM ep_stats es WHERE es.drama_id=d.id AND NOT es.has_render AND es.in_progress) AS "hasInProgressEpisode"
+           EXISTS (SELECT 1 FROM ep_stats es WHERE es.drama_id=d.id AND NOT es.has_render AND es.in_progress) AS "hasInProgressEpisode",
+           (SELECT count(*)::int FROM lot_comic_drama.cd_drama_cast dc WHERE dc.owner_id=d.owner_id AND dc.drama_id=d.id) AS "castCount"
          FROM lot_comic_drama.cd_dramas d
          WHERE d.owner_id=$1 AND d.deleted_at IS NULL AND (d.archived_at IS NOT NULL)=$2
            AND ($3='' OR strpos(lower(d.title),lower($3))>0 OR strpos(lower(d.synopsis),lower($3))>0 OR EXISTS (
@@ -795,7 +807,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       }
     }
     const dramas: ComicDramaTreeEntry[] = pageRows.map(
-      ({ episodeCount, exportedEpisodeCount, hasInProgressEpisode: _inProg, ...row }) => {
+      ({ episodeCount, exportedEpisodeCount, hasInProgressEpisode: _inProg, castCount, ...row }) => {
         const drama = asDrama(row);
         const episodes = episodesByDrama.get(drama.id) ?? [];
         const clipCount = episodes.reduce((sum, ep) => sum + ep.clipCount, 0);
@@ -814,6 +826,9 @@ export class PgComicDramaRepository implements ComicDramaRepository {
           coverMediaId,
           status: derived,
           episodes,
+          castCount: Number(castCount ?? 0),
+          hasOutline: drama.outline.trim().length > 0,
+          hasScript: drama.scriptContent.trim().length > 0,
         };
       },
     );
@@ -821,11 +836,63 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return { dramas, nextCursor: rows.length > 24 && last ? `${last.updatedAt},${last.id}` : null };
   }
 
-  getDrama(owner: string, dramaId: string): Promise<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[] }> {
+  getDrama(owner: string, dramaId: string): Promise<ComicDramaView> {
     return this.transaction(async client => {
       const drama = await this.dramaRow(client, owner, dramaId);
       const episodes = await this.dramaEpisodes(client, owner, dramaId, !!drama.archivedAt);
-      return { drama, episodes };
+      const cast = await readDramaCast(client, dramaId);
+      return { drama, episodes, cast };
+    }, true);
+  }
+
+  openDrama(owner: string, dramaId: string): Promise<ComicDramaView> {
+    return this.transaction(async client => {
+      const drama = await this.dramaRow(client, owner, dramaId, true);
+      await this.setCurrentDrama(client, owner, drama.id);
+      const episodes = await this.dramaEpisodes(client, owner, dramaId, false);
+      const cast = await readDramaCast(client, dramaId);
+      return { drama, episodes, cast };
+    });
+  }
+
+  async currentDrama(owner: string): Promise<ComicDramaCurrentState> {
+    return this.transaction(async client => {
+      const { rows } = await client.query<{ seriesId: string | null; dramaId: string | null }>(
+        `SELECT current_series_id AS "seriesId", current_drama_id AS "dramaId"
+         FROM lot_comic_drama.cd_user_state WHERE owner_id=$1`,
+        [owner],
+      );
+      let seriesId = rows[0]?.seriesId ?? null;
+      let dramaId = rows[0]?.dramaId ?? null;
+      if (seriesId) {
+        const { rows: [ep] } = await client.query<{ dramaId: string }>(
+          `SELECT drama_id AS "dramaId" FROM lot_comic_drama.cd_series
+           WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL AND archived_at IS NULL`,
+          [owner, seriesId],
+        );
+        if (ep) dramaId = ep.dramaId;
+        else seriesId = null;
+      }
+      if (!dramaId) return { dramaId: null, seriesId: null, drama: null, episodeCount: 0, castCount: 0 };
+      const drama = await this.tryDramaRow(client, owner, dramaId);
+      if (!drama || drama.archivedAt) {
+        return { dramaId: null, seriesId: null, drama: null, episodeCount: 0, castCount: 0 };
+      }
+      const { rows: [stats] } = await client.query<{ episodeCount: number; castCount: number }>(
+        `SELECT
+           (SELECT count(*)::int FROM lot_comic_drama.cd_series s
+             WHERE s.owner_id=$1 AND s.drama_id=$2 AND s.deleted_at IS NULL AND s.archived_at IS NULL) AS "episodeCount",
+           (SELECT count(*)::int FROM lot_comic_drama.cd_drama_cast dc
+             WHERE dc.owner_id=$1 AND dc.drama_id=$2) AS "castCount"`,
+        [owner, drama.id],
+      );
+      return {
+        dramaId: drama.id,
+        seriesId,
+        drama,
+        episodeCount: Number(stats?.episodeCount ?? 0),
+        castCount: Number(stats?.castCount ?? 0),
+      };
     }, true);
   }
 
@@ -833,12 +900,16 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return this.transaction(async client => {
       await requireComicChoice(client, owner, "style", input.styleKey);
       const { rows: [dRow] } = await client.query<DramaRow>(
-        `INSERT INTO lot_comic_drama.cd_dramas(owner_id,title,synopsis,style_key,aspect_ratio,video_model)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${dramaFields}`,
-        [owner, input.title, input.synopsis ?? "", input.styleKey, input.aspectRatio, input.videoModel ?? null],
+        `INSERT INTO lot_comic_drama.cd_dramas(owner_id,title,synopsis,outline,script_content,style_key,aspect_ratio,video_model)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${dramaFields}`,
+        [owner, input.title, input.synopsis ?? "", input.outline ?? "", input.scriptContent ?? "",
+          input.styleKey, input.aspectRatio, input.videoModel ?? null],
       );
       const drama = asDrama(dRow);
-      if (input.createFirstEpisode === false) return { drama, detail: null };
+      if (input.createFirstEpisode === false) {
+        await this.setCurrentDrama(client, owner, drama.id);
+        return { drama, detail: null };
+      }
       const epTitle = input.firstEpisodeTitle?.trim() || input.title;
       const epLogline = input.firstEpisodeLogline ?? "";
       const series = await this.insert(client, owner, {
@@ -851,7 +922,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         aspectRatio: drama.aspectRatio,
         videoModel: drama.videoModel,
       });
-      await this.setCurrent(client, owner, series.id);
+      await this.setCurrent(client, owner, series.id, drama.id);
       const detail = await this.buildDetail(client, owner, series, [], null, [], 0, 0);
       return { drama, detail };
     });
@@ -862,11 +933,14 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       const current = await this.dramaRow(client, owner, dramaId, true);
       requireRevision(current.revision, input.expectedRevision);
       if (current.styleKey !== input.styleKey) await requireComicChoice(client, owner, "style", input.styleKey);
+      const outline = input.outline ?? current.outline;
+      const scriptContent = input.scriptContent ?? current.scriptContent;
       const { rows: [dRow] } = await client.query<DramaRow>(
         `UPDATE lot_comic_drama.cd_dramas
-         SET title=$2,synopsis=$3,style_key=$4,aspect_ratio=$5,video_model=$6,revision=revision+1,updated_at=clock_timestamp()
+         SET title=$2,synopsis=$3,outline=$4,script_content=$5,style_key=$6,aspect_ratio=$7,video_model=$8,
+           revision=revision+1,updated_at=clock_timestamp()
          WHERE id=$1 RETURNING ${dramaFields}`,
-        [dramaId, input.title, input.synopsis, input.styleKey, input.aspectRatio, input.videoModel],
+        [dramaId, input.title, input.synopsis, outline, scriptContent, input.styleKey, input.aspectRatio, input.videoModel],
       );
       if (current.title !== input.title) {
         await client.query(
@@ -876,6 +950,67 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         );
       }
       return asDrama(dRow);
+    });
+  }
+
+  saveDramaOutline(owner: string, dramaId: string, expectedRevision: number, outline: string): Promise<ComicDrama> {
+    return this.transaction(async client => {
+      const current = await this.dramaRow(client, owner, dramaId, true);
+      requireRevision(current.revision, expectedRevision);
+      const { rows: [dRow] } = await client.query<DramaRow>(
+        `UPDATE lot_comic_drama.cd_dramas
+         SET outline=$2, revision=revision+1, updated_at=clock_timestamp()
+         WHERE id=$1 RETURNING ${dramaFields}`,
+        [dramaId, outline],
+      );
+      return asDrama(dRow);
+    });
+  }
+
+  saveDramaScript(owner: string, dramaId: string, expectedRevision: number, content: string): Promise<ComicDrama> {
+    return this.transaction(async client => {
+      const current = await this.dramaRow(client, owner, dramaId, true);
+      requireRevision(current.revision, expectedRevision);
+      const { rows: [dRow] } = await client.query<DramaRow>(
+        `UPDATE lot_comic_drama.cd_dramas
+         SET script_content=$2, revision=revision+1, updated_at=clock_timestamp()
+         WHERE id=$1 RETURNING ${dramaFields}`,
+        [dramaId, content],
+      );
+      return asDrama(dRow);
+    });
+  }
+
+  readDramaCast(owner: string, dramaId: string): Promise<ComicDramaCastContent> {
+    return this.transaction(async client => {
+      const drama = await this.dramaRow(client, owner, dramaId);
+      return { cast: await readDramaCast(client, dramaId), dramaRevision: drama.revision };
+    }, true);
+  }
+
+  changeDramaCast(
+    owner: string,
+    dramaId: string,
+    expectedRevision: number,
+    change: ComicCastChange,
+  ): Promise<ComicDramaCastContent> {
+    return this.transaction(async client => {
+      const drama = await this.dramaRow(client, owner, dramaId, true);
+      requireRevision(drama.revision, expectedRevision);
+      await editDramaCast(client, owner, dramaId, change);
+      const { rows: [bumped] } = await client.query<{ revision: number }>(
+        `UPDATE lot_comic_drama.cd_dramas SET revision=revision+1, updated_at=clock_timestamp()
+         WHERE id=$1 RETURNING revision`,
+        [dramaId],
+      );
+      return { cast: await readDramaCast(client, dramaId), dramaRevision: bumped.revision };
+    });
+  }
+
+  syncEpisodeCastFromDrama(owner: string, seriesId: string, expectedRevision: number): Promise<ComicDramaContent> {
+    return this.editContent(owner, seriesId, expectedRevision, async client => {
+      const series = await this.series(client, owner, seriesId);
+      await syncDramaCastToSeries(client, owner, series.dramaId, seriesId);
     });
   }
 
@@ -914,11 +1049,21 @@ export class PgComicDramaRepository implements ComicDramaRepository {
            SELECT owner_id,$1,character_id,outfit_id,snapshot FROM lot_comic_drama.cd_series_cast WHERE owner_id=$2 AND series_id=$3`,
           [series.id, owner, parentId],
         );
+      } else if (inherit) {
+        await syncDramaCastToSeries(client, owner, drama.id, series.id);
+      }
+      let initialScript: ComicDramaDetail["script"] = null;
+      if (input.initialScript?.trim()) {
+        await client.query(
+          `INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source) VALUES ($1,1,$2,'user')`,
+          [series.id, input.initialScript],
+        );
+        initialScript = { version: 1, content: input.initialScript };
       }
       await this.touchDrama(client, owner, drama.id);
-      await this.setCurrent(client, owner, series.id);
-      const cast = parentId && inherit ? await readSeriesCast(client, series.id) : [];
-      return this.buildDetail(client, owner, series, [], null, cast, 0, 0);
+      await this.setCurrent(client, owner, series.id, drama.id);
+      const cast = inherit ? await readSeriesCast(client, series.id) : [];
+      return this.buildDetail(client, owner, series, [], initialScript, cast, 0, 0);
     });
   }
 
@@ -940,8 +1085,13 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         [owner, dramaId],
       );
       await client.query(
-        `UPDATE lot_comic_drama.cd_user_state SET current_series_id=NULL
-         WHERE owner_id=$1 AND current_series_id IN (SELECT id FROM lot_comic_drama.cd_series WHERE owner_id=$1 AND drama_id=$2)`,
+        `UPDATE lot_comic_drama.cd_user_state
+         SET current_series_id = CASE
+               WHEN current_series_id IN (SELECT id FROM lot_comic_drama.cd_series WHERE owner_id=$1 AND drama_id=$2) THEN NULL
+               ELSE current_series_id
+             END,
+             current_drama_id = CASE WHEN current_drama_id=$2 THEN NULL ELSE current_drama_id END
+         WHERE owner_id=$1`,
         [owner, dramaId],
       );
     });
@@ -1040,15 +1190,31 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     }
   }
 
-  private async setCurrent(client: PoolClient, owner: string, id: string) {
-    await client.query(`INSERT INTO lot_comic_drama.cd_user_state(owner_id,current_series_id) VALUES ($1,$2)
-      ON CONFLICT (owner_id) DO UPDATE SET current_series_id=excluded.current_series_id`, [owner, id]);
+  private async setCurrent(client: PoolClient, owner: string, id: string, dramaId?: string) {
+    await client.query(
+      `INSERT INTO lot_comic_drama.cd_user_state(owner_id,current_series_id,current_drama_id)
+       VALUES ($1,$2,coalesce($3::uuid,(SELECT drama_id FROM lot_comic_drama.cd_series WHERE owner_id=$1 AND id=$2)))
+       ON CONFLICT (owner_id) DO UPDATE
+         SET current_series_id=excluded.current_series_id,
+             current_drama_id=coalesce(excluded.current_drama_id, lot_comic_drama.cd_user_state.current_drama_id)`,
+      [owner, id, dramaId ?? null],
+    );
+  }
+
+  private async setCurrentDrama(client: PoolClient, owner: string, dramaId: string) {
+    await client.query(
+      `INSERT INTO lot_comic_drama.cd_user_state(owner_id,current_series_id,current_drama_id)
+       VALUES ($1,NULL,$2)
+       ON CONFLICT (owner_id) DO UPDATE
+         SET current_series_id=NULL, current_drama_id=excluded.current_drama_id`,
+      [owner, dramaId],
+    );
   }
 
   open(owner: string, id: string): Promise<ComicDramaDetail> {
     return this.transaction(async client => {
       const series = await this.series(client, owner, id, true);
-      await this.setCurrent(client, owner, id);
+      await this.setCurrent(client, owner, id, series.dramaId);
       const { clips: rawClips, script, cast } = await this.content(client, id, series.revision);
       const { clips, completedCount, generatingCount } = await this.attachProgress(client, owner, id, rawClips, cast);
       return this.buildDetail(client, owner, series, clips, script, cast, completedCount, generatingCount);
@@ -1143,10 +1309,12 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         await client.query(`INSERT INTO lot_comic_drama.cd_series_cast(owner_id,series_id,character_id,outfit_id,snapshot)
           SELECT owner_id,$1,character_id,outfit_id,snapshot FROM lot_comic_drama.cd_series_cast WHERE owner_id=$2 AND series_id=$3`,
           [series.id, owner, parentId]);
+      } else if (!created && inherit) {
+        await syncDramaCastToSeries(client, owner, drama.id, series.id);
       }
       await this.touchDrama(client, owner, drama.id);
-      await this.setCurrent(client, owner, series.id);
-      const cast = parentId && inherit ? await readSeriesCast(client, series.id) : [];
+      await this.setCurrent(client, owner, series.id, drama.id);
+      const cast = (parentId || !created) && inherit ? await readSeriesCast(client, series.id) : [];
       return this.buildDetail(client, owner, series, [], null, cast, 0, 0);
     });
   }
@@ -1186,7 +1354,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         SELECT $1,1,content,source FROM lot_comic_drama.cd_scripts WHERE series_id=$2 ORDER BY version DESC LIMIT 1`, [series.id, id]);
     }
     await this.touchDrama(client, owner, drama.id);
-    await this.setCurrent(client, owner, series.id);
+    await this.setCurrent(client, owner, series.id, drama.id);
     const { clips, script, cast } = await this.content(client, series.id, series.revision);
     return this.buildDetail(client, owner, series, clips, script, cast, 0, 0);
   }

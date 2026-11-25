@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   adaptComicClipDraftForModel, checkComicClipIssues, COMIC_DRAMA_ROOT,
   type ComicCurrencyAmount, type ComicDirectorApplyInput, type ComicDirectorDecision, type ComicDirectorProposal,
-  type ComicDirectorRoleOutcome, type ComicDrama, type ComicDramaContent, type ComicDramaCreateInput, type ComicDramaDetail,
-  type ComicDramaEpisodeSummary, type ComicDramaScriptVersion, type ComicDramaSeriesInput, type ComicDramaTreeEntry,
-  type ComicDramaUpdateInput, type ComicGenerationMode,
+  type ComicDirectorRoleOutcome, type ComicDrama, type ComicDramaContent, type ComicDramaCreateInput,
+  type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaEpisodeSummary,
+  type ComicDramaScriptVersion, type ComicDramaTreeEntry, type ComicDramaUpdateInput, type ComicDramaView,
+  type ComicGenerationMode,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, type User } from "../../api/client.js";
 import { BrandHeader } from "../../components/BrandHeader.js";
@@ -13,7 +14,10 @@ import { comicDramaApi } from "./api.js";
 import { computeComicBatchPlan } from "./batch-plan.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
 import { DramaDialog } from "./DramaDialog.js";
-import { SeriesDialog, type ComicDramaModel, type PresetDramaTarget, type SeriesModelAdaptOptions } from "./SeriesDialog.js";
+import { DramaHub, type DramaHubTab } from "./DramaHub.js";
+import {
+  SeriesDialog, type ComicDramaModel, type EpisodeDialogPayload, type PresetDramaTarget, type SeriesModelAdaptOptions,
+} from "./SeriesDialog.js";
 import { describeComicClipCheckIssue } from "./clip-check-copy.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { CastPanel } from "./CastPanel.js";
@@ -42,6 +46,8 @@ import { comicDirectorApi } from "./director-api.js";
 import { useComicDramaDraft } from "./useComicDramaDraft.js";
 import "./comic-drama.css";
 
+const dramasPath = COMIC_DRAMA_ROOT + "/dramas";
+const dramaPath = (id: string) => dramasPath + "/" + id;
 const historyPath = COMIC_DRAMA_ROOT + "/series";
 const seriesPath = (id: string) => historyPath + "/" + id;
 
@@ -59,11 +65,11 @@ type Props = {
 };
 
 const steps = [
-  { key: "剧本", Icon: ScriptIcon },
-  { key: "选角", Icon: CharactersIcon },
-  { key: "分镜", Icon: StoryboardIcon },
-  { key: "生成", Icon: SparklesIcon },
-  { key: "剪辑", Icon: TimelineEditIcon },
+  { key: "剧本", label: "本集剧本", Icon: ScriptIcon },
+  { key: "选角", label: "本集选角", Icon: CharactersIcon },
+  { key: "分镜", label: "分镜", Icon: StoryboardIcon },
+  { key: "生成", label: "生成", Icon: SparklesIcon },
+  { key: "剪辑", label: "剪辑", Icon: TimelineEditIcon },
 ] as const;
 const libraryPaths = [
   { suffix: "/characters", label: "角色素材库", tone: "violet", Icon: CharactersIcon },
@@ -97,6 +103,11 @@ export function ComicDramaWorkspace({
   const detail = editor.detail;
   const series = detail?.series;
   const [sidebarSummary, setSidebarSummary] = useState<ComicDramaEpisodeSummary | null>(null);
+  const [sidebarDrama, setSidebarDrama] = useState<ComicDramaCurrentState | null>(null);
+  const [dramaView, setDramaView] = useState<ComicDramaView | null>(null);
+  const [dramaTabHint, setDramaTabHint] = useState<DramaHubTab | undefined>(undefined);
+  const dramaFlushRef = useRef<(() => Promise<boolean>) | null>(null);
+  const setDramaFlush = useCallback((fn: (() => Promise<boolean>) | null) => { dramaFlushRef.current = fn; }, []);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -104,7 +115,7 @@ export function ComicDramaWorkspace({
   const [retry, setRetry] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [bgNotice, setBgNotice] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"create" | "edit" | "addEpisode" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "addEpisode" | null>(null);
   const [presetDrama, setPresetDrama] = useState<PresetDramaTarget | undefined>(undefined);
   const [dramaDialog, setDramaDialog] = useState<{ mode: "create" | "edit"; drama?: ComicDrama } | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
@@ -137,6 +148,7 @@ export function ComicDramaWorkspace({
   const editorRoute = pathname === editorPath || pathname.startsWith(editorPath + "/");
   const editGuard = useRef<(() => boolean) | null>(null);
   const setEditGuard = useCallback((guard: (() => boolean) | null) => { editGuard.current = guard; }, []);
+  const directDramaId = pathname.startsWith(dramasPath + "/") ? pathname.slice(dramasPath.length + 1) : null;
   const directId = pathname.startsWith(historyPath + "/") ? pathname.slice(historyPath.length + 1) : null;
   const library = libraryPaths.find(({ suffix }) => pathname === COMIC_DRAMA_ROOT + suffix ||
     (suffix === "/characters" && pathname.startsWith(COMIC_DRAMA_ROOT + suffix + "/")))?.suffix;
@@ -149,15 +161,18 @@ export function ComicDramaWorkspace({
     if (active && legacyEditId) replacePath(editorPath + "/" + legacyEditId);
   }, [active, legacyEditId, replacePath]);
 
-  // Always keep sidebar's current series summary populated, even on direct subroutes
+  // Always keep sidebar's current drama and episode summary populated, even on direct subroutes
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
     void comicDramaApi.currentSummary(controller.signal).then(res => {
       if (!controller.signal.aborted) setSidebarSummary(res.summary);
     }).catch(() => {});
+    void comicDramaApi.currentDrama(controller.signal).then(res => {
+      if (!controller.signal.aborted) setSidebarDrama(res);
+    }).catch(() => {});
     return () => controller.abort();
-  }, [active, pathname, retry]);
+  }, [active, pathname, retry, historyRefresh]);
 
   useEffect(() => {
     if (detail?.summary && !detail.series.archivedAt) {
@@ -169,6 +184,12 @@ export function ComicDramaWorkspace({
     setScriptSelection(null);
   }, [series?.id]);
 
+  const flushAll = useCallback(async () => {
+    if (!await flush()) return false;
+    if (dramaFlushRef.current && !await dramaFlushRef.current()) return false;
+    return true;
+  }, [flush]);
+
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -178,28 +199,73 @@ export function ComicDramaWorkspace({
     setNotice(null);
     routeQueue.current = routeQueue.current.then(async () => {
       if (!live) return;
-      if (!await flush()) {
+      if (!await flushAll()) {
         if (live && pathname !== loadedPath.current) replacePath(loadedPath.current);
         return;
       }
       if (!live || !workspace) return;
-      const id = directId ?? (await comicDramaApi.current(controller.signal)).seriesId;
+      if (directDramaId) {
+        let view = await comicDramaApi.getDrama(directDramaId, controller.signal);
+        if (!view.drama.archivedAt && live) view = await comicDramaApi.openDrama(directDramaId);
+        if (live) {
+          loadedPath.current = pathname;
+          setLatest(null);
+          load(null);
+          setDramaView(view);
+          if (!view.drama.archivedAt) {
+            setSidebarDrama({
+              dramaId: view.drama.id, seriesId: null, drama: view.drama,
+              episodeCount: view.episodes.length, castCount: view.cast.length,
+            });
+          }
+        }
+        return;
+      }
+      if (directId) {
+        let result = await comicDramaApi.get(directId, controller.signal);
+        if (result && !result.series.archivedAt && live) result = await comicDramaApi.open(directId);
+        if (live) {
+          loadedPath.current = pathname;
+          setLatest(null);
+          setDramaView(null);
+          load(result);
+          if (result?.summary && !result.series.archivedAt) setSidebarSummary(result.summary);
+        }
+        return;
+      }
+      const cur = await comicDramaApi.currentDrama(controller.signal);
       if (!live) return;
-      let result = id ? await comicDramaApi.get(id, controller.signal) : null;
-      if (directId && result && !result.series.archivedAt && live) result = await comicDramaApi.open(directId);
-      if (live) {
+      if (cur.seriesId) {
+        const result = await comicDramaApi.get(cur.seriesId, controller.signal);
+        if (live) {
+          loadedPath.current = pathname;
+          setLatest(null);
+          setDramaView(null);
+          load(result);
+          if (result?.summary && !result.series.archivedAt) setSidebarSummary(result.summary);
+        }
+      } else if (cur.dramaId) {
+        const view = await comicDramaApi.getDrama(cur.dramaId, controller.signal);
+        if (live) {
+          loadedPath.current = pathname;
+          setLatest(null);
+          load(null);
+          setDramaView(view);
+          setSidebarDrama(cur);
+        }
+      } else if (live) {
         loadedPath.current = pathname;
         setLatest(null);
-        load(result);
-        if (result?.summary && !result.series.archivedAt) setSidebarSummary(result.summary);
+        setDramaView(null);
+        load(null);
       }
     }).catch(() => { if (live) setLoadError(true); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; controller.abort(); };
-  }, [active, directId, flush, getDetail, load, pathname, replacePath, retry, workspace]);
+  }, [active, directDramaId, directId, flushAll, getDetail, load, pathname, replacePath, retry, workspace]);
 
   const leave = async (callback: () => void) => {
-    if (!busyRef.current && (editGuard.current?.() ?? true) && await flush()) callback();
+    if (!busyRef.current && (editGuard.current?.() ?? true) && await flushAll()) callback();
   };
   const warnGeneratingIfSwitching = (targetId?: string) => {
     const activeSum = detail?.summary ?? sidebarSummary;
@@ -221,7 +287,7 @@ export function ComicDramaWorkspace({
     setBusy(true);
     report(null);
     try {
-      if (!await flush()) return false;
+      if (!await flushAll()) return false;
       await operation();
       return true;
     } catch (error) {
@@ -231,11 +297,16 @@ export function ComicDramaWorkspace({
   }
   const saved = (result: ComicDramaDetail) => {
     warnGeneratingIfSwitching(result.series.id);
+    setDramaView(null);
     load(result);
     if (result.summary && !result.series.archivedAt) setSidebarSummary(result.summary);
     loadedPath.current = seriesPath(result.series.id);
     navigate(loadedPath.current);
   };
+  const openDramaHub = (id: string, tab?: DramaHubTab) => void leave(() => {
+    setDramaTabHint(tab);
+    navigate(dramaPath(id));
+  });
   const reloadCurrent = useCallback(async () => {
     const current = getDetail();
     if (!current) return;
@@ -245,6 +316,14 @@ export function ComicDramaWorkspace({
       if (fresh.summary && !fresh.series.archivedAt) setSidebarSummary(fresh.summary);
     } catch { /* ignore */ }
   }, [getDetail, load]);
+  const reloadDramaView = useCallback(async () => {
+    const id = dramaView?.drama.id;
+    if (!id) return;
+    try {
+      const fresh = await comicDramaApi.getDrama(id);
+      setDramaView(fresh);
+    } catch { /* ignore */ }
+  }, [dramaView?.drama.id]);
   const changeContent = (apply: (id: string, revision: number) => Promise<ComicDramaContent>, then?: (result: ComicDramaContent) => void) =>
     run(async () => {
       const current = getDetail();
@@ -255,7 +334,7 @@ export function ComicDramaWorkspace({
       else load({ ...current, series: { ...current.series, revision: result.seriesRevision }, script: result.script, clips: result.clips, cast: result.cast });
       then?.(result);
     });
-  const showDialog = (next: "create" | "edit" | "addEpisode", preset?: PresetDramaTarget) => void leave(() => {
+  const showDialog = (next: "edit" | "addEpisode", preset?: PresetDramaTarget) => void leave(() => {
     setModalError(null);
     setPresetDrama(preset);
     setDialog(next);
@@ -264,10 +343,11 @@ export function ComicDramaWorkspace({
     setModalError(null);
     setDramaDialog({ mode, drama });
   });
-  const saveDialog = (fields: ComicDramaSeriesInput, modelAdapt?: SeriesModelAdaptOptions) => run(async () => {
+  const saveDialog = (fields: EpisodeDialogPayload, modelAdapt?: SeriesModelAdaptOptions) => run(async () => {
     const current = getDetail();
     if (dialog === "edit" && current) {
-      const updated = await comicDramaApi.update(current.series.id, fields, current.series.revision);
+      const { initialScript: _ignored, ...updateFields } = fields;
+      const updated = await comicDramaApi.update(current.series.id, updateFields, current.series.revision);
       if (modelAdapt?.apply && fields.videoModel) {
         for (const clip of current.clips) {
           const adapted = adaptComicClipDraftForModel(clip.draft, fields.videoModel, {
@@ -290,11 +370,17 @@ export function ComicDramaWorkspace({
       }
       setHistoryRefresh(v => v + 1);
     } else if (dialog === "addEpisode" && presetDrama) {
-      const created = await comicDramaApi.createEpisode(presetDrama.id, fields);
-      setHistoryRefresh(v => v + 1);
-      saved(created);
-    } else {
-      const created = await comicDramaApi.create(fields);
+      const created = await comicDramaApi.createEpisode(presetDrama.id, {
+        title: fields.title,
+        logline: fields.logline,
+        episodeNo: fields.episodeNo,
+        styleKey: fields.styleKey,
+        aspectRatio: fields.aspectRatio,
+        videoModel: fields.videoModel,
+        sourceSeriesId: fields.sourceSeriesId,
+        inheritCastAndStyle: fields.inheritCastAndStyle,
+        ...(fields.initialScript ? { initialScript: fields.initialScript } : {}),
+      });
       setHistoryRefresh(v => v + 1);
       saved(created);
     }
@@ -302,7 +388,10 @@ export function ComicDramaWorkspace({
 
   const saveDramaDialog = (fields: ComicDramaCreateInput | ComicDramaUpdateInput) => run(async () => {
     if (dramaDialog?.mode === "edit" && dramaDialog.drama) {
-      await comicDramaApi.updateDrama(dramaDialog.drama.id, fields as ComicDramaUpdateInput);
+      const updated = await comicDramaApi.updateDrama(dramaDialog.drama.id, fields as ComicDramaUpdateInput);
+      if (dramaView && dramaView.drama.id === updated.id) {
+        setDramaView({ ...dramaView, drama: updated });
+      }
       const current = getDetail();
       if (current && current.series.dramaId === dramaDialog.drama.id) {
         const fresh = await comicDramaApi.get(current.series.id).catch(() => null);
@@ -315,7 +404,19 @@ export function ComicDramaWorkspace({
     } else {
       const created = await comicDramaApi.createDrama(fields as ComicDramaCreateInput);
       setHistoryRefresh(v => v + 1);
-      if (created.detail) saved(created.detail);
+      if (created.detail) {
+        saved(created.detail);
+      } else {
+        const initialView: ComicDramaView = { drama: created.drama, episodes: [], cast: [] };
+        load(null);
+        setDramaView(initialView);
+        setDramaTabHint("outline");
+        setSidebarDrama({
+          dramaId: created.drama.id, seriesId: null, drama: created.drama, episodeCount: 0, castCount: 0,
+        });
+        loadedPath.current = dramaPath(created.drama.id);
+        navigate(loadedPath.current);
+      }
     }
   }, setModalError);
 
@@ -402,11 +503,23 @@ export function ComicDramaWorkspace({
 
   const activeClip = detail ? (detail.clips.find(clip => clip.id === selected) ?? detail.clips[0] ?? null) : null;
   const episodeSummary = detail?.summary;
-  const dramaTitle = detail?.drama?.title ?? series?.seriesGroup ?? series?.title ?? "";
+  const dramaTitle = dramaView?.drama.title ?? detail?.drama?.title ?? series?.seriesGroup ?? series?.title ?? "";
   const episodeNo = series?.episodeNo ?? 1;
-  const siblingEpisodes = detail?.episodes ?? [];
+  const siblingEpisodes = dramaView?.episodes ?? detail?.episodes ?? [];
   const activeClipScene = activeClip ? (editor.clips[activeClip.id]?.draft.scene ?? activeClip.draft.scene) : "";
-  const currentDramaPreset = series ? {
+  const activeDramaId = dramaView?.drama.id ?? series?.dramaId ?? sidebarDrama?.dramaId ?? sidebarSummary?.dramaId ?? null;
+  const activeDramaName = dramaView?.drama.title ?? detail?.drama?.title ?? sidebarDrama?.drama?.title ?? sidebarSummary?.dramaTitle ?? null;
+  const activeDramaPreset: PresetDramaTarget | undefined = dramaView ? {
+    id: dramaView.drama.id,
+    title: dramaView.drama.title,
+    styleKey: dramaView.drama.styleKey,
+    aspectRatio: dramaView.drama.aspectRatio,
+    videoModel: dramaView.drama.videoModel,
+    nextEpisodeNo: Math.max(0, ...dramaView.episodes.map(ep => ep.episodeNo)) + 1,
+    latestEpisodeId: dramaView.episodes.at(-1)?.id ?? null,
+    castCount: dramaView.cast.length,
+    episodes: dramaView.episodes,
+  } : series ? {
     id: series.dramaId,
     title: dramaTitle,
     styleKey: detail?.drama?.styleKey ?? series.styleKey,
@@ -414,6 +527,8 @@ export function ComicDramaWorkspace({
     videoModel: detail?.drama?.videoModel ?? series.videoModel,
     nextEpisodeNo: Math.max(0, ...siblingEpisodes.map(ep => ep.episodeNo), episodeNo) + 1,
     latestEpisodeId: siblingEpisodes.at(-1)?.id ?? series.id,
+    castCount: detail?.dramaCastCount ?? 0,
+    episodes: siblingEpisodes,
   } : undefined;
   const presetFromTree = (drama: ComicDramaTreeEntry): PresetDramaTarget => ({
     id: drama.id,
@@ -423,7 +538,22 @@ export function ComicDramaWorkspace({
     videoModel: drama.videoModel,
     nextEpisodeNo: Math.max(0, ...drama.episodes.map(ep => ep.episodeNo)) + 1,
     latestEpisodeId: drama.episodes.at(-1)?.id ?? null,
+    castCount: drama.castCount ?? 0,
+    episodes: drama.episodes,
   });
+  const handleChangeEpisode = async (entry: ComicDramaEpisodeBrief, action: "archive" | "remove") => {
+    if (action === "remove" && !window.confirm(t(entry.clipCount > 0 ? "删除此剧集？已导出的正片不会删除。" : "删除此剧集？"))) return false;
+    return run(async () => {
+      await comicDramaApi[action](entry.id, entry.revision);
+      if (getDetail()?.series.id === entry.id) load(null);
+      if (sidebarSummary?.seriesId === entry.id) setSidebarSummary(null);
+      if (dramaView && dramaView.drama.id === entry.dramaId) {
+        const fresh = await comicDramaApi.getDrama(dramaView.drama.id).catch(() => null);
+        if (fresh) setDramaView(fresh);
+      }
+      setHistoryRefresh(v => v + 1);
+    });
+  };
 
   return <div className="comic-workspace">
     <aside className="comic-sidebar">
@@ -431,50 +561,55 @@ export function ComicDramaWorkspace({
         onOpenDigitalEmployee={() => void leave(onOpenDigitalEmployee)} onOpenComicDrama={() => void leave(() => navigate(COMIC_DRAMA_ROOT))}
         activeModule="comicDrama" />
       <nav className="comic-nav" aria-label={t("漫剧工厂")}>
-        <button className="comic-nav-new primary" type="button" onClick={() => showDialog("create")}>
+        <button className="comic-nav-new primary" type="button" onClick={() => showDramaDialog("create")}>
           <span className="comic-nav-new-icon" aria-hidden="true"><NewEpisodeIcon size={16} /></span>
-          <span>{t("新建剧集")}</span>
+          <span>{t("新建新剧")}</span>
         </button>
 
         <div className="comic-nav-group">
           <span className="comic-nav-section" aria-hidden="true">{t("创作工坊")}</span>
           <button
             type="button"
-            className={`comic-nav-current${activeNavSummary ? " has-series" : ""}`}
-            aria-current={workspace ? "page" : undefined}
-            onClick={() => void leave(() => navigate(COMIC_DRAMA_ROOT))}
+            className={`comic-nav-current${activeDramaName || activeNavSummary ? " has-series" : ""}`}
+            aria-current={workspace && !series ? "page" : undefined}
+            onClick={() => void leave(() => navigate(activeDramaId ? dramaPath(activeDramaId) : COMIC_DRAMA_ROOT))}
           >
             <span className="comic-nav-icon" data-tone="jade" aria-hidden="true"><ClapperboardIcon size={16} /></span>
             <span className="comic-nav-current-copy">
               <small className="comic-nav-drama-name">
-                {activeNavSummary?.dramaTitle
-                  ? `${t("整部剧集")} · ${activeNavSummary.dramaTitle}`
-                  : t("当前剧集")}
+                {activeDramaName ? t("当前剧目 · 全剧筹备") : t("当前剧目")}
               </small>
               <strong>
-                {activeNavSummary
-                  ? `${activeNavSummary.episodeNo ? `${t("第 {0} 集", [activeNavSummary.episodeNo])} · ` : ""}${activeNavSummary.title}`
-                  : t("工作区")}
+                {activeDramaName ? `《${activeDramaName}》` : t("工作区")}
               </strong>
-              {activeNavSummary && (
+              {dramaView ? (
                 <small className="comic-nav-progress">
+                  {t("角色 {0}", [dramaView.cast.length])} · {t("共 {0} 集", [dramaView.episodes.length])}
+                </small>
+              ) : activeNavSummary ? (
+                <small className="comic-nav-progress">
+                  {`${t("第 {0} 集", [activeNavSummary.episodeNo ?? 1])} · `}
                   {series && activeClip ? `${t("分镜 {0}/{1}", [activeClip.ordinal, detail.clips.length])} · ` : ""}
                   {t("已完成 {0}/{1}", [activeNavSummary.completedCount, activeNavSummary.clipCount])}
                   {activeNavSummary.generatingCount > 0 && <> · {t("生成中 {0}", [activeNavSummary.generatingCount])}</>}
                 </small>
-              )}
+              ) : sidebarDrama?.drama ? (
+                <small className="comic-nav-progress">
+                  {t("角色 {0}", [sidebarDrama.castCount])} · {t("共 {0} 集", [sidebarDrama.episodeCount])}
+                </small>
+              ) : null}
             </span>
           </button>
-          {workspace && series && siblingEpisodes.length > 0 && (
+          {workspace && (dramaView || series) && activeDramaPreset && (
             <div className="comic-nav-episodes" aria-label={t("本剧分集")}>
               {siblingEpisodes.map(ep => (
                 <button
                   key={ep.id}
                   type="button"
                   className="comic-nav-ep-item"
-                  aria-current={ep.id === series.id ? "true" : undefined}
+                  aria-current={ep.id === series?.id ? "true" : undefined}
                   onClick={() => void leave(() => {
-                    if (ep.id !== series.id) {
+                    if (ep.id !== series?.id) {
                       warnGeneratingIfSwitching(ep.id);
                       navigate(seriesPath(ep.id));
                     }
@@ -484,9 +619,9 @@ export function ComicDramaWorkspace({
                   <span className="comic-nav-ep-title">{ep.title}</span>
                 </button>
               ))}
-              {!locked && currentDramaPreset && (
-                <button type="button" className="comic-nav-ep-add" onClick={() => showDialog("addEpisode", currentDramaPreset)}>
-                  ＋ {t("新增分集")}
+              {!locked && !(dramaView?.drama.archivedAt) && (
+                <button type="button" className="comic-nav-ep-add" onClick={() => showDialog("addEpisode", activeDramaPreset)}>
+                  ＋ {siblingEpisodes.length === 0 ? t("创建第 1 集") : t("新增分集")}
                 </button>
               )}
             </div>
@@ -582,19 +717,12 @@ export function ComicDramaWorkspace({
       {loading ? <p role="status">{t("加载中…")}</p> : loadError ?
         <div className="comic-empty"><p>{t("剧集暂时无法读取")}</p>
           <button type="button" onClick={() => setRetry(value => value + 1)}>{t("重试")}</button></div>
-        : history ? <SeriesHistory busy={busy} refreshToken={historyRefresh} focusDramaId={series?.dramaId ?? null}
+        : history ? <SeriesHistory busy={busy} refreshToken={historyRefresh} focusDramaId={activeDramaId}
           open={id => void leave(() => { warnGeneratingIfSwitching(id); navigate(seriesPath(id)); })}
           derive={(id, action, inherit) => run(async () => saved(await comicDramaApi.derive(id, action, inherit)))}
-          change={async (entry, action) => {
-            if (action === "remove" && !window.confirm(t(entry.clipCount > 0 ? "删除此剧集？已导出的正片不会删除。" : "删除此剧集？"))) return false;
-            return run(async () => {
-              await comicDramaApi[action](entry.id, entry.revision);
-              if (getDetail()?.series.id === entry.id) load(null);
-              if (sidebarSummary?.seriesId === entry.id) setSidebarSummary(null);
-              setHistoryRefresh(v => v + 1);
-            });
-          }}
+          change={handleChangeEpisode}
           onCreateDrama={() => showDramaDialog("create")}
+          onOpenDrama={id => openDramaHub(id)}
           onEditDrama={drama => showDramaDialog("edit", drama)}
           onAddEpisode={drama => showDialog("addEpisode", presetFromTree(drama))}
           onDramaChange={async (drama, action) => {
@@ -606,7 +734,9 @@ export function ComicDramaWorkspace({
               if (action === "archive") await comicDramaApi.archiveDrama(drama.id, drama.revision);
               else await comicDramaApi.removeDrama(drama.id, drama.revision);
               if (getDetail()?.series.dramaId === drama.id) load(null);
+              if (dramaView?.drama.id === drama.id) setDramaView(null);
               if (sidebarSummary?.dramaId === drama.id) setSidebarSummary(null);
+              if (sidebarDrama?.dramaId === drama.id) setSidebarDrama(null);
               setHistoryRefresh(v => v + 1);
             });
           }} />
@@ -628,9 +758,33 @@ export function ComicDramaWorkspace({
             openEdit(nextId);
           }}
           browse={() => navigate(editorSourcesPath)} />
-        : !series || !detail ? (
+        : dramaView ? (
+          <DramaHub
+            view={dramaView}
+            busy={busy}
+            initialTab={dramaTabHint}
+            onUpdated={next => {
+              setDramaView(next);
+              if (!next.drama.archivedAt) {
+                setSidebarDrama({
+                  dramaId: next.drama.id, seriesId: null, drama: next.drama,
+                  episodeCount: next.episodes.length, castCount: next.cast.length,
+                });
+              }
+            }}
+            onReload={reloadDramaView}
+            onEditDrama={drama => showDramaDialog("edit", drama)}
+            onAddEpisode={() => { if (activeDramaPreset) showDialog("addEpisode", activeDramaPreset); }}
+            onOpenEpisode={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
+            onDeriveEpisode={(epId, action, inherit) => run(async () => saved(await comicDramaApi.derive(epId, action, inherit)))}
+            onChangeEpisode={handleChangeEpisode}
+            onOpenHistory={() => void leave(() => navigate(historyPath))}
+            onOpenCharacters={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
+            onRegisterFlush={setDramaFlush}
+          />
+        ) : !series || !detail ? (
           <ComicStudioLanding
-            onCreateSeries={() => showDialog("create")}
+            onCreateSeries={() => showDramaDialog("create")}
             onOpenHistory={() => void leave(() => navigate(historyPath))}
             onOpenCharacters={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
             onOpenMaterials={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/materials"))}
@@ -653,7 +807,8 @@ export function ComicDramaWorkspace({
                 warnGeneratingIfSwitching(targetId);
                 navigate(seriesPath(targetId));
               })}
-              onAddEpisode={() => { if (currentDramaPreset) showDialog("addEpisode", currentDramaPreset); }}
+              onAddEpisode={() => { if (activeDramaPreset) showDialog("addEpisode", activeDramaPreset); }}
+              onOpenDrama={() => openDramaHub(series.dramaId, "outline")}
               onEditDrama={() => {
                 if (detail.drama) showDramaDialog("edit", detail.drama);
                 else showDialog("edit");
@@ -746,7 +901,7 @@ export function ComicDramaWorkspace({
               })()}
                <button type="button" onClick={() => void leave(() => navigate(editorPath))}>{t("去剪辑")}</button>
                <button type="button" onClick={() => void leave(() => setBudgetSeriesId(series.id))}>{t("整集费用预估")}</button>
-              <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑剧集")}</button>
+              <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑分集")}</button>
               <button type="button" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(v => !v)}>
                 {t(drawerOpen ? "收起侧栏" : "展开助手")}
               </button>
@@ -760,7 +915,7 @@ export function ComicDramaWorkspace({
           {budgetSeriesId === series.id && <ComicEpisodeBudgetDialog detail={detail} close={() => setBudgetSeriesId(null)} />}
 
           <nav className="comic-steps comic-stage-dock" aria-label={t("制作步骤")}>
-            {steps.map(({ key: step, Icon }, index) => {
+            {steps.map(({ key: step, label, Icon }, index) => {
               const stepBadge = step === "剧本" ? (detail.script ? `v${detail.script.version}` : null)
                 : step === "选角" ? (detail.cast.length ? String(detail.cast.length) : null)
                   : step === "分镜" ? (detail.clips.length ? String(detail.clips.length) : null)
@@ -779,7 +934,7 @@ export function ComicDramaWorkspace({
                 >
                   <span className="comic-step-index">{index + 1}</span>
                   <span className="comic-step-icon" aria-hidden="true"><Icon size={14} /></span>
-                  <span>{t(step)}</span>
+                  <span>{t(label)}</span>
                   {stepBadge && <small className="comic-step-badge">{stepBadge}</small>}
                 </button>
               );
@@ -813,6 +968,35 @@ export function ComicDramaWorkspace({
                   && scriptText.slice(scriptSelection.start, scriptSelection.end).trim().length > 0;
                 return (
                   <section className="comic-edit-card comic-script">
+                    {(detail.drama?.outline?.trim() || detail.drama?.scriptContent?.trim()) && (
+                      <details className="comic-drama-ref-box">
+                        <summary>{t("参考整部剧大纲与总剧本")}</summary>
+                        <div className="comic-drama-ref-body">
+                          {detail.drama?.outline?.trim() && (
+                            <div>
+                              <strong>{t("全剧大纲")}</strong>
+                              <pre>{detail.drama.outline}</pre>
+                            </div>
+                          )}
+                          {detail.drama?.scriptContent?.trim() && (
+                            <div>
+                              <strong>{t("全剧剧本")}</strong>
+                              <pre>{detail.drama.scriptContent.slice(0, 4000)}{detail.drama.scriptContent.length > 4000 ? "…" : ""}</pre>
+                            </div>
+                          )}
+                          <div className="comic-actions">
+                            {!locked && !scriptText.trim() && detail.drama?.scriptContent?.trim() && (
+                              <button type="button" onClick={() => editScript(detail.drama!.scriptContent.slice(0, 20_000))}>
+                                {t("带入全剧剧本到本集")}
+                              </button>
+                            )}
+                            <button type="button" onClick={() => openDramaHub(series.dramaId, "script")}>
+                              {t("去编辑全剧筹备")}
+                            </button>
+                          </div>
+                        </div>
+                      </details>
+                    )}
                     <label>{t("剧本正文")}<textarea aria-label={t("剧本正文")} rows={16} maxLength={20000} disabled={locked}
                       value={scriptText}
                       onChange={event => { setScriptSelection(null); editScript(event.target.value); }}
@@ -853,6 +1037,9 @@ export function ComicDramaWorkspace({
                 );
               })() : stage === "选角" ? (
                 <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
+                  dramaCastCount={detail.dramaCastCount ?? 0}
+                  onSyncDramaCast={() => changeContent((id, revision) => comicDramaApi.syncEpisodeCastFromDrama(id, revision))}
+                  onOpenLibrary={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
                   disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
               ) : stage === "生成" ? (
                 <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}

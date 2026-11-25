@@ -182,6 +182,8 @@ describe("comic-drama route security checks", () => {
       id: dramaId,
       title: "雨夜便利店",
       synopsis: "城市奇幻",
+      outline: "",
+      scriptContent: "",
       styleKey: "thick_painting",
       aspectRatio: "9:16" as const,
       videoModel: "doubao-seedance-2-5",
@@ -189,7 +191,19 @@ describe("comic-drama route security checks", () => {
       archivedAt: null,
     };
     const listDramas = vi.fn(async () => ({ dramas: [], nextCursor: null }));
-    const getDrama = vi.fn(async () => ({ drama: dramaRecord, episodes: [] }));
+    const getDrama = vi.fn(async () => ({ drama: dramaRecord, episodes: [], cast: [] }));
+    const currentDrama = vi.fn(async () => ({
+      dramaId, seriesId: null, drama: dramaRecord, episodeCount: 0, castCount: 0,
+    }));
+    const saveDramaOutline = vi.fn(async (_u: string, _id: string, rev: number, outline: string) => {
+      if (rev !== 2) throw new ComicDramaError("REVISION_CONFLICT", 2);
+      return { ...dramaRecord, outline, revision: 3 };
+    });
+    const saveDramaScript = vi.fn(async (_u: string, _id: string, rev: number, scriptContent: string) => {
+      if (rev !== 3) throw new ComicDramaError("REVISION_CONFLICT", 3);
+      return { ...dramaRecord, scriptContent, revision: 4 };
+    });
+    const syncEpisodeCastFromDrama = vi.fn(async () => ({ seriesRevision: 2, clips: [], script: null, cast: [] }));
     const createDrama = vi.fn(async (_u: string, input: { videoModel?: string | null }) => ({
       drama: { ...dramaRecord, videoModel: input.videoModel ?? null },
       detail: null,
@@ -202,7 +216,10 @@ describe("comic-drama route security checks", () => {
       const base = makeSeries("doubao-seedance-2-5");
       return { ...base, series: { ...base.series, dramaId: dId, title: `${userId}:${input.title}`, episodeNo: 2 } };
     });
-    const repo = { listDramas, getDrama, createDrama, updateDrama, createEpisode } as unknown as ComicDramaRepository;
+    const repo = {
+      listDramas, getDrama, currentDrama, createDrama, updateDrama, saveDramaOutline, saveDramaScript,
+      createEpisode, syncEpisodeCastFromDrama,
+    } as unknown as ComicDramaRepository;
     const app = new Hono<{ Variables: { userId: string } }>();
     app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
     app.route("/", createComicDramaRoutes(repo, async (_u, m) => m === "doubao-seedance-2-5", async () => "doubao-seedance-2-5"));
@@ -257,5 +274,33 @@ describe("comic-drama route security checks", () => {
     expect(epRes.status).toBe(201);
     expect(createEpisode).toHaveBeenCalledTimes(1);
     expect((await epRes.json() as ComicDramaDetail).series.episodeNo).toBe(2);
+
+    const curRes = await app.request("/dramas/current");
+    expect(curRes.status).toBe(200);
+    expect((await curRes.json() as { dramaId: string }).dramaId).toBe(dramaId);
+
+    const outlineRes = await app.request(`/dramas/${dramaId}/outline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 2, outline: "全剧大纲正文" }),
+    });
+    expect(outlineRes.status).toBe(200);
+    expect((await outlineRes.json() as { outline: string }).outline).toBe("全剧大纲正文");
+
+    const scriptRes = await app.request(`/dramas/${dramaId}/script`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 3, content: "全剧总剧本正文" }),
+    });
+    expect(scriptRes.status).toBe(200);
+    expect((await scriptRes.json() as { scriptContent: string }).scriptContent).toBe("全剧总剧本正文");
+
+    const syncRes = await app.request(`/series/${seriesId}/cast/sync-drama`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1 }),
+    });
+    expect(syncRes.status).toBe(200);
+    expect(syncEpisodeCastFromDrama).toHaveBeenCalledWith(ownerId, seriesId, 1);
   });
 });

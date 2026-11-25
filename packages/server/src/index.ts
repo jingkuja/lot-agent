@@ -529,7 +529,10 @@ async function main() {
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`,
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/chat`,
     ], generationRateLimit);
-    app.on("POST", `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`, uploadRateLimit);
+    app.on("POST", [
+      `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`,
+      `${COMIC_DRAMA_API_ROOT}/dramas/:dramaId/import`,
+    ], uploadRateLimit);
     const parser = fileURLToPath(new URL(`./workers/knowledge-parser.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
     const previewSeriesForDirector = service.jobQueue instanceof BullmqJobQueue
       ? createComicSeriesPreviewer({
@@ -566,7 +569,7 @@ async function main() {
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, canSelectComicVideo, async owner => {
       const [prefs, { catalog }] = await Promise.all([comicSettings.getPreferences(owner), comicModelCatalog(owner)]);
       return selectComicVideoModel(catalog?.video ?? [], prefs.defaultVideoModel);
-    }));
+    }, parser));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
         `${COMIC_DRAMA_API_ROOT}/series/:id/generate`,

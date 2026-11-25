@@ -67,7 +67,7 @@ export function DramaDialog({
           styleKey,
           aspectRatio,
           videoModel: videoModel || null,
-          firstEpisodeTitle: get("firstEpisodeTitle") || undefined,
+          createFirstEpisode: false,
         };
       if (await save(payload)) close();
     } finally { setBusy(false); }
@@ -77,19 +77,21 @@ export function DramaDialog({
     <dialog ref={dialog} className="comic-dialog" aria-labelledby="comic-drama-dialog-title"
       onCancel={event => { event.preventDefault(); if (!busy) close(); }}>
       <form onSubmit={submit}>
-        <h2 id="comic-drama-dialog-title">{t(drama ? "编辑整部剧集" : "新建整部剧集")}</h2>
+        <h2 id="comic-drama-dialog-title">{t(drama ? "编辑整部剧集" : "新建新剧")}</h2>
+        {!drama && (
+          <p className="comic-dialog-lead">
+            {t("先创建整部剧，定好大纲、角色和剧本后，再从第 1 集开始创建分集与分镜。")}
+          </p>
+        )}
         <fieldset disabled={busy}>
-          <label>{t("整部剧集名称")}
-            <input name="title" required maxLength={120} defaultValue={drama?.title} autoFocus />
+          <label>{t("剧名")}
+            <input name="title" required maxLength={120} defaultValue={drama?.title}
+              placeholder={t("例如：雨夜便利店")} autoFocus />
           </label>
-          <label>{t("整部剧集简介")}
-            <textarea name="synopsis" maxLength={2000} defaultValue={drama?.synopsis} rows={3} />
+          <label>{t("一句话简介（可选）")}
+            <textarea name="synopsis" maxLength={2000} defaultValue={drama?.synopsis} rows={2}
+              placeholder={t("简短概括题材与核心看点，创建后可编写完整大纲")} />
           </label>
-          {!drama && (
-            <label>{t("第 1 集名称（可选）")}
-              <input name="firstEpisodeTitle" maxLength={120} placeholder={t("留空则与整部剧集同名")} />
-            </label>
-          )}
           <div className="comic-fields">
             <label>{t("默认画风")}
               <ChoiceSelect domain="style" name="styleKey" existing={drama?.styleKey}
@@ -116,7 +118,7 @@ export function DramaDialog({
           {error && <p className="comic-error" role="alert">{error}</p>}
           <div className="comic-actions">
             <button type="button" onClick={close}>{t("取消")}</button>
-            <button className="primary" type="submit">{t(drama ? "保存" : "创建并打开")}</button>
+            <button className="primary" type="submit">{t(drama ? "保存" : "创建新剧")}</button>
           </div>
         </fieldset>
       </form>

@@ -14,6 +14,7 @@ type HierarchyBarProps = {
   locked: boolean;
   onSelectEpisode: (episodeId: string) => void;
   onAddEpisode: () => void;
+  onOpenDrama?: () => void;
   onEditDrama: () => void;
   onOpenDramaHistory: () => void;
   onFocusClip?: () => void;
@@ -22,7 +23,7 @@ type HierarchyBarProps = {
 export function ComicWorkspaceHierarchyBar({
   dramaTitle, episodeCount, episodeId, episodeNo, episodeTitle, episodes,
   activeClipOrdinal, activeClipScene, totalClips, locked,
-  onSelectEpisode, onAddEpisode, onEditDrama, onOpenDramaHistory, onFocusClip,
+  onSelectEpisode, onAddEpisode, onOpenDrama, onEditDrama, onOpenDramaHistory, onFocusClip,
 }: HierarchyBarProps) {
   const { t } = useI18n();
   const sortedEpisodes = episodes.length
@@ -32,9 +33,20 @@ export function ComicWorkspaceHierarchyBar({
     <nav className="comic-hierarchy-bar" aria-label={t("剧集层级路径")}>
       <div className="comic-hierarchy-tier" data-tier="drama">
         <span className="comic-hierarchy-level">{t("整部剧集")}</span>
-        <strong className="comic-hierarchy-name">《{dramaTitle}》</strong>
+        {onOpenDrama ? (
+          <button type="button" className="comic-hierarchy-drama-link" onClick={onOpenDrama}>
+            《{dramaTitle}》
+          </button>
+        ) : (
+          <strong className="comic-hierarchy-name">《{dramaTitle}》</strong>
+        )}
         <small className="comic-hierarchy-count">{t("共 {0} 集", [Math.max(episodeCount, sortedEpisodes.length)])}</small>
         <div className="comic-hierarchy-actions">
+          {onOpenDrama && (
+            <button type="button" className="comic-hierarchy-btn" onClick={onOpenDrama}>
+              {t("全剧筹备")}
+            </button>
+          )}
           {!locked && (
             <button type="button" className="comic-hierarchy-btn" onClick={onEditDrama}>
               {t("编辑整部剧集")}

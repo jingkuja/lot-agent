@@ -2,6 +2,7 @@ import { useI18n } from "../../i18n/index.js";
 import {
   ArrowRightIcon,
   CharactersIcon,
+  EpisodesIcon,
   MaterialsIcon,
   NewEpisodeIcon,
   ScriptIcon,
@@ -23,22 +24,22 @@ const PIPELINE = [
   {
     no: "01",
     tone: "jade",
-    title: "剧本灵感",
-    desc: "AI 导演共创大纲、导入文稿与智能拆镜",
+    title: "整部戏筹备",
+    desc: "创建新剧，先定好全剧大纲、主要角色与总剧本",
     Icon: ScriptIcon,
   },
   {
     no: "02",
     tone: "violet",
-    title: "角色定妆",
-    desc: "锁定角色造型套装、表情槽位与音色",
-    Icon: CharactersIcon,
+    title: "创建分集",
+    desc: "从第 1 集开始拆分剧集，自动带入全剧角色与画风",
+    Icon: EpisodesIcon,
   },
   {
     no: "03",
     tone: "azure",
-    title: "分镜画板",
-    desc: "编排场景景别、运镜轨迹与多角色台词",
+    title: "多分镜编排",
+    desc: "每集下自由创建多分镜，设定景别、运镜与对白",
     Icon: StoryboardIcon,
   },
   {
@@ -74,14 +75,14 @@ export function ComicStudioLanding({
             <span>{t("创作工坊工作台")}</span>
           </div>
           <h1>{t("漫剧工厂")}</h1>
-          <p className="comic-hero-lead">{t("新建剧集，开始编排分镜")}</p>
+          <p className="comic-hero-lead">{t("先立项定大纲、角色与剧本，再建分集与多分镜")}</p>
           <p className="comic-hero-sub">
-            {t("从灵感剧本、角色定妆到分镜生成与五轨精剪，在一个充满活力的导演工作台完成整集漫剧创作。")}
+            {t("沿用传统剧集创作流程：先完成整部戏的大纲、角色与总剧本筹备，再从第 1 集开始拆分分集、编排多分镜、生成画面与五轨精剪。")}
           </p>
           <div className="comic-hero-actions">
             <button type="button" className="primary comic-hero-cta" onClick={onCreateSeries}>
               <NewEpisodeIcon size={17} />
-              <span>{t("新建剧集")}</span>
+              <span>{t("新建新剧")}</span>
             </button>
             <button type="button" className="comic-hero-ghost" onClick={onOpenHistory}>
               <span>{t("浏览历史剧集")}</span>
@@ -89,9 +90,9 @@ export function ComicStudioLanding({
             </button>
           </div>
           <div className="comic-hero-pills" aria-hidden="true">
-            <span>{t("AI 导演共创")}</span>
-            <span>{t("角色一致性锁定")}</span>
-            <span>{t("多轨时间线出片")}</span>
+            <span>{t("大纲 · 角色 · 剧本筹备")}</span>
+            <span>{t("分集自动继承角色")}</span>
+            <span>{t("多分镜生成与剪辑")}</span>
           </div>
         </div>
         <StudioDeskArtwork />

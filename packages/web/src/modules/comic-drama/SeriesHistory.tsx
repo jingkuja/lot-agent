@@ -14,7 +14,8 @@ const statusLabels: Record<ComicDramaSeriesStatus, string> = {
 };
 
 export function SeriesHistory({
-  busy, refreshToken = 0, focusDramaId, open, derive, change, onCreateDrama, onEditDrama, onAddEpisode, onDramaChange,
+  busy, refreshToken = 0, focusDramaId, open, derive, change,
+  onCreateDrama, onOpenDrama, onEditDrama, onAddEpisode, onDramaChange,
 }: {
   busy: boolean;
   refreshToken?: number;
@@ -23,6 +24,7 @@ export function SeriesHistory({
   derive: (id: string, action: "copy" | "sequel", inherit?: boolean) => Promise<boolean>;
   change: (entry: EpisodeEntry, action: "archive" | "remove") => Promise<boolean>;
   onCreateDrama?: () => void;
+  onOpenDrama?: (dramaId: string) => void;
   onEditDrama?: (drama: ComicDrama) => void;
   onAddEpisode?: (drama: ComicDramaTreeEntry) => void;
   onDramaChange?: (drama: ComicDramaTreeEntry, action: "archive" | "remove") => Promise<boolean>;
@@ -62,7 +64,7 @@ export function SeriesHistory({
       {onCreateDrama && (
         <div className="comic-actions">
           <button type="button" className="primary" disabled={busy} onClick={onCreateDrama}>
-            ＋ {t("新建整部剧集")}
+            ＋ {t("新建新剧")}
           </button>
         </div>
       )}
@@ -100,16 +102,32 @@ export function SeriesHistory({
                 <small className="comic-pill" data-tone={drama.status === "exported" ? "done" : drama.status === "in_progress" ? "busy" : "idle"}>
                   {t(statusLabels[drama.status])}
                 </small>
+                {drama.hasOutline && <small className="comic-pill" data-tone="done">{t("大纲已填")}</small>}
+                {(drama.castCount ?? 0) > 0 && <small className="comic-pill" data-tone="frame">{t("角色 {0}", [drama.castCount ?? 0])}</small>}
+                {drama.hasScript && <small className="comic-pill" data-tone="done">{t("总剧本已填")}</small>}
                 <small className="comic-pill" data-tone="frame">{t("共 {0} 集", [drama.episodeCount])}</small>
                 <small className="comic-pill" data-tone="idle">{t("{0} 个分镜", [drama.clipCount])}</small>
               </div>
-              <h2>{drama.title}</h2>
+              {onOpenDrama ? (
+                <h2>
+                  <button type="button" className="comic-drama-title-link" disabled={busy} onClick={() => onOpenDrama(drama.id)}>
+                    {drama.title}
+                  </button>
+                </h2>
+              ) : (
+                <h2>{drama.title}</h2>
+              )}
               {drama.synopsis && <p>{drama.synopsis}</p>}
             </div>
             <div className="comic-actions">
+              {onOpenDrama && (
+                <button type="button" disabled={busy} onClick={() => onOpenDrama(drama.id)}>
+                  {t("全剧筹备")}
+                </button>
+              )}
               {!drama.archivedAt && onAddEpisode && (
                 <button type="button" className="primary" disabled={busy} onClick={() => onAddEpisode(drama)}>
-                  ＋ {t("新增分集")}
+                  ＋ {drama.episodeCount === 0 ? t("创建第 1 集") : t("新增分集")}
                 </button>
               )}
               {!drama.archivedAt && onEditDrama && (

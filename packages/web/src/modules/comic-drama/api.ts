@@ -1,8 +1,10 @@
 import type {
-  ComicCastChange, ComicDrama, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaCreateInput, ComicDramaDetail,
-  ComicDramaEpisodeBrief, ComicDramaEpisodeCreateInput, ComicDramaEpisodeSummary, ComicDramaListing, ComicDramaScriptVersion,
-  ComicDramaSeries, ComicDramaSeriesInput, ComicDramaTreeListing, ComicDramaUpdateInput, ComicSeriesCast,
+  ComicCastChange, ComicDrama, ComicDramaCastContent, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent,
+  ComicDramaCreateInput, ComicDramaCurrentState, ComicDramaDetail, ComicDramaEpisodeCreateInput,
+  ComicDramaEpisodeSummary, ComicDramaListing, ComicDramaScriptVersion, ComicDramaSeries, ComicDramaSeriesInput,
+  ComicDramaTreeListing, ComicDramaUpdateInput, ComicDramaView, ComicScriptImport, ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
+import { COMIC_SCRIPT_DOCX } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
 const dramasRoot = "/comic-drama/dramas";
@@ -14,11 +16,36 @@ const write = <T>(url: string, method: string, body: unknown) => request<T>(url,
 
 export const comicDramaApi = {
   listDramas: (params: URLSearchParams, signal?: AbortSignal) => read<ComicDramaTreeListing>(`${dramasRoot}?${params}`, signal),
-  getDrama: (id: string, signal?: AbortSignal) =>
-    read<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[] }>(dramaPath(id), signal),
+  currentDrama: (signal?: AbortSignal) => read<ComicDramaCurrentState>(`${dramasRoot}/current`, signal),
+  openDrama: (dramaId: string) => write<ComicDramaView>(`${dramasRoot}/current`, "PUT", { dramaId }),
+  getDrama: (id: string, signal?: AbortSignal) => read<ComicDramaView>(dramaPath(id), signal),
   createDrama: (fields: ComicDramaCreateInput) =>
     write<{ drama: ComicDrama; detail: ComicDramaDetail | null }>(dramasRoot, "POST", fields),
   updateDrama: (id: string, fields: ComicDramaUpdateInput) => write<ComicDrama>(dramaPath(id), "PATCH", fields),
+  saveDramaOutline: (id: string, outline: string, expectedRevision: number) =>
+    write<ComicDrama>(`${dramaPath(id)}/outline`, "PUT", { outline, expectedRevision }),
+  saveDramaScript: (id: string, content: string, expectedRevision: number) =>
+    write<ComicDrama>(`${dramaPath(id)}/script`, "PUT", { content, expectedRevision }),
+  importDramaScript: (id: string, file: File, signal?: AbortSignal) => request<ComicScriptImport>(
+    `${dramaPath(id)}/import`,
+    {
+      method: "POST",
+      body: file,
+      signal,
+      headers: { "Content-Type": /\.docx$/i.test(file.name) ? COMIC_SCRIPT_DOCX : "text/plain" },
+    },
+  ),
+  dramaCast: (id: string, signal?: AbortSignal) => read<ComicDramaCastContent>(`${dramaPath(id)}/cast`, signal),
+  changeDramaCast: (id: string, expectedRevision: number, change: ComicCastChange) => {
+    const base = `${dramaPath(id)}/cast`;
+    const target = base + "/" + change.characterId;
+    if (change.action === "add") return write<ComicDramaCastContent>(base, "POST", {
+      expectedRevision, characterId: change.characterId, outfitId: change.outfitId,
+    });
+    if (change.action === "outfit") return write<ComicDramaCastContent>(target, "PATCH", { expectedRevision, outfitId: change.outfitId });
+    if (change.action === "sync") return write<ComicDramaCastContent>(target + "/sync", "POST", { expectedRevision });
+    return write<ComicDramaCastContent>(target, "DELETE", { expectedRevision });
+  },
   createEpisode: (dramaId: string, fields: ComicDramaEpisodeCreateInput) =>
     write<ComicDramaDetail>(`${dramaPath(dramaId)}/episodes`, "POST", fields),
   archiveDrama: (id: string, expectedRevision: number) =>
@@ -34,6 +61,8 @@ export const comicDramaApi = {
   derive: (id: string, action: "copy" | "sequel", inheritCastAndStyle = true) =>
     write<ComicDramaDetail>(`${path(id)}/${action}`, "POST", action === "sequel" ? { inheritCastAndStyle } : {}),
   cast: (id: string, signal?: AbortSignal) => read<{ cast: ComicSeriesCast[]; seriesRevision: number }>(`${path(id)}/cast`, signal),
+  syncEpisodeCastFromDrama: (id: string, expectedRevision: number) =>
+    write<ComicDramaContent>(`${path(id)}/cast/sync-drama`, "POST", { expectedRevision }),
   changeCast: (id: string, expectedRevision: number, change: ComicCastChange) => {
     const root = `${path(id)}/cast`;
     const target = root + "/" + change.characterId;

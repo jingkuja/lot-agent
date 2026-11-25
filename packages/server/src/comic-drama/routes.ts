@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicAddClipSchema, comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema,
-  comicDramaListSchema, comicDramaRevisionSchema, comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
-  comicDramaSetCurrentSchema, comicVideoProfile, createComicDramaSchema, createComicDramaSeriesSchema,
-  createComicEpisodeSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema, updateComicDramaSchema,
-  updateComicDramaSeriesSchema, type ComicDramaRepository,
+  COMIC_DRAMA_SCRIPT_MAX_CHARS, COMIC_SCRIPT_DOCX, COMIC_SCRIPT_FILE_BYTES, comicAddClipSchema, comicCastAddSchema,
+  comicCastOutfitSchema, comicDramaIdSchema, comicDramaListSchema, comicDramaMasterScriptWriteSchema,
+  comicDramaOutlineWriteSchema, comicDramaRevisionSchema, comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
+  comicDramaSetCurrentDramaSchema, comicDramaSetCurrentSchema, comicSequelOptionsSchema, comicVideoProfile,
+  createComicDramaSchema, createComicDramaSeriesSchema, createComicEpisodeSchema, reorderComicDramaClipsSchema,
+  updateComicDramaClipSchema, updateComicDramaSchema, updateComicDramaSeriesSchema, type ComicDramaRepository,
 } from "@lot-agent/core/comic-drama";
+import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
 import { ComicLibraryError } from "./library-db.js";
 import { ComicDramaError } from "./repository.js";
 
@@ -16,12 +18,17 @@ export function createComicDramaRoutes(
   repo: ComicDramaRepository,
   canSelectModel: (owner: string, model: string) => Promise<boolean>,
   resolveDefaultVideoModel?: (owner: string) => Promise<string | null>,
+  parser?: string,
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const jsonLimit = bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
+  const fileLimit = bodyLimit({ maxSize: COMIC_SCRIPT_FILE_BYTES, onError: c => c.json({ code: "DIRECTOR_FILE_TOO_LARGE" }, 413) });
   app.use("/series/*", jsonLimit);
   app.use("/dramas", jsonLimit);
-  app.use("/dramas/*", jsonLimit);
+  app.use("/dramas/*", async (c, next) => {
+    if (c.req.path.endsWith("/import")) return next();
+    return jsonLimit(c, next);
+  });
   app.onError((error, c) => {
     if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
     if (error instanceof ComicDramaError) {
@@ -68,6 +75,18 @@ export function createComicDramaRoutes(
     if (!resolved.ok) return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
     return c.json(await repo.createDrama(owner, { ...input.data, videoModel: resolved.videoModel }), 201);
   });
+  app.get("/dramas/current", async c => {
+    if (!repo.currentDrama) {
+      return c.json({ dramaId: null, seriesId: null, drama: null, episodeCount: 0, castCount: 0 });
+    }
+    return c.json(await repo.currentDrama(c.get("userId")));
+  });
+  app.put("/dramas/current", async c => {
+    if (!repo.openDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaSetCurrentDramaSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.openDrama(c.get("userId"), input.data.dramaId));
+  });
   app.get("/dramas/:dramaId", async c => {
     if (!repo.getDrama) return c.json({ code: "NOT_FOUND" }, 404);
     return c.json(await repo.getDrama(c.get("userId"), seriesId(c.req.param("dramaId"))));
@@ -85,6 +104,70 @@ export function createComicDramaRoutes(
     }
     return c.json(await repo.updateDrama(owner, dramaId, input.data));
   });
+  app.put("/dramas/:dramaId/outline", async c => {
+    if (!repo.saveDramaOutline) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaOutlineWriteSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.saveDramaOutline(
+      c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision, input.data.outline,
+    ));
+  });
+  app.put("/dramas/:dramaId/script", async c => {
+    if (!repo.saveDramaScript) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaMasterScriptWriteSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.saveDramaScript(
+      c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision, input.data.content,
+    ));
+  });
+  app.post("/dramas/:dramaId/import", fileLimit, async c => {
+    if (!repo.getDrama || !parser) return c.json({ code: "NOT_FOUND" }, 404);
+    const { drama } = await repo.getDrama(c.get("userId"), seriesId(c.req.param("dramaId")));
+    if (drama.archivedAt) throw new ComicLibraryError("DIRECTOR_ARCHIVED", 409);
+    const mime = c.req.header("Content-Type")?.split(";", 1)[0].toLowerCase();
+    if (mime !== "text/plain" && mime !== COMIC_SCRIPT_DOCX) throw new ComicLibraryError("DIRECTOR_FILE_TYPE", 415);
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    const parsed = await parseIsolated(parser, { mime, bytes }, c.req.raw.signal, 15_000).catch(() => {
+      throw new ComicLibraryError("DIRECTOR_FILE_INVALID", 400);
+    });
+    const text = parsed.blocks.map(block => block.text).join("\n\n").replace(/\0/g, "").trim();
+    if (!text) throw new ComicLibraryError("DIRECTOR_FILE_INVALID", 400);
+    return c.json({
+      text: text.slice(0, COMIC_DRAMA_SCRIPT_MAX_CHARS).replace(/[\uD800-\uDBFF]$/u, ""),
+      truncated: text.length > COMIC_DRAMA_SCRIPT_MAX_CHARS,
+    });
+  });
+  app.get("/dramas/:dramaId/cast", async c => {
+    if (!repo.readDramaCast) return c.json({ code: "NOT_FOUND" }, 404);
+    return c.json(await repo.readDramaCast(c.get("userId"), seriesId(c.req.param("dramaId"))));
+  });
+  app.post("/dramas/:dramaId/cast", async c => {
+    if (!repo.changeDramaCast) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicCastAddSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const { expectedRevision, characterId, outfitId } = input.data;
+    return c.json(await repo.changeDramaCast(c.get("userId"), seriesId(c.req.param("dramaId")), expectedRevision,
+      { action: "add", characterId, outfitId }), 201);
+  });
+  app.patch("/dramas/:dramaId/cast/:characterId", async c => {
+    if (!repo.changeDramaCast) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicCastOutfitSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const characterId = seriesId(c.req.param("characterId"));
+    return c.json(await repo.changeDramaCast(c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision,
+      { action: "outfit", characterId, outfitId: input.data.outfitId }));
+  });
+  for (const [method, suffix, action] of [["POST", "/sync", "sync"], ["DELETE", "", "remove"]] as const) {
+    app.on(method, "/dramas/:dramaId/cast/:characterId" + suffix, async c => {
+      if (!repo.changeDramaCast) return c.json({ code: "NOT_FOUND" }, 404);
+      const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+      const characterId = seriesId(c.req.param("characterId"));
+      return c.json(await repo.changeDramaCast(
+        c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision, { action, characterId },
+      ));
+    });
+  }
   app.post("/dramas/:dramaId/episodes", async c => {
     if (!repo.createEpisode) return c.json({ code: "NOT_FOUND" }, 404);
     const input = createComicEpisodeSchema.safeParse(await c.req.json().catch(() => null));
@@ -173,6 +256,14 @@ export function createComicDramaRoutes(
     const { expectedRevision, characterId, outfitId } = input.data;
     return c.json(await repo.changeCast(c.get("userId"), seriesId(c.req.param("id")), expectedRevision,
       { action: "add", characterId, outfitId }), 201);
+  });
+  app.post("/series/:id/cast/sync-drama", async c => {
+    if (!repo.syncEpisodeCastFromDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.syncEpisodeCastFromDrama(
+      c.get("userId"), seriesId(c.req.param("id")), input.data.expectedRevision,
+    ));
   });
   app.patch("/series/:id/cast/:characterId", async c => {
     const input = comicCastOutfitSchema.safeParse(await c.req.json().catch(() => null));

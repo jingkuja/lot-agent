@@ -10,6 +10,8 @@ type StoredDrama = {
   ownerId: string;
   title: string;
   synopsis: string;
+  outline: string;
+  scriptContent: string;
   styleKey: string;
   aspectRatio: "9:16" | "16:9" | "1:1";
   videoModel: string | null;
@@ -47,11 +49,16 @@ function createHierarchyPool() {
   const episodes = new Map<string, StoredEpisode>();
   const clips = new Map<string, { id: string; seriesId: string; ordinal: number; revision: number; draft: unknown }>();
   const castRows: Array<{ ownerId: string; seriesId: string; characterId: string; outfitId: string | null; snapshot: unknown }> = [];
+  const dramaCastRows: Array<{ ownerId: string; dramaId: string; characterId: string; outfitId: string; snapshot: unknown }> = [];
+  const scripts: Array<{ seriesId: string; version: number; content: string; source: string }> = [];
   const currentSeries = new Map<string, string | null>();
+  const currentDrama = new Map<string, string | null>();
   const projectDrama = (d: StoredDrama) => ({
     id: d.id,
     title: d.title,
     synopsis: d.synopsis,
+    outline: d.outline,
+    scriptContent: d.scriptContent,
     styleKey: d.styleKey,
     aspectRatio: d.aspectRatio,
     videoModel: d.videoModel,
@@ -85,14 +92,17 @@ function createHierarchyPool() {
     if (sql.startsWith("INSERT INTO lot_comic_drama.cd_dramas")) {
       const id = makeUuid(seq++);
       const now = nextDate();
+      const hasPrep = sql.includes("outline,script_content");
       const row: StoredDrama = {
         id,
         ownerId: String(params[0]),
         title: String(params[1]),
         synopsis: String(params[2] ?? ""),
-        styleKey: String(params[3]),
-        aspectRatio: params[4] as StoredDrama["aspectRatio"],
-        videoModel: (params[5] as string | null) ?? null,
+        outline: hasPrep ? String(params[3] ?? "") : "",
+        scriptContent: hasPrep ? String(params[4] ?? "") : "",
+        styleKey: String(params[hasPrep ? 5 : 3]),
+        aspectRatio: params[hasPrep ? 6 : 4] as StoredDrama["aspectRatio"],
+        videoModel: (params[hasPrep ? 7 : 5] as string | null) ?? null,
         revision: 1,
         archivedAt: null,
         deletedAt: null,
@@ -118,14 +128,32 @@ function createHierarchyPool() {
       if (hit && hit.ownerId === String(params[0])) hit.updatedAt = nextDate();
       return { rows: [], rowCount: hit ? 1 : 0 };
     }
+    if (sql.includes("UPDATE lot_comic_drama.cd_dramas") && sql.includes("SET outline=$2")) {
+      const hit = dramas.get(String(params[0]));
+      if (!hit) return { rows: [], rowCount: 0 };
+      hit.outline = String(params[1] ?? "");
+      hit.revision += 1;
+      hit.updatedAt = nextDate();
+      return { rows: [projectDrama(hit)], rowCount: 1 };
+    }
+    if (sql.includes("UPDATE lot_comic_drama.cd_dramas") && sql.includes("SET script_content=$2")) {
+      const hit = dramas.get(String(params[0]));
+      if (!hit) return { rows: [], rowCount: 0 };
+      hit.scriptContent = String(params[1] ?? "");
+      hit.revision += 1;
+      hit.updatedAt = nextDate();
+      return { rows: [projectDrama(hit)], rowCount: 1 };
+    }
     if (sql.startsWith("UPDATE lot_comic_drama.cd_dramas\n")) {
       const hit = dramas.get(String(params[0]));
       if (!hit) return { rows: [], rowCount: 0 };
       hit.title = String(params[1]);
       hit.synopsis = String(params[2]);
-      hit.styleKey = String(params[3]);
-      hit.aspectRatio = params[4] as StoredDrama["aspectRatio"];
-      hit.videoModel = (params[5] as string | null) ?? null;
+      hit.outline = String(params[3] ?? hit.outline);
+      hit.scriptContent = String(params[4] ?? hit.scriptContent);
+      hit.styleKey = String(params[5]);
+      hit.aspectRatio = params[6] as StoredDrama["aspectRatio"];
+      hit.videoModel = (params[7] as string | null) ?? null;
       hit.revision += 1;
       hit.updatedAt = nextDate();
       return { rows: [projectDrama(hit)], rowCount: 1 };
@@ -280,16 +308,65 @@ function createHierarchyPool() {
         }));
       return { rows: matched, rowCount: matched.length };
     }
-    if (sql.startsWith("INSERT INTO lot_comic_drama.cd_user_state")) {
-      currentSeries.set(String(params[0]), String(params[1]));
+    if (sql.includes("SELECT current_series_id AS \"seriesId\", current_drama_id AS \"dramaId\"")) {
+      const owner = String(params[0]);
+      return {
+        rows: [{ seriesId: currentSeries.get(owner) ?? null, dramaId: currentDrama.get(owner) ?? null }],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes("SELECT drama_id AS \"dramaId\" FROM lot_comic_drama.cd_series")) {
+      const ep = episodes.get(String(params[1]));
+      if (!ep || ep.ownerId !== String(params[0]) || ep.deletedAt || ep.archivedAt) return { rows: [], rowCount: 0 };
+      return { rows: [{ dramaId: ep.dramaId }], rowCount: 1 };
+    }
+    if (sql.includes("AS \"episodeCount\"") && sql.includes("AS \"castCount\"") && !sql.includes("WITH ep_stats AS")) {
+      const owner = String(params[0]);
+      const dramaId = String(params[1]);
+      const episodeCount = [...episodes.values()].filter(
+        ep => ep.ownerId === owner && ep.dramaId === dramaId && !ep.deletedAt && !ep.archivedAt,
+      ).length;
+      const castCount = dramaCastRows.filter(c => c.ownerId === owner && c.dramaId === dramaId).length;
+      return { rows: [{ episodeCount, castCount }], rowCount: 1 };
+    }
+    if (sql.includes("SELECT count(*)::int AS n FROM lot_comic_drama.cd_drama_cast")) {
+      const owner = String(params[0]);
+      const dramaId = String(params[1]);
+      return { rows: [{ n: dramaCastRows.filter(c => c.ownerId === owner && c.dramaId === dramaId).length }], rowCount: 1 };
+    }
+    if (sql.includes("INSERT INTO lot_comic_drama.cd_user_state")) {
+      const owner = String(params[0]);
+      if (sql.includes("VALUES ($1,NULL,$2)")) {
+        currentSeries.set(owner, null);
+        currentDrama.set(owner, String(params[1]));
+      } else {
+        const sId = String(params[1]);
+        currentSeries.set(owner, sId);
+        const dId = (params[2] as string | null) ?? episodes.get(sId)?.dramaId ?? null;
+        if (dId) currentDrama.set(owner, dId);
+      }
       return { rows: [], rowCount: 1 };
     }
-    if (sql.startsWith("UPDATE lot_comic_drama.cd_user_state SET current_series_id=NULL")) {
+    if (sql.includes("UPDATE lot_comic_drama.cd_user_state") && sql.includes("current_drama_id")) {
       const owner = String(params[0]);
       const dramaId = String(params[1]);
       const cur = currentSeries.get(owner);
       if (cur && episodes.get(cur)?.dramaId === dramaId) currentSeries.set(owner, null);
+      if (currentDrama.get(owner) === dramaId) currentDrama.set(owner, null);
       return { rows: [], rowCount: 1 };
+    }
+    if (sql.startsWith("INSERT INTO lot_comic_drama.cd_series_cast") && sql.includes("FROM lot_comic_drama.cd_drama_cast")) {
+      const targetSeriesId = String(params[0]);
+      const owner = String(params[1]);
+      const dramaId = String(params[2]);
+      let inserted = 0;
+      for (const item of dramaCastRows.filter(c => c.ownerId === owner && c.dramaId === dramaId)) {
+        if (!castRows.some(c => c.seriesId === targetSeriesId && c.characterId === item.characterId)) {
+          castRows.push({ ...item, seriesId: targetSeriesId });
+          inserted += 1;
+        }
+      }
+      return { rows: [], rowCount: inserted };
     }
     if (sql.startsWith("INSERT INTO lot_comic_drama.cd_series_cast")) {
       const targetSeriesId = String(params[0]);
@@ -299,6 +376,20 @@ function createHierarchyPool() {
       for (const item of inherited) castRows.push({ ...item, seriesId: targetSeriesId });
       return { rows: [], rowCount: inherited.length };
     }
+    if (sql.startsWith("INSERT INTO lot_comic_drama.cd_scripts")) {
+      const seriesId = String(params[0]);
+      const content = String(params[1]);
+      scripts.push({ seriesId, version: 1, content, source: "user" });
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.includes("UPDATE lot_comic_drama.cd_series SET revision=revision+1")) {
+      const ep = episodes.get(String(params[0]));
+      if (ep) {
+        ep.revision += 1;
+        return { rows: [{ revision: ep.revision, dramaId: ep.dramaId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
     if (sql.includes("FROM lot_comic_drama.cd_clips WHERE series_id=$1 ORDER BY ordinal")) {
       const sId = String(params[0]);
       const rows = [...clips.values()]
@@ -307,8 +398,25 @@ function createHierarchyPool() {
         .map(c => ({ id: c.id, episodeId: c.seriesId, revision: c.revision, selectionRevision: 1, ordinal: c.ordinal, draft: c.draft }));
       return { rows, rowCount: rows.length };
     }
-    if (sql.includes("FROM lot_comic_drama.cd_scripts WHERE series_id=$1")) return { rows: [], rowCount: 0 };
-    if (sql.includes("FROM lot_comic_drama.cd_series_cast")) return { rows: [], rowCount: 0 };
+    if (sql.includes("FROM lot_comic_drama.cd_scripts WHERE series_id=$1")) {
+      const sId = String(params[0]);
+      const hit = scripts.filter(s => s.seriesId === sId).sort((a, b) => b.version - a.version)[0];
+      return hit ? { rows: [{ version: hit.version, content: hit.content }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (sql.includes("FROM lot_comic_drama.cd_series_cast")) {
+      const sId = String(params[0]);
+      const rows = castRows
+        .filter(c => c.seriesId === sId)
+        .map(c => ({ snapshot: c.snapshot, archived: false, hasUpdates: false }));
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.includes("FROM lot_comic_drama.cd_drama_cast")) {
+      const dId = String(params[0]);
+      const rows = dramaCastRows
+        .filter(c => c.dramaId === dId)
+        .map(c => ({ snapshot: c.snapshot, archived: false, hasUpdates: false }));
+      return { rows, rowCount: rows.length };
+    }
     if (sql.includes("FROM lot_comic_drama.cd_clips c")) return { rows: [], rowCount: 0 };
     if (sql.includes("SELECT count(DISTINCT t.target_id)::int AS generating")) return { rows: [{ generating: 0 }], rowCount: 1 };
     if (sql.includes("FROM lot_comic_drama.cd_takes t")) return { rows: [], rowCount: 0 };
@@ -317,7 +425,7 @@ function createHierarchyPool() {
 
   const client: PoolClient = { query, release: vi.fn() } as unknown as PoolClient;
   const pool: Pool = { connect: vi.fn(async () => client), query } as unknown as Pool;
-  return { pool, dramas, episodes, clips, currentSeries };
+  return { pool, dramas, episodes, clips, castRows, dramaCastRows, scripts, currentSeries, currentDrama };
 }
 
 describe("PgComicDramaRepository 3-tier hierarchy", () => {
@@ -415,5 +523,95 @@ describe("PgComicDramaRepository 3-tier hierarchy", () => {
     await repo.removeDrama(ownerId, created.drama.id, updatedDrama.revision + 1);
     const afterDelete = await repo.listDramas(ownerId, { archived: "true" });
     expect(afterDelete.dramas).toHaveLength(0);
+  });
+
+  it("supports drama-first preparation (outline, cast, master script) then Episode 1 creation with automatic cast inheritance", async () => {
+    const store = createHierarchyPool();
+    const repo = new PgComicDramaRepository(store.pool);
+
+    const created = await repo.createDrama(ownerId, {
+      title: "长安雨夜",
+      synopsis: "盛唐悬疑短剧",
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+      videoModel: null,
+      createFirstEpisode: false,
+    });
+    expect(created.detail).toBeNull();
+    expect(store.currentDrama.get(ownerId)).toBe(created.drama.id);
+    expect(store.currentSeries.get(ownerId)).toBeNull();
+
+    const curBefore = await repo.currentDrama(ownerId);
+    expect(curBefore.dramaId).toBe(created.drama.id);
+    expect(curBefore.seriesId).toBeNull();
+    expect(curBefore.episodeCount).toBe(0);
+
+    await expect(repo.saveDramaOutline(ownerId, created.drama.id, 99, "stale")).rejects.toMatchObject({
+      code: "REVISION_CONFLICT",
+    });
+    const withOutline = await repo.saveDramaOutline(ownerId, created.drama.id, 1, "全剧大纲：十起雨夜失踪案串联全季。");
+    expect(withOutline.outline).toContain("十起雨夜失踪案");
+    expect(withOutline.revision).toBe(2);
+
+    const withScript = await repo.saveDramaScript(ownerId, created.drama.id, 2, "【第1集】大理寺灯火通明。");
+    expect(withScript.scriptContent).toContain("大理寺灯火通明");
+    expect(withScript.revision).toBe(3);
+
+    const charA = makeUuid(501);
+    const outfitA = makeUuid(601);
+    store.dramaCastRows.push({
+      ownerId,
+      dramaId: created.drama.id,
+      characterId: charA,
+      outfitId: outfitA,
+      snapshot: {
+        schemaVersion: 1,
+        characterId: charA,
+        name: "沈青",
+        aliases: [],
+        age: "24",
+        personality: "冷静",
+        appearance: "青衫折扇",
+        roleKey: "lead",
+        outfitId: outfitA,
+        outfitName: "官服",
+        assets: [],
+      },
+    });
+
+    const ep1 = await repo.createEpisode(ownerId, created.drama.id, {
+      title: "第一集：朱雀门雨夜",
+      initialScript: "沈青推开木门。",
+    });
+    expect(ep1.series.episodeNo).toBe(1);
+    expect(ep1.script?.content).toBe("沈青推开木门。");
+    expect(ep1.cast.map(c => c.snapshot.name)).toEqual(["沈青"]);
+    expect(ep1.dramaCastCount).toBe(1);
+    expect(store.currentSeries.get(ownerId)).toBe(ep1.series.id);
+
+    // Add a second drama-level character and sync it into Episode 1
+    const charB = makeUuid(502);
+    const outfitB = makeUuid(602);
+    store.dramaCastRows.push({
+      ownerId,
+      dramaId: created.drama.id,
+      characterId: charB,
+      outfitId: outfitB,
+      snapshot: {
+        schemaVersion: 1,
+        characterId: charB,
+        name: "苏晚",
+        aliases: [],
+        age: "22",
+        personality: "机敏",
+        appearance: "红伞油纸",
+        roleKey: "support",
+        outfitId: outfitB,
+        outfitName: "雨披",
+        assets: [],
+      },
+    });
+    const synced = await repo.syncEpisodeCastFromDrama(ownerId, ep1.series.id, ep1.series.revision);
+    expect(synced.cast.map(c => c.snapshot.name).sort()).toEqual(["沈青", "苏晚"]);
   });
 });

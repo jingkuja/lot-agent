@@ -31,6 +31,28 @@ export async function readSeriesCast(db: ComicQuery, seriesId: string): Promise<
   return rows.map(row => ({ ...row, snapshot: comicCastSnapshotSchema.parse(row.snapshot) }));
 }
 
+export async function readDramaCast(db: ComicQuery, dramaId: string): Promise<ComicSeriesCast[]> {
+  const { rows } = await db.query<ComicSeriesCast>(`SELECT s.snapshot,(c.archived_at IS NOT NULL) AS archived,
+    (c.archived_at IS NULL AND s.snapshot IS DISTINCT FROM ${currentSnapshot}) AS "hasUpdates"
+    FROM lot_comic_drama.cd_drama_cast s
+    JOIN lot_comic_drama.cd_characters c ON c.owner_id=s.owner_id AND c.id=s.character_id
+    JOIN lot_comic_drama.cd_character_outfits o ON o.owner_id=s.owner_id AND o.character_id=s.character_id AND o.id=s.outfit_id
+    WHERE s.drama_id=$1 ORDER BY s.snapshot->>'name',s.character_id`, [dramaId]);
+  return rows.map(row => ({ ...row, snapshot: comicCastSnapshotSchema.parse(row.snapshot) }));
+}
+
+export async function syncDramaCastToSeries(db: ComicQuery, owner: string, dramaId: string, seriesId: string): Promise<number> {
+  const result = await db.query(
+    `INSERT INTO lot_comic_drama.cd_series_cast(owner_id,series_id,character_id,outfit_id,snapshot)
+     SELECT owner_id,$1,character_id,outfit_id,snapshot
+     FROM lot_comic_drama.cd_drama_cast
+     WHERE owner_id=$2 AND drama_id=$3
+     ON CONFLICT (series_id, character_id) DO NOTHING`,
+    [seriesId, owner, dramaId],
+  );
+  return result.rowCount ?? 0;
+}
+
 async function capture(db: ComicQuery, owner: string, characterId: string, outfitId: string): Promise<ComicCastSnapshot> {
   const character = await db.query(`SELECT id FROM lot_comic_drama.cd_characters
     WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, characterId]);
@@ -78,6 +100,31 @@ export async function editSeriesCast(db: ComicQuery, owner: string, seriesId: st
      VALUES($1,$2,$3,$4,$5) ON CONFLICT(series_id,character_id) DO UPDATE SET outfit_id=excluded.outfit_id,snapshot=excluded.snapshot`,
     [owner, seriesId, characterId, outfitId, snapshot]);
   if (action === "outfit") await adjustClipCast(db, seriesId, characterId, snapshot);
+}
+
+/** Caller holds the drama row lock and checks its revision before this operation. */
+export async function editDramaCast(db: ComicQuery, owner: string, dramaId: string, change: ComicCastChange) {
+  const { characterId, action } = change;
+  const { rows } = await db.query<{ outfitId: string }>(`SELECT outfit_id AS "outfitId" FROM lot_comic_drama.cd_drama_cast
+    WHERE drama_id=$1 AND owner_id=$2 AND character_id=$3`, [dramaId, owner, characterId]);
+  const existing = rows[0];
+  if (action === "add" && existing) throw new ComicLibraryError("ALREADY_CAST", 409);
+  if (action !== "add" && !existing) libraryMissing();
+  if (action === "remove") {
+    await db.query(
+      `DELETE FROM lot_comic_drama.cd_drama_cast WHERE drama_id=$1 AND character_id=$2 AND owner_id=$3`,
+      [dramaId, characterId, owner],
+    );
+    return;
+  }
+  if (action === "outfit" && change.outfitId === existing.outfitId) return;
+  const outfitId = "outfitId" in change ? change.outfitId : existing.outfitId;
+  const snapshot = await capture(db, owner, characterId, outfitId);
+  await db.query(
+    `INSERT INTO lot_comic_drama.cd_drama_cast(owner_id,drama_id,character_id,outfit_id,snapshot)
+     VALUES($1,$2,$3,$4,$5) ON CONFLICT(drama_id,character_id) DO UPDATE SET outfit_id=excluded.outfit_id,snapshot=excluded.snapshot`,
+    [owner, dramaId, characterId, outfitId, snapshot],
+  );
 }
 
 export async function requireClipCast(db: ComicQuery, seriesId: string, cast: ComicClipCasting | undefined) {
