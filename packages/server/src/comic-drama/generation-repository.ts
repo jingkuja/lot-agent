@@ -10,23 +10,42 @@ import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, library
 import { insertComicCharacterVersion, insertComicMaterialVersion, insertComicMedia } from "./library-repository.js";
 import { requireComicChoice } from "./dictionary.js";
 import { assertComicDramaCompliance } from "./compliance.js";
-import { comicQuoteCurrency } from "./pricing.js";
+import { comicQuoteCurrency, readComicVideoEstimateDeviations } from "./pricing.js";
 
 export type ComicGenerationScope = { kind: "series" | "character" | "material"; id: string };
 export type ComicPrice = { modelId: string; amountMicros: number; unit?: "image" | "second"; currency?: "CNY" | "USD" };
+export type ComicVideoPrices = {
+  modelId: string; unit: "second"; currency: "CNY" | "USD"; clipAmounts: Record<string, number>; videoTokenEstimate?: true;
+};
+type GenerationPrice = ComicPrice | ComicVideoPrices;
 export type FrozenVisualReference = { materialId: string | null; mediaId: string; version: number; styleKey?: string; pinned?: true };
 type FrozenQuote = {
-  stamp: string; price: ComicPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[];
+  stamp: string; price: GenerationPrice; inputs: ComicTakeInput[]; replaceAdopted?: string[];
   visualReferences?: FrozenVisualReference[]; newMaterial?: true;
 };
 type RequestRow = { id: string; taskId: string | null; confirmed: boolean; valid: boolean; frozen: FrozenQuote };
 export type ComicWorkItem = { id: string; slot: number; input: ComicImageTakeInput };
 export const comicJobLockKey = (id: string) => `comic-drama-image:${id}`;
-const taskType = (price: ComicPrice) => price.unit === "second" ? COMIC_VIDEO_TASK : COMIC_IMAGE_TASK;
+const taskType = (price: GenerationPrice) => price.unit === "second" ? COMIC_VIDEO_TASK : COMIC_IMAGE_TASK;
 
 function targetId(input: ComicTakeInput) {
   if ("clipId" in input) return input.clipId;
   return "characterId" in input ? input.characterId : input.materialId;
+}
+
+function pricedAmount(price: GenerationPrice, input: ComicTakeInput) {
+  if ("clipAmounts" in price) return price.clipAmounts[targetId(input)];
+  const quantity = price.unit === "second" && "clipId" in input ? input.durationMs / 1000 : 1;
+  return Math.round(price.amountMicros * quantity);
+}
+
+function priceMatches(saved: GenerationPrice, current: GenerationPrice, inputs: ComicTakeInput[]) {
+  const currency = saved.currency ?? "CNY";
+  if (saved.modelId !== current.modelId || taskType(saved) !== taskType(current) || currency !== (current.currency ?? currency)) return false;
+  if ("clipAmounts" in saved && "clipAmounts" in current) {
+    return saved.videoTokenEstimate === current.videoTokenEstimate && inputs.every(input => pricedAmount(saved, input) === pricedAmount(current, input));
+  }
+  return "amountMicros" in saved && "amountMicros" in current && saved.amountMicros === current.amountMicros;
 }
 function targetKey(input: ComicTakeInput) {
   if ("clipId" in input) return `${input.mode === "keyframe" ? "keyframe" : "video"}:${input.clipId}`;
@@ -77,19 +96,28 @@ export class PgComicGeneration {
     return new Set(inputs.filter(input => keys.has(targetKey(input))).map(targetId));
   }
 
-  async quote(owner: string, scope: ComicGenerationScope, stamp: string, price: ComicPrice | null,
+  async quote(owner: string, scope: ComicGenerationScope, stamp: string, price: GenerationPrice | null,
     inputs: ComicTakeInput[], skipped: ComicGenerationQuote["skipped"], replaceAdopted?: string[],
     visualReferences?: FrozenVisualReference[], defaultCurrency: "CNY" | "USD" = comicQuoteCurrency(),
     newMaterial?: { kind: ComicMaterialImageKind; name: string }): Promise<ComicGenerationQuote> {
     const currency = price?.currency ?? defaultCurrency;
     const busy = await this.busy(owner, inputs);
     inputs = inputs.filter(input => {
-      const reason = busy.has(targetId(input)) ? "BUSY" : !price ? "PRICE_UNAVAILABLE" : null;
+      const amount = price ? pricedAmount(price, input) : undefined;
+      const validAmount = amount !== undefined && Number.isSafeInteger(amount) && amount >= 0 && amount <= Math.floor(Number.MAX_SAFE_INTEGER / 10);
+      const reason = busy.has(targetId(input)) ? "BUSY" : !validAmount ? "PRICE_UNAVAILABLE" : null;
       if (reason) skipped.push({ clipId: targetId(input), reason });
       return !reason;
     });
     if (!inputs.length || !price) return { confirmationId: null, expiresAt: null, items: [], skipped, totalMicros: null, currency };
-    const storedPrice: ComicPrice = { ...price, currency };
+    const storedPrice: GenerationPrice = { ...price, currency };
+    if (visualReferences?.length) {
+      const mediaIds = new Set(inputs.flatMap(input => [
+        ...input.references.map(ref => ref.mediaId), ...("clipId" in input ? (input.timedReferences ?? []).map(ref => ref.mediaId) : []),
+        ...("clipId" in input && input.lastFrame ? [input.lastFrame.mediaId] : []),
+      ]));
+      visualReferences = visualReferences.filter(ref => mediaIds.has(ref.mediaId));
+    }
     const insertQuote = (db: ComicQuery, currentStamp: string) => db.query<{ id: string; expiresAt: Date }>(`INSERT INTO ${namespace}.cd_generation_requests
       (owner_id,series_id,character_id,material_id,frozen,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '10 minutes') RETURNING id,expires_at AS "expiresAt"`,
     [owner, scope.kind === "series" ? scope.id : null, scope.kind === "character" ? scope.id : null,
@@ -102,6 +130,9 @@ export class PgComicGeneration {
       return insertQuote(db, material.stamp);
     }) : await insertQuote(this.pool, stamp);
     const unit = storedPrice.unit ?? "image";
+    const videoInputs = inputs.filter((input): input is ComicFrozenGenerationInput => "clipId" in input && input.mode !== "keyframe");
+    const deviations = "clipAmounts" in storedPrice && storedPrice.videoTokenEstimate
+      ? await readComicVideoEstimateDeviations(this.pool, owner, storedPrice, videoInputs).catch(() => null) : null;
     const items = inputs.map(input => {
       const video = "clipId" in input && input.mode !== "keyframe" ? input : undefined;
       const quantity = unit === "second" && video ? video.durationMs / 1000 : 1;
@@ -111,8 +142,10 @@ export class PgComicGeneration {
       if (video?.lastFrame) referenceVersions.push({ mediaId: video.lastFrame.mediaId, version: video.lastFrame.version, kind: "last_frame" });
       for (const { kind, mediaId, version } of video?.timedReferences ?? []) referenceVersions.push({ kind, mediaId, version });
       const source = video?.timedReferences?.find(ref => ref.kind === "video");
+      const deviation = video ? deviations?.get(video.clipId) : undefined;
       return { clipId: targetId(input), modelId: storedPrice.modelId, unit, quantity,
-        amountMicros: Math.round(storedPrice.amountMicros * quantity), referenceVersions,
+        amountMicros: pricedAmount(storedPrice, input), referenceVersions,
+        ...(deviation ? { videoEstimateDeviation: deviation } : {}),
         ...(video ? { advisories: comicVideoPromptNotices(video) } : {}),
         ...(source && (video?.mode === "edit" || video?.mode === "extend") ? {
           sourceDurationMs: source.durationMs, followsSource: !!video.sourceDuration,
@@ -120,6 +153,7 @@ export class PgComicGeneration {
       };
     });
     return { confirmationId: rows[0].id, expiresAt: rows[0].expiresAt.toISOString(), items, skipped, currency,
+      ...("clipAmounts" in storedPrice && storedPrice.videoTokenEstimate ? { videoTokenEstimate: true } : {}),
       totalMicros: items.reduce((total, item) => total + item.amountMicros, 0) };
   }
 
@@ -142,25 +176,22 @@ export class PgComicGeneration {
   }
 
   async confirm(owner: string, scope: ComicGenerationScope, id: string,
-    currentPrice: (model: string, kind: "image" | "video") => Promise<ComicPrice | null>,
+    currentPrice: (model: string, kind: "image" | "video", inputs: ComicFrozenGenerationInput[]) => Promise<GenerationPrice | null>,
     verifyVideoFiles: (inputs: ComicFrozenGenerationInput[]) => Promise<void>,
   ) {
     const first = await this.request(owner, id, scope);
     if (first.confirmed) return { taskId: first.taskId ?? libraryMissing(), type: taskType(first.frozen.price), created: false };
     if (!first.valid) throw new ComicLibraryError("QUOTE_EXPIRED", 409);
-    const price = await currentPrice(first.frozen.price.modelId, taskType(first.frozen.price) === COMIC_VIDEO_TASK ? "video" : "image");
-    if (price && taskType(first.frozen.price) === COMIC_VIDEO_TASK) {
-      await verifyVideoFiles(first.frozen.inputs.flatMap(input => "clipId" in input && input.mode !== "keyframe" ? [input] : []));
-    }
+    const isVideo = taskType(first.frozen.price) === COMIC_VIDEO_TASK;
+    const videoInputs = first.frozen.inputs.filter((input): input is ComicFrozenGenerationInput => "clipId" in input && input.mode !== "keyframe");
+    const price = await currentPrice(first.frozen.price.modelId, isVideo ? "video" : "image", videoInputs);
+    if (price && isVideo) await verifyVideoFiles(videoInputs);
     return libraryTransaction(this.pool, async db => {
       const row = await this.request(owner, id, scope, db, true);
       if (row.confirmed) return { taskId: row.taskId ?? libraryMissing(), type: taskType(row.frozen.price), created: false };
       if (!row.valid) throw new ComicLibraryError("QUOTE_EXPIRED", 409);
       const { stamp, price: savedPrice, inputs, visualReferences } = row.frozen;
-      const expectedCurrency = savedPrice.currency ?? "CNY";
-      const actualCurrency = price?.currency ?? expectedCurrency;
-      if (!price || price.amountMicros !== savedPrice.amountMicros || price.modelId !== savedPrice.modelId
-        || taskType(price) !== taskType(savedPrice) || actualCurrency !== expectedCurrency) {
+      if (!price || !priceMatches(savedPrice, price, inputs)) {
         throw new ComicLibraryError("PRICE_CHANGED", 409);
       }
       assertComicDramaCompliance(inputs.map((input, index) => ({ field: `prompt[${index}]`, text: input.prompt })));

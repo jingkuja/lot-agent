@@ -11,14 +11,14 @@ import {
   comicVideoProfile, validateComicVideoInput,
   type ComicCharacterGenerateRequest, type ComicCharacterUpload, type ComicDramaDetail, type ComicGenerationPreviewRequest, type ComicGenerationImage,
   type ComicFrozenGenerationInput, type ComicGenerationIssue, type ComicGenerationTimedMedia, type ComicMaterialGenerateRequest,
-  type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicSkippedInvalidReference, type ComicTakeInput,
+  type ComicGenerationQuote, type ComicGenerationReference, type ComicImageTakeInput, type ComicSkippedInvalidReference,
   type ComicNewMaterialGenerateRequest,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_IMAGE_TASK } from "../jobs/task-queues.js";
 import { assertComicDramaCompliance } from "./compliance.js";
 import { createComicBudgetPredictionCache, estimateComicEpisode, type EpisodeBudgetPricing } from "./episode-budget.js";
 import { readComicDictionary } from "./dictionary.js";
-import { type ComicGenerationScope, type ComicPrice, type FrozenVisualReference, PgComicGeneration } from "./generation-repository.js";
+import { type ComicGenerationScope, type ComicPrice, type ComicVideoPrices, type FrozenVisualReference, PgComicGeneration } from "./generation-repository.js";
 import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, libraryTransaction } from "./library-db.js";
 import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary, MeasuredComicReference } from "./media-library.js";
@@ -32,12 +32,15 @@ export type GenerationQueue = {
   canResumePersisted(id: string): Promise<boolean>;
   resumePersisted(id: string, type: string): Promise<void>;
 };
+type QuoteVideoPrice = (
+  owner: string, model: string, inputs: ComicFrozenGenerationInput[], signal: AbortSignal,
+) => Promise<ComicVideoPrices | null>;
 export type ComicSeriesPreviewDeps = {
   pool: Pool;
   series: Pick<PgComicDramaRepository, "get">;
   media: Pick<ComicMediaLibrary, "assertAvailable" | "assertVideoReferenceOrigin" | "inspectVideoReference">;
   quotePrice: (owner: string, model?: string) => Promise<ComicPrice | null>;
-  quoteVideoPrice?: (owner: string, model: string) => Promise<ComicPrice | null>;
+  quoteVideoPrice?: QuoteVideoPrice;
   repo?: Pick<PgComicGeneration, "quote">;
   video?: Pick<PgComicVideo, "frames" | "inspectReferences" | "generationReferences">;
   settings?: Pick<PgComicSettings, "getStylePreset">;
@@ -49,7 +52,7 @@ type Dependencies = {
   series: PgComicDramaRepository;
   media: ComicMediaLibrary;
   quotePrice: (owner: string, model?: string) => Promise<ComicPrice | null>;
-  quoteVideoPrice?: (owner: string, model: string) => Promise<ComicPrice | null>;
+  quoteVideoPrice?: QuoteVideoPrice;
   queue: GenerationQueue;
   accepting?: () => void;
   budgetPricing?: (owner: string, includeText: boolean, signal: AbortSignal) => Promise<EpisodeBudgetPricing>;
@@ -152,7 +155,7 @@ function createSeriesInputResolver(deps: ComicSeriesPreviewDeps) {
         mediaId: stylePreset.media.id, version: 1, mime: stylePreset.media.mime, sizeBytes: stylePreset.media.sizeBytes,
         width: stylePreset.media.width, height: stylePreset.media.height, kind: "style", label: styleDescription ?? detail.series.styleKey,
       } : null;
-    const inputs: ComicTakeInput[] = [];
+    const inputs: ComicFrozenGenerationInput[] = [];
     const skipped: ComicGenerationQuote["skipped"] = [];
     const replaceAdopted = body.targets.filter(target => target.replaceAdopted).map(target => target.clipId);
     const frozenVisualMap = new Map<string, FrozenVisualReference>();
@@ -270,14 +273,14 @@ export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
     if (detail.series.archivedAt) libraryMissing();
     const isVideo = body.mode !== "keyframe";
     const videoModel = detail.series.videoModel;
-    const getPrice = isVideo ? videoModel && deps.quoteVideoPrice ? deps.quoteVideoPrice(owner, videoModel) : Promise.resolve(null) : deps.quotePrice(owner);
-    const [price, { inputs, skipped, replaceAdopted, visualReferences }] = await Promise.all([
-      getPrice, resolve(owner, detail, body, getPrice.then(price => isVideo ? videoModel ?? "" : price?.modelId ?? "unpriced"), signal),
-    ]);
-    if (price && isVideo && inputs.some(input => "clipId" in input && videoReferences(input).length)) {
+    const imagePrice = isVideo ? null : await deps.quotePrice(owner);
+    const model = isVideo ? videoModel ?? "" : imagePrice?.modelId ?? "unpriced";
+    const { inputs, skipped, replaceAdopted, visualReferences } = await resolve(owner, detail, body, Promise.resolve(model), signal);
+    const videoPrice = isVideo && videoModel && inputs.length ? await deps.quoteVideoPrice?.(owner, videoModel, inputs, signal) : null;
+    if (videoPrice && inputs.some(input => Object.hasOwn(videoPrice.clipAmounts, input.clipId) && videoReferences(input).length)) {
       deps.media.assertVideoReferenceOrigin();
     }
-    return repo.quote(owner, scope, String(detail.series.revision), price, inputs, skipped, replaceAdopted, visualReferences);
+    return repo.quote(owner, scope, String(detail.series.revision), videoPrice ?? imagePrice, inputs, skipped, replaceAdopted, visualReferences);
   };
 }
 
@@ -465,19 +468,21 @@ export function createComicGenerationRoutes(deps: Dependencies) {
       const body = comicGenerationConfirmSchema.safeParse(await c.req.json().catch(() => null));
       if (!body.success) return c.json({ code: "INVALID_INPUT" }, 400);
       const { confirmationId } = body.data;
-      const { taskId, type, created } = await repo.confirm(owner, { kind, id: pathId(c.req.param("id")) }, confirmationId, async (model, mediaKind) => {
-        deps.accepting?.();
-        media.assertAvailable();
-        return mediaKind === "video" ? await deps.quoteVideoPrice?.(owner, model) ?? null : quotePrice(owner, model);
-      }, async inputs => {
-        const refs = inputs.flatMap(videoReferences);
-        if (refs.length) media.assertVideoReferenceOrigin();
-        const measure = createReferenceMeasurements(media, owner, c.req.raw.signal);
-        const verified = await Promise.all(refs.map(ref => measureFrozenReference(measure, ref)));
-        if (verified.some(value => !value) || inputs.some(input => validateComicVideoInput(input).length)) {
-          throw new ComicLibraryError("QUOTE_STALE", 409);
-        }
-      });
+      const signal = c.req.raw.signal;
+      const { taskId, type, created } = await repo.confirm(owner, { kind, id: pathId(c.req.param("id")) }, confirmationId,
+        async (model, mediaKind, inputs) => {
+          deps.accepting?.();
+          media.assertAvailable();
+          return mediaKind === "video" ? await deps.quoteVideoPrice?.(owner, model, inputs, signal) ?? null : quotePrice(owner, model);
+        }, async inputs => {
+          const refs = inputs.flatMap(videoReferences);
+          if (refs.length) media.assertVideoReferenceOrigin();
+          const measure = createReferenceMeasurements(media, owner, signal);
+          const verified = await Promise.all(refs.map(ref => measureFrozenReference(measure, ref)));
+          if (verified.some(value => !value) || inputs.some(input => validateComicVideoInput(input).length)) {
+            throw new ComicLibraryError("QUOTE_STALE", 409);
+          }
+        });
       if (created) await queue.publishNewTask(taskId, type).catch(() => {
         console.warn("[comic-drama] generation pending delivery", { taskId });
       });

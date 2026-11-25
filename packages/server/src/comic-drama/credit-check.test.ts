@@ -31,7 +31,7 @@ describe("comic video preflight", () => {
     expect(db.getUserById).toHaveBeenCalledWith("owner");
     expect(gateway.estimateModelCost).toHaveBeenCalledWith("managed-key", {
       model: input.modelId, video: { resolution: "720p", seconds: 8, has_video_input: false, input_image_count: 3 },
-      request_parameters: { resolution: "720p", generate_audio: false, ratio: "adaptive" },
+      request_parameters: { resolution: "720p", generate_audio: false, ratio: "adaptive", estimate_ratio: "16:9" },
     }, expect.any(AbortSignal));
     expect(gateway.getManagedBalance).toHaveBeenCalledWith(42, expect.any(AbortSignal));
     gateway.getManagedBalance.mockResolvedValueOnce({ remainAmount: 0.8, allowBalanceFallback: false });
@@ -60,7 +60,7 @@ describe("comic video preflight", () => {
     await expect(check("owner", { ...input, modelId: model, resolution: "768P", references: [] }, new AbortController().signal)).resolves.toBeNull();
     expect(gateway.estimateModelCost).toHaveBeenCalledWith("managed-key", {
       model, video: { resolution: "768P", seconds: 8, has_video_input: false, input_image_count: 1 },
-      request_parameters: { resolution: "768P", generate_audio: false, ratio: "adaptive" },
+      request_parameters: { resolution: "768P", generate_audio: false, ratio: "adaptive", estimate_ratio: "16:9" },
     }, expect.any(AbortSignal));
   });
 

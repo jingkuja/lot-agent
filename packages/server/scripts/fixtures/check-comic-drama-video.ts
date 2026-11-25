@@ -34,7 +34,7 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
   const submitted: { model: string; scene: string; request: Record<string, unknown> }[] = [];
   const polls: string[] = [];
   const downloads: string[] = [];
-  const state = { disconnect: false, badDownload: false, expireDownload: false, waiting: false, releasePoll: false };
+  const state = { disconnect: false, badDownload: false, expireDownload: false, waiting: false, releasePoll: false, quoteExtra: 0 };
   const creditBalances = new Map<string, number | null>();
   const gatewayCreditBlocks = new Set<string>();
   const provider: VideoGenerationProvider = {
@@ -95,11 +95,11 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
       return availablePoints === null ? { reason: "unavailable" }
         : availablePoints !== undefined && availablePoints < 100 ? { reason: "insufficient", availablePoints, requiredPoints: 100 } : null;
     },
-    download: async url => {
+    download: async (url, _options, consume) => {
       downloads.push(url);
       if (state.badDownload) { state.badDownload = false; throw new Error("fixture download interrupted"); }
       if (state.expireDownload) { state.expireDownload = false; throw Object.assign(new Error("fixture output expired"), { status: 403 }); }
-      return { body, mime: "video/mp4" };
+      return consume({ body: new Response(new Uint8Array(body)).body, mime: "video/mp4" });
     },
   }, job, control.signal));
   return { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks, root };
@@ -108,7 +108,7 @@ export async function mountComicVideoFixture({ pool, media, owner, queue, root }
 type FixtureApp = Hono<{ Variables: { userId: string } }>;
 type Fixture = Awaited<ReturnType<typeof mountComicVideoFixture>>;
 
-export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fixture) {
+export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fixture, advanceClock: (ms: number) => void) {
   const { submitted, polls, downloads, state, queue, creditBalances, gatewayCreditBlocks } = fixture;
   const request = (path: string, method = "GET", data?: unknown, token = "fixture-one") => app.request(COMIC_DRAMA_API_ROOT + path, {
     method, body: data === undefined ? undefined : JSON.stringify(data),
@@ -189,6 +189,13 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.equal(submitted.length, 0);
 
   const mixedQuote = await preview(ep, [ready, rejected, unknown]);
+  assert.equal(mixedQuote.videoTokenEstimate, true);
+  state.quoteExtra = 1;
+  try {
+    const changed = await json<{ code: string }>(ep.path + "/generate", "POST", { confirmationId: mixedQuote.confirmationId }, 409);
+    assert.equal(changed.code, "PRICE_CHANGED");
+    assert.equal(submitted.length, 0, "A changed gateway quote must not submit media");
+  } finally { state.quoteExtra = 0; }
   const [created, duplicate] = await Promise.all([confirm(ep, mixedQuote), confirm(ep, mixedQuote)]);
   assert.equal(created.taskId, duplicate.taskId);
   assert.equal((await pool.query("SELECT queue_name FROM tasks WHERE id=$1", [created.taskId])).rows[0].queue_name, MARKETING_VIDEO_QUEUE);
@@ -487,6 +494,20 @@ export async function verifyComicVideo(app: FixtureApp, pool: Pool, fixture: Fix
   assert.match((requestBody.reference_audio as string[])[0], /\.wav\?/);
   assert.match((requestBody.reference_video as string[])[0], /\.mov\?/);
   assert.equal(requestBody.generate_audio, true);
+  const signedMov = new URL((requestBody.reference_video as string[])[0]);
+  assert.equal((await app.request(signedMov.pathname, { headers: { Authorization: "Bearer fixture-two" } })).status, 404);
+  const fetchMov = () => app.request(signedMov, { headers: { Range: "bytes=0-31" } });
+  const firstRead = await fetchMov();
+  assert.equal(firstRead.status, 206);
+  assert.equal(firstRead.headers.get("content-type"), "video/quicktime");
+  assert.deepEqual(Buffer.from(await firstRead.arrayBuffer()), (await readFile(movementPath)).subarray(0, 32));
+  advanceClock(59 * 60_000);
+  try {
+    assert.equal((await fetchMov()).status, 206);
+    advanceClock(60_000);
+    try { assert.equal((await fetchMov()).status, 404); } finally { advanceClock(-60_000); }
+  } finally { advanceClock(-59 * 60_000); }
+  console.log("PASS signed MOV: scoped private access, 60-minute expiry and provider Range request");
   console.log("PASS per-clip references: actual WAV and MOV metadata, partial batch, fresh verification, and frozen gateway inputs");
   return { episode: ep.detail.series.id, referenceEpisode: referenceEp.detail.series.id };
 }

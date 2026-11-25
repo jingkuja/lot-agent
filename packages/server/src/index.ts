@@ -71,6 +71,7 @@ import { PgVirtualPaymentRepository } from "./payments/repository.js";
 import { createRechargeRoutes } from "./routes/recharge.js";
 import {
   COMIC_DRAMA_API_ROOT, COMIC_MEDIA_PATH, comicDirectorDefinition, comicImageTier, comicVideoModel, selectComicImageModel, selectComicVideoModel,
+  type ComicFrozenGenerationInput,
 } from "@lot-agent/core/comic-drama";
 import { PgComicDramaRepository } from "./comic-drama/repository.js";
 import { PgComicDictionary } from "./comic-drama/dictionary.js";
@@ -93,7 +94,9 @@ import { PgComicSettings } from "./comic-drama/settings-repository.js";
 import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
-import { quoteComicCatalogPrice } from "./comic-drama/pricing.js";
+import { quoteComicImageCatalogPrice, quoteComicVideoPrices } from "./comic-drama/pricing.js";
+import { startComicSettlementSync } from "./comic-drama/settlement.js";
+import { TokenhubBillingLogs } from "./tokenhub/billing-logs.js";
 import { createProductRoutes } from "./routes/product.js";
 import { createImageShareRoutes, createPublicImageShareRoutes } from "./routes/image-shares.js";
 import { initializePosterFonts } from "./generation/poster-render.js";
@@ -444,6 +447,7 @@ async function main() {
   app.route("/api/digital-employee", createDigitalEmployeeRoutes(service.digitalEmployee));
   const comicMedia = new ComicMediaLibrary(resolve(ROOT, "data/comic-drama"), new PgComicLibrary(service.db.pool));
   app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions));
+  let stopComicSettlementSync: (() => Promise<void>) | undefined;
   if (comicDramaEnabled) {
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
       store: rateLimitStore, keyFn: c => c.get("userId"), prefix: "rl:comic-drama", limit: 180, windowMs: 60_000,
@@ -467,15 +471,22 @@ async function main() {
     const quoteComicImagePrice = async (owner: string, modelId?: string) => {
       const [{ catalog }, prefs] = await Promise.all([comicModelCatalog(owner), comicSettings.getPreferences(owner)]);
       const chosen = selectComicImageModel(catalog?.image ?? [], prefs.defaultImageModel);
-      return chosen && (!modelId || chosen === modelId) ? quoteComicCatalogPrice(service.modelCatalog, "image", chosen) : null;
+      return chosen && (!modelId || chosen === modelId) ? quoteComicImageCatalogPrice(service.modelCatalog, chosen) : null;
     };
     const canSelectComicVideo = async (owner: string, model: string) => {
       if (!comicVideoModel(model)) return false;
       const { catalog } = await comicModelCatalog(owner);
       return catalog?.video.some(item => item.id === model) === true;
     };
-    const quoteComicVideoPrice = async (owner: string, modelId: string) => await canSelectComicVideo(owner, modelId)
-      ? quoteComicCatalogPrice(service.modelCatalog, "video", modelId) : null;
+    const billing = new TokenhubBillingLogs(process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1");
+    stopComicSettlementSync = startComicSettlementSync(service.db, billing, service.managedKeysEnabled);
+    const quoteComicVideoPrice = async (owner: string, modelId: string, inputs: ComicFrozenGenerationInput[], signal: AbortSignal) => {
+      if (!comicVideoModel(modelId)) return null;
+      const { key, catalog } = await comicModelCatalog(owner, signal).catch(() => ({ key: null, catalog: null }));
+      signal.throwIfAborted();
+      if (!key || !catalog?.video.some(item => item.id === modelId && item.provider === "openai-video")) return null;
+      return quoteComicVideoPrices(service.tokenhub, billing, key, modelId, inputs, signal);
+    };
     const edits = new PgComicEdits(service.db.pool);
     const speechModel = loadTwinVoiceConfig().targetModel;
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
@@ -651,6 +662,7 @@ async function main() {
   const shutdown = async () => {
     console.log("\nShutting down...");
     stopPosterRefresh();
+    await stopComicSettlementSync?.();
     await stopVirtualPayments();
     await feishuChannel?.stop();
     await service.shutdown();

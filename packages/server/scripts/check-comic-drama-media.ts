@@ -1,8 +1,11 @@
 /** W1 local fixture. Generates its own inputs and never reads user media or calls a model. */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { comicTimelineSchema } from "@lot-agent/core/comic-drama";
+import { composeComicRender } from "../src/comic-drama/render-media.js";
 import { ffmpeg, ffprobe, mediaCapabilities, mediaProcess } from "../src/marketing-video/media.js";
 import { captionAss } from "../src/marketing-video/subtitles.js";
 
@@ -18,7 +21,7 @@ const run = (args: string[]) =>
   mediaProcess(ffmpeg(), ["-nostdin", "-v", "error", "-filter_complex_threads", "2", ...args], { cwd: folder, timeoutMs: 90_000 });
 
 async function check(file: string, seconds: number) {
-  const data = await mediaProcess(ffprobe(), ["-v", "error", "-show_streams", "-show_format", "-of", "json", join(folder, file)]);
+  const data = await mediaProcess(ffprobe(), ["-v", "error", "-show_streams", "-show_format", "-of", "json", resolve(folder, file)]);
   const report = JSON.parse(data);
   const duration = Number(report.format.duration);
   const video = report.streams.find((stream: { codec_type: string }) => stream.codec_type === "video");
@@ -28,8 +31,62 @@ async function check(file: string, seconds: number) {
   console.log(`${file} ${duration.toFixed(3)}s ${size} H.264/AAC`);
 }
 
+async function verifyHighSpec() {
+  const sourceSize = "2160x3840";
+  const colors = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
+  const sources = [
+    { path: join(folder, "high-30s.mp4"), durationMs: 30_000, color: "0x944135", takeId: randomUUID() },
+    { path: join(folder, "high-8s.mp4"), durationMs: 8000, color: "0x287e99", takeId: randomUUID() },
+  ];
+  for (const source of sources) {
+    await run(["-f", "lavfi", "-i", `color=c=${source.color}:s=${sourceSize}:r=24:d=${source.durationMs / 1000},format=yuv420p10le`,
+      "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "pools=2:frame-threads=2:log-level=error",
+      "-threads", "2", "-tag:v", "hvc1", ...colors, source.path]);
+    const metadata = await mediaProcess(ffprobe(), ["-v", "error", "-select_streams", "v:0", "-show_streams", "-of", "json", source.path]);
+    const stream = JSON.parse(metadata).streams[0];
+    assert.deepEqual([stream.codec_name, stream.pix_fmt, stream.width, stream.height, stream.avg_frame_rate],
+      ["hevc", "yuv420p10le", 2160, 3840, "24/1"]);
+  }
+  const timeline = comicTimelineSchema.parse({
+    schemaVersion: 1, aspectRatio: "9:16", voice: [], sfx: [], music: [],
+    video: sources.map(({ takeId, durationMs }, index) => ({
+      id: randomUUID(), takeId, sourceDurationMs: durationMs, inMs: 0, outMs: durationMs, volume: 1,
+      transitionIn: index ? { kind: "crossfade", durationMs: 500 } : { kind: "cut", durationMs: 0 },
+    })),
+    subtitles: ["林夏走进便利店。", "The shop is still open.", "Toko ini masih buka."].map((line, index) => ({
+      id: randomUUID(), anchor: { kind: "timeline", offsetMs: (index + 1) * 1000 }, durationMs: 1000, text: line,
+    })),
+  });
+  const started = performance.now();
+  const output = await composeComicRender(timeline, {
+    videos: new Map(sources.map(source => [source.takeId, source])), audio: new Map(),
+  }, AbortSignal.timeout(180_000));
+  const seconds = (performance.now() - started) / 1000;
+  try {
+    await check(output.file, 37.5);
+    const sample = async (file: string, at: number, key = "AVG", crop = "64:64:16:16") => {
+      const stats = await run(["-ss", String(at), "-i", file, "-frames:v", "1",
+        "-vf", `crop=${crop},format=yuv444p,signalstats,metadata=print:file=-`, "-f", "null", "-"]);
+      const values = ["Y", "U", "V"].map(channel => Number(new RegExp(`lavfi.signalstats.${channel}${key}=([0-9.]+)`).exec(stats)?.[1]));
+      assert.ok(values.every(Number.isFinite), "FFmpeg should report the sampled channels");
+      return values;
+    };
+    const firstColor = await sample(sources[0].path, 1);
+    const secondColor = await sample(sources[1].path, 1);
+    const expectedBlend = firstColor.map((value, index) => (value + secondColor[index]) / 2);
+    const samples = await Promise.all([sample(output.file, 2), sample(output.file, 29.75), sample(output.file, 31)]);
+    const maxDelta = Math.max(...samples.flatMap((values, index) =>
+      values.map((value, channel) => Math.abs(value - [firstColor, expectedBlend, secondColor][index][channel]))));
+    assert.ok(maxDelta <= 6, `Unexpected BT.709 color shift on a solid patch: ${maxDelta}`);
+    const [captions, clear] = await Promise.all([sample(output.file, 1.5, "MAX", "1080:960:0:960"), sample(output.file, 0.5, "MAX", "1080:960:0:960")]);
+    assert.ok(captions[0] > clear[0] + 50, "Subtitle burn-in must change the picture");
+    console.log(`PASS 4K HEVC Main10: 30s + 8s, subtitles and crossfade, 1080p export in ${seconds.toFixed(2)}s, max YUV delta ${maxDelta.toFixed(2)}`);
+  } finally { await output.dispose(); }
+}
+
 try {
   assert.deepEqual(await mediaCapabilities(), { composition: true, subtitles: true }, "FFmpeg composition with libass is required");
+  if (process.argv.includes("--high-spec")) await verifyHighSpec();
   for (const clip of [first, second]) {
     const video = `color=c=${clip.video}:s=${size}:r=${fps}:d=${clip.seconds},drawgrid=w=180:h=240:t=2:c=white@0.2`;
     const audio = `sine=frequency=${clip.tone}:sample_rate=48000:duration=${clip.seconds}`;

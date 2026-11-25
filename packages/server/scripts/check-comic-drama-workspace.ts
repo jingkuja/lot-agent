@@ -22,6 +22,7 @@ import { comicFixturePng, verifyComicLibrary } from "./fixtures/check-comic-dram
 import { verifyComicCast } from "./fixtures/check-comic-drama-cast.js";
 import { mountComicGenerationFixture, verifyComicGeneration } from "./fixtures/check-comic-drama-generation.js";
 import { verifyComicVideo, w6Seedance25 } from "./fixtures/check-comic-drama-video.js";
+import { verifyComicSettlements } from "./fixtures/check-comic-drama-settlements.js";
 import { mountComicEdits, verifyComicEdits } from "./fixtures/check-comic-drama-edits.js";
 import { mountComicRenderFixture, verifyComicRenders } from "./fixtures/check-comic-drama-renders.js";
 import { directorDraft, mountComicDirector, verifyComicDirector } from "./fixtures/check-comic-drama-director.js";
@@ -157,7 +158,8 @@ try {
   await verifyComicLibrary(app, ms => { clockOffset += ms; });
   await verifyComicCast(app);
   if (generation) await verifyComicGeneration(app, pool, generation);
-  const videoFixture = generation ? await verifyComicVideo(app, pool, generation.video) : null;
+  const videoFixture = generation ? await verifyComicVideo(app, pool, generation.video, ms => { clockOffset += ms; }) : null;
+  if (videoFixture) await verifyComicSettlements(pool, owner, videoFixture.episode);
   const videoEpisode = videoFixture?.episode;
   const editFixture = await verifyComicEdits(app, pool, seriesRepo, files, fixtureMediaDir, owner, other, edits);
   if (pauseRender) await verifyComicRenders(app, pool, files, fixtureMediaDir, owner, editFixture, pauseRender);
@@ -202,6 +204,7 @@ try {
           await page.getByRole("button", { name: "直接参考生成", exact: true }).click();
           await page.getByRole("button", { name: "预览待处理费用（2）", exact: true }).click();
           const quote = page.getByRole("dialog", { name: "生成费用预览" });
+          await quote.getByText(/误差范围待通道实测/).waitFor();
           await quote.getByText("输出时长（秒） · 实际 31 · 允许 4–30").waitFor();
           await quote.getByRole("button", { name: "编辑分镜", exact: true }).click();
           await page.getByRole("heading", { name: "分镜 2", exact: true }).waitFor();

@@ -56,7 +56,7 @@ it("marketing video is a visible studio agent with no model-driven write tools",
   expect(marketingVideoDefinition.hidden).not.toBe(true);
 });
 
-it("comic director is a hidden workspace agent exposing all 11 spec tools", () => {
+it("comic director is a hidden workspace agent exposing all 12 spec tools", () => {
   expect(comicDirectorDefinition).toMatchObject({
     id: "comic_drama",
     type: "comic_drama",
@@ -64,7 +64,7 @@ it("comic director is a hidden workspace agent exposing all 11 spec tools", () =
     defaultModelId: "tokenhub-user-selected",
   });
   expect(comicDirectorDefinition.toolNames).toEqual([
-    "read_series", "write_script", "breakdown_script", "continue_series",
+    "read_series", "write_script", "breakdown_script", "continue_series", "propose_enhancement",
     "update_clip", "reorder_clips", "search_characters", "propose_character",
     "search_materials", "check_series", "request_generation",
   ]);

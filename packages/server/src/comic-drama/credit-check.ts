@@ -7,7 +7,7 @@ import type { ModelEstimateRequest, TokenhubClient } from "../tokenhub/client.js
 
 export function comicVideoEstimateUsage(
   input: Pick<ComicFrozenGenerationInput, "modelId" | "resolution" | "durationMs" | "aspectRatio" | "timedReferences"> &
-    Partial<Pick<ComicFrozenGenerationInput, "mode" | "sourceDuration">>,
+    Partial<Pick<ComicFrozenGenerationInput, "mode" | "sourceDuration" | "firstFrame">>,
   imageCount: number,
 ): ModelEstimateRequest {
   const resolution = input.resolution ?? COMIC_VIDEO_RESOLUTION;
@@ -16,14 +16,20 @@ export function comicVideoEstimateUsage(
   const audio = media.filter(ref => ref.kind === "audio");
   const adaptive = input.mode === "edit" || input.mode === "extend"
     || input.mode === "from_keyframe" && comicVideoProfile(input.modelId)?.adaptiveFrame;
+  const source = input.mode === "from_keyframe" ? input.firstFrame : videos[0];
+  const ratio = source ? Math.max(source.width / source.height, source.height / source.width) : null;
+  const estimateRatio = ratio === null ? input.aspectRatio : ratio < 7 / 6 ? "1:1" : ratio < 14 / 9 ? "4:3" : ratio < 37 / 18 ? "16:9" : "21:9";
+  const outputSeconds = input.durationMs / 1000;
   return {
     model: input.modelId,
     video: {
-      resolution, seconds: input.durationMs / 1000, has_video_input: !!videos.length,
+      resolution, seconds: Math.ceil(outputSeconds), has_video_input: !!videos.length,
       input_image_count: imageCount,
     },
     request_parameters: {
       resolution, generate_audio: !!audio.length, ratio: adaptive ? "adaptive" : input.aspectRatio,
+      ...(adaptive ? { estimate_ratio: estimateRatio } : {}),
+      ...(!Number.isInteger(outputSeconds) ? { output_video_seconds: outputSeconds } : {}),
       ...(videos.length ? { reference_video_seconds: videos.reduce((sum, ref) => sum + ref.durationMs / 1000, 0) } : {}),
       ...(audio.length ? { reference_audio_seconds: audio.reduce((sum, ref) => sum + ref.durationMs / 1000, 0) } : {}),
       ...(input.sourceDuration ? { duration: -1 } : {}),

@@ -103,6 +103,9 @@ export function ComicEpisodeBudgetDialog({ detail, close }: { detail: ComicDrama
       {!!result.costs?.quotedUnbilled.length && <p>{t("未出账估算 {0}", [monetary(result.costs.quotedUnbilled)])}</p>}
       {!!result.estimatedMonetaryTotals?.length && <p>{t("预计金额小计 {0}", [monetary(result.estimatedMonetaryTotals)])}</p>}
       {!!result.costs?.pendingReconcileCount && <p>{t("待核对 {0} 笔", [result.costs.pendingReconcileCount])}</p>}
+      {result.items.some(line => line.videoTokenEstimate) && <p className="comic-generation-note">
+        {t("视频 Token 预估会受实际时长、画幅和通道计量规则影响。")}
+      </p>}
       <p className="comic-generation-note">{t("积分预估与货币金额分开显示。实际费用以模型网关账单为准。")}</p>
     </>}
     <div className="comic-actions comic-dialog-actions"><button type="button" onClick={close}>{t("关闭")}</button></div>

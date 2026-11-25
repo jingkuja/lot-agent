@@ -29,6 +29,7 @@ export type ComicQuoteLine = {
   advisories?: ComicGenerationNotice[];
   sourceDurationMs?: number;
   followsSource?: boolean;
+  videoEstimateDeviation?: { low: number; high: number; sampleCount: number };
 };
 export type ComicSkippedInvalidReference = {
   role: "style" | "scene" | "prop";
@@ -51,6 +52,7 @@ export type ComicGenerationQuote = {
   }[];
   totalMicros: number | null;
   currency: "CNY" | "USD";
+  videoTokenEstimate?: true;
 };
 
 const image = z.object({
@@ -168,6 +170,7 @@ export type ComicEpisodeBudgetLine = {
   kind: "keyframe" | "video" | "character" | "material" | "text" | "speech";
   modelId: string | null; clipId?: string; quantity: number; inputTokens?: number; outputTokens?: number;
   estimatedPoints: number | null;
+  videoTokenEstimate?: true;
 };
 export type ComicEpisodeBudget = {
   revision: number; items: ComicEpisodeBudgetLine[]; knownPoints: number; unverifiedCount: number;

@@ -62,15 +62,10 @@ describe("POST /api/models/estimate", () => {
   });
 
   it.each([
-    ["doubao-seedance-2-5", "480p", 90],
-    ["doubao-seedance-2.5", "1280x720", 130],
-    ["doubao-seedance-2-5", "1080p", 160],
-    ["doubao-seedance-2.5", "4K", 220],
-    ["doubao-seedance-2.0", "480p", 80],
     ["other-video", "720", 120],
     ["other-video", "2K", 150],
     ["other-video", "2160x3840", 200],
-  ])("estimates %s at %s on the Agent server", async (model, resolution, rate) => {
+  ])("keeps the local estimate for %s at %s when the channel has no token formula", async (model, resolution, rate) => {
     const service = svc(null);
     vi.mocked(service.tokenhub.listModels).mockResolvedValue({
       llm: [], image: [], video: [model], video_token_models: [model],
@@ -82,6 +77,28 @@ describe("POST /api/models/estimate", () => {
     expect(await res.json()).toEqual({ model, pricingScheme: "video_token", estimatedPoints: rate * 5, estimatedQuota: null });
     expect(service.tokenhub.listModels).toHaveBeenCalledWith("sk-user", expect.any(AbortSignal));
     expect(service.tokenhub.estimateModelCost).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["doubao-seedance-2-0", "480p", 864 * 496],
+    ["doubao-seedance-2.5", "1280x720", 1280 * 720],
+    ["doubao-seedance-2-5", "1080p", 1920 * 1080],
+    ["doubao-seedance-2.5", "4K", 3840 * 2160],
+  ])("prices %s at %s with the owner's gateway rate and measured input seconds", async (model, resolution, pixels) => {
+    const service = svc(null);
+    vi.mocked(service.tokenhub.listModels).mockResolvedValue({ llm: [], image: [], video: [model], video_token_models: [model] });
+    const quote = { model, pricingScheme: "video_token", estimatedQuota: 55_000, estimatedPoints: 11 };
+    service.tokenhub.estimateModelCost = vi.fn().mockResolvedValue(quote);
+    const video = { resolution, seconds: 8, has_video_input: true };
+    for (const generate_audio of [false, true]) {
+      const request_parameters = { ratio: "16:9", reference_video_seconds: 2.5, generate_audio };
+      const res = await submit(service, { model, video, request_parameters });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(quote);
+      expect(service.tokenhub.estimateModelCost).toHaveBeenLastCalledWith("sk-user", {
+        model, video: { ...video, total_tokens: Math.ceil(10.5 * pixels * 24 / 1024) }, request_parameters,
+      }, expect.any(AbortSignal));
+    }
   });
 
   it("requires a usable duration and resolution for a token-priced video", async () => {

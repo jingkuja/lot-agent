@@ -38,6 +38,15 @@ export async function fetchPublicBinary(
   url: string,
   opts: FetchPublicBinaryOptions
 ): Promise<{ body: Buffer; mime: string }> {
+  return withPublicDownload(url, opts, async ({ body, mime }) => ({ body: Buffer.from(await new Response(body).arrayBuffer()), mime }));
+}
+
+/** Consume a bounded response stream while the pinned connection and its deadline are active. */
+export async function withPublicDownload<T>(
+  url: string,
+  opts: FetchPublicBinaryOptions,
+  consume: (result: { body: ReadableStream<Uint8Array> | null; mime: string }) => Promise<T>,
+): Promise<T> {
   const {
     maxBytes,
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -84,39 +93,20 @@ export async function fetchPublicBinary(
         throw new Error(`download exceeds maxBytes (${contentLength} > ${maxBytes})`);
       }
 
-      const body = await readBodyWithLimit(res, maxBytes, signal);
-      return { body, mime };
+      let total = 0;
+      const body = res.body?.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          total += chunk.byteLength;
+          if (total > maxBytes) throw new Error(`download exceeds maxBytes (${total} > ${maxBytes})`);
+          controller.enqueue(chunk);
+        },
+      }), { signal }) ?? null;
+      try { return await consume({ body, mime }); }
+      finally { void body?.cancel().catch(() => {}); }
     }
     throw new Error("unreachable");
   } finally {
     deadline.dispose();
-  }
-}
-
-/** Reads `res.body` incrementally, aborting as soon as the running total
- * exceeds `maxBytes` — never buffers the whole response via `arrayBuffer()`. */
-async function readBodyWithLimit(res: Response, maxBytes: number, signal: AbortSignal): Promise<Buffer> {
-  if (!res.body) return Buffer.alloc(0);
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await withAbort(reader.read(), signal);
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > maxBytes) {
-          void reader.cancel().catch(() => {});
-          throw new Error(`download exceeds maxBytes (${maxBytes})`);
-        }
-        chunks.push(value);
-      }
-    }
-    return Buffer.concat(chunks.map((c) => Buffer.from(c)));
-  } finally {
-    void reader.cancel().catch(() => {});
-    reader.releaseLock();
   }
 }
 

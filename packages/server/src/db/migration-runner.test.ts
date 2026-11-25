@@ -160,7 +160,8 @@ describe("runMigrations", () => {
         [89, "comic-drama-edits"], [90, "comic-drama-renders"], [91, "comic-drama-delivery"],
         [92, "comic-drama-director-actions"], [93, "comic-drama-operations"], [94, "comic-drama-speech-release"],
         [95, "comic-drama-v1-features"], [96, "assignment-schedules"], [97, "comic-drama-v1-remediation"],
-        [98, "comic-video-credits"], [99, "comic-drama-material-generation"]]);
+        [98, "comic-video-credits"], [99, "comic-drama-material-generation"],
+        [100, "comic-drama-reference-video"], [101, "comic-drama-settlements"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

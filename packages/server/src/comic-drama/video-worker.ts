@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
-import { fetchPublicBinary, ProviderError, type VideoGenerationProvider, type VideoGenerationRequest } from "@lot-agent/core";
+import { withPublicDownload, ProviderError, type VideoGenerationProvider, type VideoGenerationRequest } from "@lot-agent/core";
 import { COMIC_VIDEO_RESOLUTION, comicVideoModel, comicVideoProfile } from "@lot-agent/core/comic-drama";
 import { definiteRejection, gatewayFailure } from "../marketing-video/run.js";
 import type { createComicVideoCreditCheck } from "./credit-check.js";
@@ -16,13 +16,14 @@ const sizes = {
   "2K": { "9:16": "1152x2048", "16:9": "2048x1152", "1:1": "1440x1440" },
   "4k": { "9:16": "2160x3840", "16:9": "3840x2160", "1:1": "2160x2160" },
 };
+const DOWNLOAD_TIMEOUT_MS = 300_000;
 type Job = { id: string; userId: string };
 type Dependencies = {
   pool: Pool;
   media: ComicMediaLibrary;
   provider: (owner: string, model: string) => Promise<VideoGenerationProvider>;
   checkCredits: ReturnType<typeof createComicVideoCreditCheck>;
-  download?: typeof fetchPublicBinary;
+  download?: typeof withPublicDownload;
   pollIntervalMs?: number;
   cancelIntervalMs?: number;
 };
@@ -64,14 +65,13 @@ async function submit(
   signal: AbortSignal, takeSignal: AbortSignal, creditOverride: boolean,
 ) {
   deps.media.assertAvailable();
-  const request = await prepareComicVideoRequest(deps.media, owner, take);
-  takeSignal.throwIfAborted();
   const check = await deps.checkCredits(owner, take.input, takeSignal);
   takeSignal.throwIfAborted();
   if (check && (check.reason !== "insufficient" || !creditOverride)) {
     return await repo.pauseForCredits(owner, take.id, check) ? { paused: true } as const : undefined;
   }
   const provider = await getProvider();
+  const request = await prepareComicVideoRequest(deps.media, owner, take);
   takeSignal.throwIfAborted();
   if (!await repo.claim(owner, take.id)) return;
   // A take cancel after this claim stops local work once the provider response is recorded.
@@ -132,7 +132,15 @@ async function takeWork(deps: Dependencies, repo: PgComicVideo, owner: string, t
       await delay(deps.pollIntervalMs ?? 5000, undefined, { signal: pollSignal });
     }
   };
-  const download = (url: string) => (deps.download ?? fetchPublicBinary)(url, { maxBytes: COMIC_VIDEO_MAX_BYTES, timeoutMs: 120_000, signal: takeSignal });
+  const download = (url: string) => (deps.download ?? withPublicDownload)(
+    url, { maxBytes: COMIC_VIDEO_MAX_BYTES, timeoutMs: DOWNLOAD_TIMEOUT_MS, signal: takeSignal },
+    ({ body }) => {
+      const request = new Request("http://comic-drama.invalid/generated-video", {
+        method: "POST", body, signal: takeSignal, duplex: "half", headers: { "Content-Type": "video/mp4" },
+      } as RequestInit & { duplex: "half" });
+      return deps.media.upload(request, owner, "generated-video", media => repo.save(owner, take.id, media));
+    },
+  );
 
   try {
     await observe();
@@ -145,19 +153,14 @@ async function takeWork(deps: Dependencies, repo: PgComicVideo, owner: string, t
     const url = checkpoint.outputUrl ?? await lookup(vendor);
     if (!url) return;
     takeSignal.throwIfAborted();
-    let output;
-    try { output = await download(url); }
+    try { await download(url); }
     catch (error) {
       const status = (error as { status?: number } | null)?.status;
       if (!checkpoint.outputUrl || ![401, 403, 404, 410].includes(status ?? 0)) throw error;
       const refreshed = await lookup(vendor);
       if (!refreshed) return;
-      output = await download(refreshed);
+      await download(refreshed);
     }
-    const request = new Request("http://comic-drama.invalid/generated-video", {
-      method: "POST", body: new Uint8Array(output.body), signal: takeSignal, headers: { "Content-Type": "video/mp4" },
-    });
-    await deps.media.upload(request, owner, "generated-video", media => repo.save(owner, take.id, media));
   } catch {
     const receipt = await repo.receipt(owner, take.id);
     if (receipt.state === "submitting") {

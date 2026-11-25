@@ -18,5 +18,5 @@ export {
 } from "./ask-user.js";
 export { assertPublicUrl, resolvePublicUrl, isPrivateAddress, SsrfError } from "./net-guard.js";
 export type { NetGuardOptions, ResolvedAddress } from "./net-guard.js";
-export { fetchPublicBinary } from "./net-fetch.js";
+export { fetchPublicBinary, withPublicDownload } from "./net-fetch.js";
 export type { FetchPublicBinaryOptions } from "./net-fetch.js";

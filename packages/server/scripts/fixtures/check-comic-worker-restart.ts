@@ -19,7 +19,7 @@ import { ComicMediaLibrary } from "../../src/comic-drama/media-library.js";
 import { runComicVideoGeneration } from "../../src/comic-drama/video-worker.js";
 import { PgComicVideo } from "../../src/comic-drama/video-repository.js";
 
-const model = "grok-imagine-video-1.5";
+const model = "doubao-seedance-2-0";
 const vendorId = "w7-fixture-paid-once";
 const mediaFor = (db: DB, root: string) => new ComicMediaLibrary(root, new PgComicLibrary(db.pool), { masterKey: "cd".repeat(32) });
 const jobLimits = { concurrency: 2, perUser: 1, segments: 2 };
@@ -72,7 +72,9 @@ export async function checkComicWorkerRestart(db: DB, redis: string, publisher: 
     const price = { modelId: model, unit: "second", amountMicros: 500_000 } as const;
     const { confirmationId } = await gen.quote(owner, scope, String(seriesRevision), price, [frozen.input], []);
     assert(confirmationId);
-    const { taskId, type } = await gen.confirm(owner, scope, confirmationId, async () => price);
+    const { taskId, type } = await gen.confirm(owner, scope, confirmationId, async () => price, async inputs => {
+      assert.deepEqual(inputs, [frozen.input]);
+    });
     const request = () => gen.status(owner, confirmationId);
     const { id: takeId } = (await request()).takes[0];
     const events: string[] = [];
@@ -103,7 +105,7 @@ export async function checkComicWorkerRestart(db: DB, redis: string, publisher: 
           return { status: "completed", progress: 100, url: "https://fixture.invalid/w7.mp4" };
         },
       }),
-      download: async () => ({ body, mime: "video/mp4" }),
+      download: async (_url, _options, consume) => consume({ body: new Response(new Uint8Array(body)).body, mime: "video/mp4" }),
     }, job, control.signal));
     await until(async () => !(await request()).active, 75_000, "replacement completes the stalled BullMQ job");
     const result = await request();

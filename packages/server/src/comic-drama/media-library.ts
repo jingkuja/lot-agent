@@ -19,7 +19,8 @@ import { ComicLibraryError, libraryMissing } from "./library-db.js";
 const imageFormats: Record<string, string> = { jpeg: "jpg", png: "png", webp: "webp" };
 const allowedMime = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"], ["audio/wav", "wav"], ["audio/mpeg", "mp3"]]);
 const MiB = 1024 * 1024;
-export const COMIC_VIDEO_MAX_BYTES = 80 * MiB;
+export const COMIC_VIDEO_MAX_BYTES = 256 * MiB;
+const COMIC_VIDEO_REFERENCE_TTL_MS = 60 * 60_000;
 
 type MeasuredAudio = Omit<Extract<ComicGenerationTimedMedia, { kind: "audio" }>, "mediaId" | "version" | "label">;
 type MeasuredVideo = Omit<Extract<ComicGenerationTimedMedia, { kind: "video" }>, "mediaId" | "version" | "label">;
@@ -231,7 +232,8 @@ export class ComicMediaLibrary {
   private sign(owner: string, id: string, key: string, external = false) {
     try {
       return signPrivateMaterial({ id, user_id: owner, storage_key: key, url: "", type: "upload", is_private: true },
-        { ...this.signing, publicBaseUrl: external ? this.signing.publicBaseUrl : "", materialPath: COMIC_MEDIA_PATH });
+        { ...this.signing, publicBaseUrl: external ? this.signing.publicBaseUrl : "", materialPath: COMIC_MEDIA_PATH,
+          materialTtlMs: external ? COMIC_VIDEO_REFERENCE_TTL_MS : undefined });
     } catch { throw new ComicLibraryError("MEDIA_UNAVAILABLE", 503); }
   }
 
@@ -253,11 +255,11 @@ export class ComicMediaLibrary {
     const app = new Hono();
     const guard = createUploadAccessGuard({
       getUploadByStorageKey: async key => {
-        if (!/^[0-9a-f-]{36}(?:-thumb)?\.(?:jpg|png|webp|mp3|wav|mp4)$/.test(key)) return null;
+        if (!isGenerationMediaKey(key) && !/^[a-f0-9-]{36}-thumb\.webp$/.test(key)) return null;
         const row = await this.repo.file(key);
         return row ? { id: row.id, user_id: row.owner, storage_key: key, url: "", type: "upload", is_private: true } : null;
       },
-    }, sessions, this.signing);
+    }, sessions, { ...this.signing, materialPath: COMIC_MEDIA_PATH, materialTtlMs: COMIC_VIDEO_REFERENCE_TTL_MS });
     app.use("*", async (c, next) => {
       c.header("Referrer-Policy", "no-referrer");
       await next();

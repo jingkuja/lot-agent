@@ -39,6 +39,7 @@ export const messages: Record<string, { en: string; id: string }> = {
   "重新估算": { en: "Recalculate", id: "Hitung ulang" },
   "正在估算费用…": { en: "Estimating costs…", id: "Memperkirakan biaya…" },
   "待报价": { en: "Estimate unavailable", id: "Estimasi belum tersedia" },
+  "待核实": { en: "Pending verification", id: "Menunggu verifikasi" },
   "{0} 积分/秒": { en: "{0} credits/sec", id: "{0} kredit/detik" },
   "{0} 积分/句": { en: "{0} credits/line", id: "{0} kredit/baris" },
   "{0} 积分/张": { en: "{0} credits/image", id: "{0} kredit/gambar" },
@@ -276,6 +277,18 @@ export const messages: Record<string, { en: string; id: string }> = {
   "{0} 张参考图": { en: "{0} reference image(s)", id: "{0} gambar referensi" },
   "暂不能生成": { en: "Generation unavailable", id: "Pembuatan tidak tersedia" },
   "预估合计": { en: "Estimated total", id: "Total perkiraan" },
+  "视频 Token 预估会受实际时长、画幅和通道计量规则影响。": {
+    en: "Video token estimates vary with the actual duration, aspect ratio, and provider billing rules.",
+    id: "Perkiraan token video bergantung pada durasi aktual, rasio aspek, dan aturan penyedia.",
+  },
+  "视频 Token 预估会受实际时长、画幅和通道计量规则影响。误差范围待通道实测。": {
+    en: "Video token estimates vary with the actual duration, aspect ratio, and provider billing rules. The error range is pending channel testing.",
+    id: "Perkiraan token video bergantung pada durasi aktual, rasio aspek, dan aturan penyedia. Rentang selisih masih menunggu pengujian.",
+  },
+  "同规格近 {0} 笔实扣相对估价的常见偏差为 {1} 至 {2}": {
+    en: "For {0} recent charges with similar settings, the typical difference from the estimate was {1} to {2}.",
+    id: "Pada {0} tagihan terakhir dengan pengaturan serupa, selisih dari perkiraan umumnya {1} hingga {2}.",
+  },
   "实际费用以模型网关账单为准。": { en: "Final charges follow the model gateway's bill.", id: "Biaya akhir mengikuti tagihan gateway model." },
   "确认费用并生成": { en: "Confirm cost and generate", id: "Konfirmasi biaya dan buat" },
   "图片已入库": { en: "Image saved", id: "Gambar tersimpan" },

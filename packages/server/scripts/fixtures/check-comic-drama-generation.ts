@@ -14,6 +14,7 @@ import { runComicImageGeneration } from "../../src/comic-drama/generation-worker
 import type { PgComicLibrary } from "../../src/comic-drama/library-repository.js";
 import type { ComicMediaLibrary } from "../../src/comic-drama/media-library.js";
 import type { PgComicDramaRepository } from "../../src/comic-drama/repository.js";
+import { quoteComicVideoPrices } from "../../src/comic-drama/pricing.js";
 import { DB } from "../../src/db/database.js";
 import { BullmqJobQueue } from "../../src/jobs/bullmq-queue.js";
 import { COMIC_IMAGE_TASK, MARKETING_VIDEO_QUEUE } from "../../src/jobs/task-queues.js";
@@ -74,8 +75,20 @@ export async function mountComicGenerationFixture(deps: {
   deps.app.route(COMIC_DRAMA_API_ROOT, createComicGenerationRoutes({
     ...deps,
     quotePrice: async owner => owner === deps.owner ? { modelId: "fixture-image", amountMicros: state.price } : null,
-    quoteVideoPrice: async (owner, modelId) => owner === deps.owner && [w6Seedance20, w6Seedance25].includes(modelId) ?
-      { modelId, amountMicros: 500_000, unit: "second" } : null,
+    quoteVideoPrice: async (owner, modelId, inputs, signal) => {
+      const models = [w6Seedance20, w6Seedance25];
+      if (owner !== deps.owner || !models.includes(modelId)) return null;
+      return quoteComicVideoPrices({
+        listModels: async () => ({ llm: [], image: [], video: models, video_token_models: models }),
+        estimateModelCost: async (key, usage) => {
+          assert.equal(key, "fixture-video-key");
+          assert.ok(usage.video?.total_tokens && usage.video.seconds);
+          const seconds = usage.video.seconds + Number(usage.request_parameters?.reference_video_seconds ?? 0);
+          const estimatedPoints = (seconds * 50 + video.state.quoteExtra) / 7;
+          return { model: usage.model, pricingScheme: "video_token", estimatedPoints, estimatedQuota: Math.round(estimatedPoints * 5000) };
+        },
+      }, { units: async () => ({ quotaPerUnit: 500_000, currency: "CNY", exchangeRate: 7 }) }, "fixture-video-key", modelId, inputs, signal);
+    },
     budgetPricing: async () => ({
       imageModel: "fixture-image", textModel: null, speechModel: null,
       predict: async usage => ({ estimatedPoints: usage.video ? 25 * (usage.video.seconds ?? 0) : 20, pricingScheme: "fixture" }),

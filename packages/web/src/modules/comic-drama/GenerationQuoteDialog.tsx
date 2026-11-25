@@ -83,6 +83,7 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted,
   const priceUnverified = quote.totalMicros === null && quote.skipped.some(item => item.reason === "PRICE_UNAVAILABLE");
   const format = (micros: number | null) => micros === null ? (priceUnverified ? t("费用待核实") : "—") : currency.format(micros / 1_000_000);
   const numberFormat = new Intl.NumberFormat(locale, { maximumFractionDigits: 3 });
+  const percent = new Intl.NumberFormat(locale, { style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 0 });
   const describe = (issue: ComicGenerationIssue) => {
     const name = issue.label && Object.hasOwn(referenceKindLabels, issue.label)
       ? t(referenceKindLabels[issue.label as keyof typeof referenceKindLabels]) : issue.label ?? issue.mediaId?.slice(0, 8);
@@ -133,6 +134,9 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted,
             [numberFormat.format(item.sourceDurationMs / 1000)])}</small>}
           {item.followsSource && item.sourceDurationMs !== undefined && item.quantity * 1000 !== Math.round(item.sourceDurationMs)
             && <small>{t("自动时长按模型上限估价")}</small>}
+          {item.videoEstimateDeviation && <small>{t("同规格近 {0} 笔实扣相对估价的常见偏差为 {1} 至 {2}", [
+            item.videoEstimateDeviation.sampleCount, percent.format(item.videoEstimateDeviation.low), percent.format(item.videoEstimateDeviation.high),
+          ])}</small>}
           {item.advisories?.map(advisory => <small key={advisory.code + (advisory.unit ?? "")}>{advisory.code === "PROMPT_LIMIT_UNVERIFIED"
             ? t("提示词硬上限待核实")
             : t(advisory.unit === "chars" ? "最终提示词含 {0} 个汉字，建议最多 {1} 个"
@@ -159,6 +163,9 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted,
       </li>)}
     </ul>
     <div className="comic-quote-total"><strong>{t("预估合计")}</strong><strong>{format(quote.totalMicros)}</strong></div>
+    {quote.videoTokenEstimate && quote.items.some(item => !item.videoEstimateDeviation) && <p className="comic-generation-note">
+      {t("视频 Token 预估会受实际时长、画幅和通道计量规则影响。误差范围待通道实测。")}
+    </p>}
     {quote.items.length > 0 && <p className="comic-generation-note">{t("实际费用以模型网关账单为准。")}</p>}
     {(error || expired) && <p className="comic-error" role="alert">{t(error || "报价已过期，请重新询价")}</p>}
     <div className="comic-actions comic-dialog-actions">

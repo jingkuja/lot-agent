@@ -105,9 +105,11 @@ export async function estimateComicEpisode(
   }));
   signal.throwIfAborted();
   const items = plans.map(({ usage, calls = 1, fixedPoints, ...line }): ComicEpisodeBudgetLine => {
-    const points = usage ? results.get(JSON.stringify(usage))?.estimatedPoints : undefined;
+    const quote = usage ? results.get(JSON.stringify(usage)) : undefined;
+    const points = quote?.estimatedPoints;
     const verified = points != null && Number.isFinite(points) && points >= 0;
-    return { ...line, estimatedPoints: fixedPoints ?? (verified ? points * calls : null) };
+    return { ...line, estimatedPoints: fixedPoints ?? (verified ? points * calls : null),
+      ...(verified && quote?.pricingScheme === "video_token" ? { videoTokenEstimate: true } : {}) };
   });
   const { knownPoints, unverifiedCount } = items.reduce((total, item) => ({
     knownPoints: total.knownPoints + (item.estimatedPoints ?? 0), unverifiedCount: total.unverifiedCount + Number(item.estimatedPoints === null),

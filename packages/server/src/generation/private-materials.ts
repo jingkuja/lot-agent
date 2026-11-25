@@ -16,6 +16,7 @@ export interface PrivateMaterialOptions {
   now?: () => number;
   publicBaseUrl?: string;
   materialPath?: string;
+  materialTtlMs?: number;
 }
 
 interface UploadLookup {
@@ -73,9 +74,13 @@ export function signPrivateMaterial(asset: PrivateMaterialAsset, options: Privat
   if (!asset.is_private || asset.type !== "upload") return asset.url;
   if (!asset.id || !asset.user_id || !safeKey(asset.storage_key)) throw new Error("素材不存在。");
   const now = (options.now ?? Date.now)();
-  const claim = { purpose: PURPOSE, id: asset.id, owner: asset.user_id, key: asset.storage_key, expires: now + TOKEN_TTL_MS };
+  const path = options.materialPath ?? UPLOAD_PATH;
+  const claim = {
+    purpose: PURPOSE, id: asset.id, owner: asset.user_id, key: asset.storage_key,
+    expires: now + (options.materialTtlMs ?? TOKEN_TTL_MS), ...(options.materialPath ? { path } : {}),
+  };
   const token = Buffer.from(secretBox(options).seal(JSON.stringify(claim))).toString("base64url");
-  return `${publicBase(options)}${options.materialPath ?? UPLOAD_PATH}${encodeURIComponent(asset.storage_key)}?${TOKEN_PARAMETER}=${token}`;
+  return `${publicBase(options)}${path}${encodeURIComponent(asset.storage_key)}?${TOKEN_PARAMETER}=${token}`;
 }
 
 /** A short-lived link to the owner's private generated file (`/static/assets/<key>`), such as a marketing clip or
@@ -146,8 +151,10 @@ function openCapability(token: string | undefined, options: PrivateMaterialOptio
 function validCapability(token: string | undefined, asset: PrivateMaterialAsset, options: PrivateMaterialOptions): boolean {
   const claim = openCapability(token, options);
   const now = (options.now ?? Date.now)();
+  const ttl = claim?.path ? options.materialTtlMs ?? TOKEN_TTL_MS : TOKEN_TTL_MS;
   return claim?.purpose === PURPOSE && claim.id === asset.id && claim.owner === asset.user_id && claim.key === asset.storage_key
-    && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + TOKEN_TTL_MS;
+    && (claim.path === undefined || claim.path === options.materialPath)
+    && Number.isSafeInteger(claim.expires) && (claim.expires as number) > now && (claim.expires as number) <= now + ttl;
 }
 
 function validFileCapability(

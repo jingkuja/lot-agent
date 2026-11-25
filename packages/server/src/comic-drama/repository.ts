@@ -66,6 +66,7 @@ type ClipMetaRow = {
 
 export type EpisodeSpendRow = {
   amountMicros: number | null;
+  quotedTotalMicros?: number | null;
   unit: string | null;
   durationMs: number | null;
   status: string;
@@ -75,6 +76,7 @@ export type EpisodeSpendRow = {
   currency: string | null;
   settledAmountMicros?: string | number | null;
   settledCurrency?: string | null;
+  settlementChecked?: boolean;
 };
 
 type MaterialRefEntry = {
@@ -124,6 +126,7 @@ export function summarizeEpisodeCosts(
   const quotedTotals = new Map<"CNY" | "USD", number>();
   let settledTakeCount = 0;
   let unbilledReadyCount = 0;
+  let unbilledPendingCount = 0;
   let pendingReconcileCount = 0;
 
   for (const row of rows) {
@@ -149,13 +152,16 @@ export function summarizeEpisodeCosts(
     }
 
     if (row.status !== "ready" && row.status !== "pending" && row.status !== "running") continue;
-    if (row.status === "ready") unbilledReadyCount += 1;
-    if (typeof row.amountMicros === "number" && Number.isFinite(row.amountMicros) && isCurrency(row.currency)) {
-      const qty = row.unit === "second" && row.durationMs ? row.durationMs / 1000 : 1;
-      quotedTotals.set(row.currency, (quotedTotals.get(row.currency) ?? 0) + Math.round(row.amountMicros * qty));
-    } else {
-      pendingReconcileCount += 1;
+    const qty = row.unit === "second" && row.durationMs ? row.durationMs / 1000 : 1;
+    const quote = row.quotedTotalMicros ?? (row.amountMicros === null ? null : Math.round(row.amountMicros * qty));
+    const ready = row.status === "ready";
+    if (ready) unbilledReadyCount++;
+    if (quote !== null && Number.isFinite(quote) && isCurrency(row.currency)) {
+      quotedTotals.set(row.currency, (quotedTotals.get(row.currency) ?? 0) + quote);
+      if (!ready || !row.settlementChecked) continue;
     }
+    pendingReconcileCount++;
+    if (ready) unbilledPendingCount++;
   }
 
   const estimateCurrency: "CNY" | "USD" = estimate?.currency ?? defaultCurrency;
@@ -206,7 +212,7 @@ export function summarizeEpisodeCosts(
     estimatedMicros,
     estimatedUnverifiedCount,
     spentMicros,
-    spentUnverifiedCount: pendingReconcileCount + unbilledReadyCount,
+    spentUnverifiedCount: pendingReconcileCount + unbilledReadyCount - unbilledPendingCount,
     currency: displayCurrency,
   };
 }
@@ -434,6 +440,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
   ): Promise<ComicDramaEpisodeSummary> {
     const { rows: spendRows } = await client.query<EpisodeSpendRow>(
       `SELECT (r.frozen->'price'->>'amountMicros')::double precision AS "amountMicros",
+         (r.frozen->'price'->'clipAmounts'->>t.target_id::text)::double precision AS "quotedTotalMicros",
          r.frozen->'price'->>'unit' AS unit,
          (t.input->>'durationMs')::int AS "durationMs",
           CASE WHEN t.submit_state IS NULL AND t.status IN ('pending','running','recoverable') AND ${comicBatchCreditPaused} THEN 'pending'
@@ -448,7 +455,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
          t.gateway_http_status AS "gatewayHttpStatus",
          r.frozen->'price'->>'currency' AS currency,
          t.settled_amount_micros::text AS "settledAmountMicros",
-         t.settled_currency AS "settledCurrency"
+         t.settled_currency AS "settledCurrency", t.settlement_checked_at IS NOT NULL AS "settlementChecked"
        FROM lot_comic_drama.cd_takes t
        JOIN lot_comic_drama.cd_generation_requests r ON (r.owner_id, r.id) = (t.owner_id, t.request_id)
        LEFT JOIN tasks job ON job.id = r.task_id AND job.user_id = t.owner_id::text
@@ -474,17 +481,29 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     owner: string,
     takeId: string,
     settlement: { amountMicros: number; currency: "CNY" | "USD"; source?: string },
+    receipt?: { request: string | null; task: string | null },
   ): Promise<boolean> {
-    if (!Number.isInteger(settlement.amountMicros) || settlement.amountMicros < 0) {
+    if (!Number.isSafeInteger(settlement.amountMicros) || settlement.amountMicros < 0) {
       throw new ComicDramaError("INVALID_ORDER");
     }
-    const { rowCount } = await this.pool.query(
-      `UPDATE lot_comic_drama.cd_takes
-       SET settled_amount_micros=$3, settled_currency=$4, settled_at=now(), settled_source=$5
-       WHERE owner_id=$1 AND id=$2`,
-      [owner, takeId, settlement.amountMicros, settlement.currency, settlement.source ?? "gateway"],
-    );
-    return (rowCount ?? 0) > 0;
+    try {
+      const { rowCount } = await this.pool.query(
+        `UPDATE lot_comic_drama.cd_takes t
+         SET settled_amount_micros=$3, settled_currency=$4, settled_at=now(), settled_source=$5
+         WHERE t.owner_id=$1 AND t.id=$2 AND t.settled_amount_micros IS NULL
+           AND (NOT $6::boolean OR t.gateway_request_id=$7 OR t.vendor_id=$8 OR EXISTS (
+             SELECT 1 FROM lot_comic_drama.cd_generation_requests r
+             JOIN image_call_receipts i ON i.user_id=r.owner_id::text AND i.task_id=r.task_id AND i.slot=t.slot
+             WHERE (r.owner_id,r.id)=(t.owner_id,t.request_id) AND i.gateway_request_id=$7
+           ))`,
+        [owner, takeId, settlement.amountMicros, settlement.currency, settlement.source ?? "gateway",
+          !!receipt, receipt?.request ?? null, receipt?.task ?? null],
+      );
+      return !!rowCount;
+    } catch (error) {
+      if ((error as { constraint?: string }).constraint === "cd_takes_gateway_settlement_unique") return false;
+      throw error;
+    }
   }
 
   private async content(client: PoolClient, id: string, seriesRevision: number): Promise<ComicDramaContent> {
