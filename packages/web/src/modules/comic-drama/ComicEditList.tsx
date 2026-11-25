@@ -64,9 +64,13 @@ export function ComicEditsIndex({ open, browse, currentSeries }: {
     {page === "error" ? <button onClick={refresh}>{t("重新读取")}</button> : !page ? <p role="status">{t("加载中…")}</p> :
       page.entries.length === 0 ? <p className="comic-empty">{t("暂无剪辑工程")}</p> : <div className="comic-history-list">
         {page.entries.map(entry => <article key={entry.id}>
-          <button type="button" onClick={() => open(entry.id)}>{entry.title}</button>
-          <small>{new Date(entry.updatedAt).toLocaleString(locale)}</small>
-          <button onClick={() => void remove(entry)}>{t("删除")}</button>
+          <button type="button" className="comic-history-title" onClick={() => open(entry.id)}>
+            <strong>{entry.title}</strong>
+          </button>
+          <div className="comic-actions">
+            <small>{new Date(entry.updatedAt).toLocaleString(locale)}</small>
+            <button type="button" onClick={() => void remove(entry)}>{t("删除")}</button>
+          </div>
         </article>)}
       </div>}
     {page && page !== "error" && (cursor || page.nextCursor) && <div className="comic-actions">

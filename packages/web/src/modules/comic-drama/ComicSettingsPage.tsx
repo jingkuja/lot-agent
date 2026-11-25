@@ -142,7 +142,7 @@ export function ComicSettingsPage({
       )}
 
       {tab === "models" && (
-        <section className="comic-edit-card">
+        <section className="comic-edit-card comic-settings-models">
           <header><h2>{t("默认模型设置")}</h2></header>
           <p className="comic-generation-note">
             {t("视频默认模型用于新建剧集，图片档位用于角色造型、分镜首帧和图片素材。导演文字模型由系统自动选择。")}
