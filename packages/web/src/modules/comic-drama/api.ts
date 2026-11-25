@@ -1,8 +1,10 @@
 import type {
   ComicCastChange, ComicDrama, ComicDramaCastContent, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent,
   ComicDramaCreateInput, ComicDramaCurrentState, ComicDramaDetail, ComicDramaEpisodeCreateInput,
-  ComicDramaEpisodeSummary, ComicDramaListing, ComicDramaScriptVersion, ComicDramaSeries, ComicDramaSeriesInput,
-  ComicDramaTreeListing, ComicDramaUpdateInput, ComicDramaView, ComicScriptImport, ComicSeriesCast,
+  ComicDramaEpisodeSummary, ComicDramaListing, ComicDramaOption, ComicDramaOutlinePolishInput,
+  ComicDramaOutlinePolishResult, ComicDramaScriptGenerateInput, ComicDramaScriptGenerateResult,
+  ComicDramaScriptVersion, ComicDramaSeries, ComicDramaSeriesInput, ComicDramaTreeListing, ComicDramaUpdateInput,
+  ComicDramaView, ComicScriptImport, ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 import { COMIC_SCRIPT_DOCX } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
@@ -16,6 +18,7 @@ const write = <T>(url: string, method: string, body: unknown) => request<T>(url,
 
 export const comicDramaApi = {
   listDramas: (params: URLSearchParams, signal?: AbortSignal) => read<ComicDramaTreeListing>(`${dramasRoot}?${params}`, signal),
+  listDramaOptions: (signal?: AbortSignal) => read<ComicDramaOption[]>(`${dramasRoot}/options`, signal),
   currentDrama: (signal?: AbortSignal) => read<ComicDramaCurrentState>(`${dramasRoot}/current`, signal),
   openDrama: (dramaId: string) => write<ComicDramaView>(`${dramasRoot}/current`, "PUT", { dramaId }),
   getDrama: (id: string, signal?: AbortSignal) => read<ComicDramaView>(dramaPath(id), signal),
@@ -24,8 +27,16 @@ export const comicDramaApi = {
   updateDrama: (id: string, fields: ComicDramaUpdateInput) => write<ComicDrama>(dramaPath(id), "PATCH", fields),
   saveDramaOutline: (id: string, outline: string, expectedRevision: number) =>
     write<ComicDrama>(`${dramaPath(id)}/outline`, "PUT", { outline, expectedRevision }),
+  polishDramaOutline: (id: string, input: ComicDramaOutlinePolishInput, signal?: AbortSignal) =>
+    request<ComicDramaOutlinePolishResult>(`${dramaPath(id)}/outline/polish`, {
+      method: "POST", body: JSON.stringify(input), signal,
+    }),
   saveDramaScript: (id: string, content: string, expectedRevision: number) =>
     write<ComicDrama>(`${dramaPath(id)}/script`, "PUT", { content, expectedRevision }),
+  generateDramaScript: (id: string, input: ComicDramaScriptGenerateInput, signal?: AbortSignal) =>
+    request<ComicDramaScriptGenerateResult>(`${dramaPath(id)}/script/generate`, {
+      method: "POST", body: JSON.stringify(input), signal,
+    }),
   importDramaScript: (id: string, file: File, signal?: AbortSignal) => request<ComicScriptImport>(
     `${dramaPath(id)}/import`,
     {

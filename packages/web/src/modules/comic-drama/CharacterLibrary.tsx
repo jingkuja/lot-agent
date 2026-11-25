@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
-  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterGenerateRequest, ComicCharacterInput, ComicCharacterUpload,
+  ComicCharacterAsset, ComicCharacterDetail, ComicCharacterGenerateRequest, ComicCharacterUpload,
   ComicGenerationQuote,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
 import { comicGenerationApi } from "./generation-api.js";
+import { CharacterFormDialog, useComicDramaOptions } from "./CharacterFormDialog.js";
 import { ComicCharacterVoice } from "./ComicCharacterVoice.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
-import { ChoiceSelect, comicListWords, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
+import {
+  ChoiceSelect, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices,
+} from "./LibraryParts.js";
 import { SaveMediaAsMaterialDialog } from "./SaveMediaAsMaterialDialog.js";
 
 const images = "image/jpeg,image/png,image/webp";
@@ -17,6 +20,7 @@ const images = "image/jpeg,image/png,image/webp";
 export function CharacterLibrary({ characterId, open }: { characterId?: string; open: (id?: string) => void }) {
   const { locale, t } = useI18n();
   const [query, setQuery] = useState("");
+  const [dramaFilter, setDramaFilter] = useState("");
   const [archived, setArchived] = useState(false);
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
@@ -24,6 +28,7 @@ export function CharacterLibrary({ characterId, open }: { characterId?: string; 
   const [detail, setDetail] = useState<ComicCharacterDetail | "error" | null>(null);
   const [creating, setCreating] = useState(false);
   const roles = useComicChoices("role");
+  const dramas = useComicDramaOptions(refresh);
   const roleName = (role: string | null) => roles.find(row => row.key === role)?.labels[locale] ?? role;
   const reload = () => setRefresh(i => i + 1);
   useEffect(() => {
@@ -35,12 +40,17 @@ export function CharacterLibrary({ characterId, open }: { characterId?: string; 
       }).catch(() => { if (!controller.signal.aborted) setDetail("error"); });
     } else {
       setList(null);
-      void comicLibraryApi.characters({ query, archived: String(archived), page: String(page) }, controller.signal).then(rows => {
+      void comicLibraryApi.characters({
+        query,
+        archived: String(archived),
+        page: String(page),
+        ...(dramaFilter ? { dramaId: dramaFilter } : {}),
+      }, controller.signal).then(rows => {
         if (!controller.signal.aborted) setList(rows);
       }).catch(() => { if (!controller.signal.aborted) setList("error"); });
     }
     return () => controller.abort();
-  }, [characterId, query, archived, page, refresh]);
+  }, [characterId, query, dramaFilter, archived, page, refresh]);
 
   return <>
     {characterId ? <>
@@ -52,8 +62,31 @@ export function CharacterLibrary({ characterId, open }: { characterId?: string; 
       <header className="comic-heading"><h1>{t("角色素材库")}</h1>
         <button className="primary" onClick={() => setCreating(true)}>＋ {t("新建角色")}</button>
       </header>
-      <LibrarySearch query={query} search={value => { setQuery(value); setPage(1); }} archived={archived}
-        onArchived={value => { setArchived(value); setPage(1); }} />
+      <div className="comic-character-filter-bar">
+        <LibrarySearch
+          query={query}
+          search={value => { setQuery(value); setPage(1); }}
+          archived={archived}
+          onArchived={value => { setArchived(value); setPage(1); }}
+          placeholder={t("搜索名称、标签或归属剧目")}
+        />
+        <label className="comic-character-drama-filter">
+          <span>{t("归属剧目")}</span>
+          <select
+            aria-label={t("按归属剧目筛选")}
+            value={dramaFilter}
+            onChange={event => { setDramaFilter(event.target.value); setPage(1); }}
+          >
+            <option value="">{t("全部剧目")}</option>
+            <option value="unassigned">{t("通用角色")}</option>
+            {dramas.map(item => (
+              <option key={item.id} value={item.id}>
+                {`《${item.title}》${item.archived ? ` (${t("已归档")})` : ""}`}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {list === "error" ? <button onClick={reload}>{t("重新读取")}</button> : list ? <>
         {list.entries.length === 0 && <div className="comic-empty">{t("暂无匹配的角色")}</div>}
         <div className="comic-library-grid">
@@ -61,41 +94,24 @@ export function CharacterLibrary({ characterId, open }: { characterId?: string; 
             {character.cover ? <MediaPreview key={character.cover.id} media={character.cover} title={character.name} thumbOnly /> :
               <div className="comic-media-well comic-character-initial" aria-hidden="true">{Array.from(character.name)[0]}</div>}
             <button className="comic-library-title" onClick={() => open(character.id)}>{character.name}</button>
+            <small className="comic-drama-origin-tag" data-unassigned={character.dramaTitle ? undefined : "true"}>
+              {character.dramaTitle ? `《${character.dramaTitle}》` : t("通用角色")}
+            </small>
             <small>{[roleName(character.roleKey), ...character.aliases].filter(Boolean).join(" · ")}</small>
           </article>)}
         </div>
         <LibraryPagination page={page} more={list.more} change={setPage} />
       </> : <p role="status">{t("加载中…")}</p>}
     </>}
-    {creating && <CharacterForm close={() => setCreating(false)} save={async input => {
-      const { id } = await comicLibraryApi.createCharacter(input);
-      open(id);
-    }} />}
+    {creating && <CharacterFormDialog
+      defaultDramaId={dramaFilter && dramaFilter !== "unassigned" ? dramaFilter : null}
+      close={() => setCreating(false)}
+      save={async input => {
+        const { id } = await comicLibraryApi.createCharacter(input);
+        open(id);
+      }}
+    />}
   </>;
-}
-
-function CharacterForm({ character, close, save }: {
-  character?: ComicCharacter; close: () => void; save: (input: ComicCharacterInput) => Promise<void>;
-}) {
-  const { t } = useI18n();
-  return <LibraryDialog title={t(character ? "编辑角色" : "新建角色")} submitLabel={t("保存")} close={close} save={form => {
-    const field = (name: string) => String(form.get(name) ?? "").trim();
-    return save({
-      name: field("name"), aliases: comicListWords(field("aliases")), tags: comicListWords(field("tags")), roleKey: field("role") || null,
-      age: field("age"), personality: field("personality"), appearance: field("appearance"),
-    });
-  }}>
-    <label>{t("角色名称")}<input name="name" autoFocus required maxLength={120} defaultValue={character?.name} /></label>
-    <div className="comic-fields">
-      <label>{t("角色定位")}<ChoiceSelect domain="role" name="role" existing={character?.roleKey} defaultValue={character?.roleKey ?? ""}
-        empty={t("未分类")} /></label>
-      <label>{t("年龄")}<input name="age" maxLength={120} defaultValue={character?.age} /></label>
-      <label>{t("别名")}<input name="aliases" maxLength={2400} defaultValue={character?.aliases.join(", ")} placeholder={t("用逗号分隔")} /></label>
-      <label>{t("标签")}<input name="tags" maxLength={2400} defaultValue={character?.tags.join(", ")} placeholder={t("用逗号分隔")} /></label>
-    </div>
-    <label>{t("性格")}<textarea name="personality" maxLength={2000} rows={2} defaultValue={character?.personality} /></label>
-    <label>{t("外貌设定")}<textarea name="appearance" maxLength={2000} rows={3} defaultValue={character?.appearance} /></label>
-  </LibraryDialog>;
 }
 
 function CharacterAssets({ character, roleName, changed, onArchive }: {
@@ -168,7 +184,12 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   };
   return <>
     <header className="comic-heading"><div>
-      {roleName && <small>{roleName}</small>}
+      <div className="comic-cut-badges">
+        {roleName && <small>{roleName}</small>}
+        <small className="comic-drama-origin-tag" data-unassigned={character.dramaTitle ? undefined : "true"}>
+          {t("归属剧目")} · {character.dramaTitle ? `《${character.dramaTitle}》` : t("通用角色")}
+        </small>
+      </div>
       <h1>{character.name}</h1>
       {character.aliases.length > 0 && <p>{t("别名")} · {character.aliases.join(" / ")}</p>}
     </div>
@@ -239,7 +260,7 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
       </article>;
     })}</div>
     {dialog === "voice" && <ComicCharacterVoice id={character.id} close={() => setDialog(null)} />}
-    {dialog === "edit" && <CharacterForm character={character} close={() => setDialog(null)}
+    {dialog === "edit" && <CharacterFormDialog character={character} close={() => setDialog(null)}
       save={async input => { await comicLibraryApi.editCharacter(character.id, input); await reload(); }} />}
     {dialog === "outfit" && <LibraryDialog title={t("新增套装")} submitLabel={t("保存")} close={() => setDialog(null)}
       save={async form => {

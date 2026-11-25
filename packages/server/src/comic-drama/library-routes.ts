@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicCharacterInput, comicCharacterUpload, comicDictionaryCreate, comicDictionaryDomain, comicDictionaryOrder, comicDictionaryUpdate,
-  comicDramaIdSchema, comicLibrarySearch, comicMaterialInput, comicMaterialSearch, comicMaterialUpdate, comicOutfitInput, comicOutfitOrder,
-  comicSaveMediaAsMaterial, comicStyleReferenceBindSchema, comicUserPreferencesSchema,
-  type ComicDictionaryRepository, type ComicLibraryRepository, type ComicUserPreferences,
+  comicCharacterInput, comicCharacterSearch, comicCharacterUpload, comicDictionaryCreate, comicDictionaryDomain,
+  comicDictionaryOrder, comicDictionaryUpdate, comicDramaIdSchema, comicMaterialInput, comicMaterialSearch,
+  comicMaterialUpdate, comicOutfitInput, comicOutfitOrder, comicSaveMediaAsMaterial, comicStyleReferenceBindSchema,
+  comicUserPreferencesSchema, type ComicDictionaryRepository, type ComicLibraryRepository, type ComicUserPreferences,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
 import type { ComicMediaLibrary } from "./media-library.js";
@@ -42,7 +42,7 @@ export function createComicLibraryRoutes(
   };
 
   app.get("/characters", async c => {
-    const query = comicLibrarySearch.safeParse(c.req.query());
+    const query = comicCharacterSearch.safeParse(c.req.query());
     if (!query.success) return c.json({ code: "INVALID_INPUT" }, 400);
     return c.json(await repo.listCharacters(c.get("userId"), query.data));
   });

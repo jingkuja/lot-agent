@@ -5,7 +5,7 @@ import {
   type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent, type ComicDramaCreateInput,
   type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput,
   type ComicDramaEpisodeSummary, type ComicDramaHierarchyListQuery, type ComicDramaListQuery, type ComicDramaListing,
-  type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion, type ComicDramaSeries, type ComicDramaSeriesInput,
+  type ComicDramaOption, type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion, type ComicDramaSeries, type ComicDramaSeriesInput,
   type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate, type ComicDramaTreeEntry, type ComicDramaTreeListing,
   type ComicDramaUpdateInput, type ComicDramaView, type ComicEpisodeCostSummary, type ComicInvalidMaterialRef, type ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
@@ -834,6 +834,18 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     );
     const last = dramas.at(-1);
     return { dramas, nextCursor: rows.length > 24 && last ? `${last.updatedAt},${last.id}` : null };
+  }
+
+  async listDramaOptions(owner: string): Promise<ComicDramaOption[]> {
+    const { rows } = await this.pool.query<ComicDramaOption>(
+      `SELECT id, title, (archived_at IS NOT NULL) AS archived
+       FROM lot_comic_drama.cd_dramas
+       WHERE owner_id=$1 AND deleted_at IS NULL
+       ORDER BY (archived_at IS NOT NULL) ASC, updated_at DESC, id DESC
+       LIMIT 200`,
+      [owner],
+    );
+    return rows;
   }
 
   getDrama(owner: string, dramaId: string): Promise<ComicDramaView> {

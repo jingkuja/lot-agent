@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import type { ComicCastChange, ComicCharacterDetail, ComicSeriesCast } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
+import { CharacterFormDialog, useComicDramaOptions } from "./CharacterFormDialog.js";
 import { comicLibraryApi } from "./library-api.js";
 import { LibraryDialog, LibraryPagination, MediaPreview, useComicChoices } from "./LibraryParts.js";
 
 export function CastPanel({
-  seriesId, revision, cast, disabled, change, scope = "episode", dramaCastCount = 0, onSyncDramaCast, onOpenLibrary,
+  seriesId, dramaId, dramaTitle, revision, cast, disabled, change, scope = "episode", dramaCastCount = 0, onSyncDramaCast, onOpenLibrary,
 }: {
   seriesId: string;
+  dramaId?: string;
+  dramaTitle?: string;
   revision: number;
   cast: ComicSeriesCast[];
   disabled: boolean;
@@ -16,15 +19,18 @@ export function CastPanel({
   scope?: "episode" | "drama";
   dramaCastCount?: number;
   onSyncDramaCast?: () => Promise<boolean>;
-  onOpenLibrary?: () => void;
+  onOpenLibrary?: (characterId?: string) => void;
 }) {
   const { t, locale } = useI18n();
   const [edit, setEdit] = useState<ComicSeriesCast | "new" | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [status, setStatus] = useState<{ cast: ComicSeriesCast[]; revision: number } | "failed" | null>(null);
   const slots = useComicChoices("slot");
   const expressions = useComicChoices("expression");
   const isDrama = scope === "drama";
+  const effectiveDramaId = dramaId ?? (isDrama ? seriesId : undefined);
   useEffect(() => {
     const focus = () => setRefresh(value => value + 1);
     window.addEventListener("focus", focus);
@@ -55,12 +61,14 @@ export function CastPanel({
           </button>
         )}
         {onOpenLibrary && (
-          <button type="button" onClick={onOpenLibrary}>{t("管理角色库")}</button>
+          <button type="button" onClick={() => onOpenLibrary()}>{t("管理角色库")}</button>
         )}
         <button disabled={disabled} type="button" onClick={() => setRefresh(value => value + 1)}>{t("检查更新")}</button>
+        <button disabled={disabled} type="button" onClick={() => { setCreateError(""); setCreating(true); }}>＋ {t("新增角色")}</button>
         <button disabled={disabled} type="button" className="primary" onClick={() => setEdit("new")}>＋ {t("选择角色")}</button>
       </div>
     </header>
+    {createError && <p className="comic-error" role="alert">{createError}</p>}
     {status === "failed" && <p className="comic-error" role="alert">{t("角色更新检查失败，请重试")}</p>}
     {status && status !== "failed" && status.revision !== revision && <p className="comic-error" role="status">
       {t(isDrama ? "其他窗口修改了整部剧，请刷新查看" : "其他窗口修改了本集，请刷新查看")}
@@ -68,10 +76,19 @@ export function CastPanel({
     {current.length === 0 && <p className="comic-empty">{t(isDrama ? "尚未设定全剧角色" : "尚未为本集选角")}</p>}
     <div className="comic-cast-list">
       {current.map(entry => {
-        const { snapshot, hasUpdates, archived } = entry;
+        const { snapshot, hasUpdates, archived, originDramaId, originDramaTitle } = entry;
+        const isCrossDrama = Boolean(originDramaId && effectiveDramaId && originDramaId !== effectiveDramaId);
         return <article key={snapshot.characterId} className="comic-cast-card">
           <header>
-            <div><h3>{snapshot.name}</h3><p>{t("已锁定造型")} · {snapshot.outfitName}</p></div>
+            <div>
+              <h3>{snapshot.name}</h3>
+              <p>{t("已锁定造型")} · {snapshot.outfitName}</p>
+              {originDramaTitle && (
+                <small className="comic-drama-origin-tag" data-cross-drama={isCrossDrama ? "true" : undefined}>
+                  {isCrossDrama ? t("跨剧 · 《{0}》", [originDramaTitle]) : t("归属 · 《{0}》", [originDramaTitle])}
+                </small>
+              )}
+            </div>
             {archived ? <small>{t("已归档")}</small> : hasUpdates && <small className="comic-cast-update">{t("角色库有更新")}</small>}
           </header>
           <div className="comic-cast-assets">
@@ -91,6 +108,9 @@ export function CastPanel({
               <button type="button" disabled={!hasUpdates} onClick={() => void change({ action: "sync", characterId: snapshot.characterId })}>
                 {t("同步最新造型")}
               </button>
+              {onOpenLibrary && (
+                <button type="button" onClick={() => onOpenLibrary(snapshot.characterId)}>{t("管理形象")}</button>
+              )}
             </>}
             <button type="button" onClick={() => {
               const confirmMsg = isDrama
@@ -102,30 +122,69 @@ export function CastPanel({
         </article>;
       })}
     </div>
-    {edit && <CastDialog edit={edit} cast={current} close={() => setEdit(null)} change={change} />}
+    {edit && <CastDialog edit={edit} currentDramaId={effectiveDramaId} cast={current} close={() => setEdit(null)} change={change} />}
+    {creating && (
+      <CharacterFormDialog
+        defaultDramaId={effectiveDramaId ?? null}
+        defaultDramaTitle={dramaTitle ?? null}
+        quickCast={{
+          label: t(isDrama ? "创建后直接加入当前剧目角色表" : "创建后直接加入本集角色表"),
+          defaultChecked: true,
+        }}
+        close={() => setCreating(false)}
+        save={async (input, opts) => {
+          const { id } = await comicLibraryApi.createCharacter(input);
+          const outfit = await comicLibraryApi.outfit(id, opts?.outfitName || t("默认造型"));
+          if (opts?.addToCast) {
+            const ok = await change({ action: "add", characterId: id, outfitId: outfit.id });
+            if (!ok) setCreateError(t("角色已创建，但加入角色表失败，请点击选择角色手动添加"));
+          }
+          setRefresh(value => value + 1);
+        }}
+      />
+    )}
   </section>;
 }
 
-function CastDialog({ edit, cast, close, change }: {
-  edit: ComicSeriesCast | "new"; cast: ComicSeriesCast[]; close: () => void; change: (action: ComicCastChange) => Promise<boolean>;
+function CastDialog({ edit, currentDramaId, cast, close, change }: {
+  edit: ComicSeriesCast | "new";
+  currentDramaId?: string;
+  cast: ComicSeriesCast[];
+  close: () => void;
+  change: (action: ComicCastChange) => Promise<boolean>;
 }) {
   const { t } = useI18n();
+  const dramas = useComicDramaOptions();
   const [characterId, setCharacterId] = useState(edit === "new" ? "" : edit.snapshot.characterId);
   const [outfitId, setOutfitId] = useState(edit === "new" ? "" : edit.snapshot.outfitId);
+  const [dramaFilter, setDramaFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [list, setList] = useState<Awaited<ReturnType<typeof comicLibraryApi.characters>> | "error" | null>(null);
   const [character, setCharacter] = useState<ComicCharacterDetail | "error" | null>(null);
   const characterDetails = character && character !== "error" && character.id === characterId ? character : null;
   const excluded = new Set(cast.map(entry => entry.snapshot.characterId));
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+      setPage(1);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+  useEffect(() => {
     if (edit !== "new") return;
     const controller = new AbortController();
     setList(null);
-    void comicLibraryApi.characters({ page: String(page) }, controller.signal).then(value => {
+    void comicLibraryApi.characters({
+      page: String(page),
+      ...(searchQuery ? { query: searchQuery } : {}),
+      ...(dramaFilter ? { dramaId: dramaFilter } : {}),
+    }, controller.signal).then(value => {
       if (!controller.signal.aborted) setList(value);
     }).catch(() => { if (!controller.signal.aborted) setList("error"); });
     return () => controller.abort();
-  }, [edit, page]);
+  }, [edit, page, searchQuery, dramaFilter]);
   useEffect(() => {
     if (!characterId) return;
     const controller = new AbortController();
@@ -143,11 +202,41 @@ function CastDialog({ edit, cast, close, change }: {
       if (!ok) throw new Error("Cast mutation failed");
     }}>
     {edit === "new" && <>
+      <div className="comic-fields">
+        <label>
+          {t("按剧目筛选")}
+          <select aria-label={t("按剧目筛选")} value={dramaFilter} onChange={event => {
+            setDramaFilter(event.target.value); setCharacterId(""); setOutfitId(""); setPage(1);
+          }}>
+            <option value="">{t("全部剧目（含跨剧）")}</option>
+            {currentDramaId && <option value={currentDramaId}>{t("仅本剧角色")}</option>}
+            <option value="unassigned">{t("通用角色")}</option>
+            {dramas.filter(item => item.id !== currentDramaId).map(item => (
+              <option key={item.id} value={item.id}>{`《${item.title}》`}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t("搜索角色")}
+          <input
+            aria-label={t("搜索角色")}
+            value={searchInput}
+            maxLength={120}
+            placeholder={t("搜索名称、标签或归属剧目")}
+            onChange={event => { setSearchInput(event.target.value); setCharacterId(""); setOutfitId(""); }}
+          />
+        </label>
+      </div>
       <label>{t("角色名称")}<select aria-label={t("角色名称")} value={characterId} required onChange={event => {
         setCharacterId(event.target.value); setOutfitId("");
       }}>
         <option value="">{t("请选择")}</option>
-        {list && list !== "error" && list.entries.filter(row => !excluded.has(row.id)).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+        {list && list !== "error" && list.entries.filter(row => !excluded.has(row.id)).map(row => {
+          const origin = row.dramaTitle
+            ? (row.dramaId === currentDramaId ? t("本剧") : `《${row.dramaTitle}》`)
+            : t("通用");
+          return <option key={row.id} value={row.id}>{`${row.name} · ${origin}`}</option>;
+        })}
       </select></label>
       {list && list !== "error" && <LibraryPagination page={page} more={list.more} change={next => {
         setCharacterId(""); setOutfitId(""); setPage(next);

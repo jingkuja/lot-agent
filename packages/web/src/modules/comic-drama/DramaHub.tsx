@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
 import { CastPanel } from "./CastPanel.js";
 import {
-  ArrowRightIcon, CharactersIcon, EpisodesIcon, NewEpisodeIcon, ScriptIcon, StoryboardIcon,
+  ArrowRightIcon, CharactersIcon, EpisodesIcon, NewEpisodeIcon, ScriptIcon, SparklesIcon, StoryboardIcon,
 } from "./ComicStudioIcons.js";
 import { comicDirectorError } from "./director-api.js";
 import { LibraryDialog, MediaPreview, useComicChoices } from "./LibraryParts.js";
@@ -22,6 +22,15 @@ const statusLabels: Record<ComicDramaSeriesStatus, string> = {
 };
 
 type SaveIssue = { kind: "conflict" | "failed"; field: "outline" | "script" };
+
+function defaultEpisodeCount(outline: string, existingEpisodes: number): number {
+  const match = /共\s*(\d{1,2})\s*集/.exec(outline) ?? /\b(\d{1,2})\s*episodes?\b/i.exec(outline);
+  if (match) {
+    const n = Number(match[1]);
+    if (Number.isInteger(n) && n >= 1 && n <= 50) return n;
+  }
+  return existingEpisodes > 0 ? Math.min(50, existingEpisodes) : 5;
+}
 
 export function DramaHub({
   view, busy, initialTab, onUpdated, onReload, onEditDrama, onAddEpisode, onOpenEpisode, onDeriveEpisode,
@@ -38,7 +47,7 @@ export function DramaHub({
   onDeriveEpisode: (episodeId: string, action: "copy" | "sequel", inherit?: boolean) => Promise<boolean>;
   onChangeEpisode: (episode: ComicDramaEpisodeBrief, action: "archive" | "remove") => Promise<boolean>;
   onOpenHistory: () => void;
-  onOpenCharacters: () => void;
+  onOpenCharacters: (characterId?: string) => void;
   onRegisterFlush?: (flush: (() => Promise<boolean>) | null) => void;
 }) {
   const { t, locale } = useI18n();
@@ -53,6 +62,13 @@ export function DramaHub({
   const [importNote, setImportNote] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [polishingOutline, setPolishingOutline] = useState(false);
+  const [outlineAiError, setOutlineAiError] = useState<string | null>(null);
+  const [polishedOutline, setPolishedOutline] = useState<string | null>(null);
+  const [outlineUndo, setOutlineUndo] = useState<string | null>(null);
+  const [scriptGenOpen, setScriptGenOpen] = useState(false);
+  const [generatedScriptPreview, setGeneratedScriptPreview] = useState<{ script: string; truncated: boolean } | null>(null);
+  const [scriptUndo, setScriptUndo] = useState<string | null>(null);
   const [sequel, setSequel] = useState<ComicDramaEpisodeBrief | null>(null);
 
   const viewRef = useRef(view);
@@ -64,6 +80,7 @@ export function DramaHub({
   const issueRef = useRef(issue);
   issueRef.current = issue;
   const inFlight = useRef<Promise<boolean> | null>(null);
+  const polishAbort = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dirty = outlineDraft !== null || scriptDraft !== null;
@@ -71,13 +88,24 @@ export function DramaHub({
   const scriptValue = scriptDraft ?? drama.scriptContent ?? "";
 
   useEffect(() => {
+    polishAbort.current?.abort();
+    polishAbort.current = null;
     setOutlineDraft(null);
     setScriptDraft(null);
     setIssue(null);
     setImportNote(null);
     setImportError(null);
+    setPolishingOutline(false);
+    setOutlineAiError(null);
+    setPolishedOutline(null);
+    setOutlineUndo(null);
+    setScriptGenOpen(false);
+    setGeneratedScriptPreview(null);
+    setScriptUndo(null);
     setTab(initialTab ?? "outline");
   }, [drama.id, initialTab]);
+
+  useEffect(() => () => polishAbort.current?.abort(), []);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -193,6 +221,27 @@ export function DramaHub({
     }
   };
 
+  const handlePolishOutline = async () => {
+    if (polishingOutline || !outlineValue.trim()) return;
+    polishAbort.current?.abort();
+    const controller = new AbortController();
+    polishAbort.current = controller;
+    setPolishingOutline(true);
+    setOutlineAiError(null);
+    try {
+      const language = locale === "en" || locale === "id" ? locale : "zh";
+      const res = await comicDramaApi.polishDramaOutline(drama.id, { outline: outlineValue, language }, controller.signal);
+      if (!controller.signal.aborted) {
+        setPolishedOutline(res.outline);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setOutlineAiError(t(comicDirectorError(error)));
+    } finally {
+      if (polishAbort.current === controller) polishAbort.current = null;
+      if (!controller.signal.aborted) setPolishingOutline(false);
+    }
+  };
+
   const nextEpisodeNo = Math.max(0, ...episodes.map(ep => ep.episodeNo)) + 1;
   const hasOutline = outlineValue.trim().length > 0;
   const hasScript = scriptValue.trim().length > 0;
@@ -292,7 +341,78 @@ export function DramaHub({
               onChange={event => setOutlineDraft(event.target.value)}
             />
           </label>
-          <div className="comic-actions comic-drama-step-footer">
+          {outlineAiError && <p className="comic-error" role="alert">{outlineAiError}</p>}
+          {polishedOutline !== null && (
+            <div className="comic-ai-preview">
+              <header>
+                <strong>{t("AI 润色建议")}</strong>
+                <small>{polishedOutline.length} / {COMIC_DRAMA_OUTLINE_MAX_CHARS}</small>
+              </header>
+              <textarea
+                aria-label={t("AI 润色建议")}
+                rows={10}
+                maxLength={COMIC_DRAMA_OUTLINE_MAX_CHARS}
+                disabled={locked}
+                value={polishedOutline}
+                onChange={event => setPolishedOutline(event.target.value)}
+              />
+              <div className="comic-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={locked || !polishedOutline.trim()}
+                  onClick={() => {
+                    setOutlineUndo(outlineValue);
+                    setOutlineDraft(polishedOutline);
+                    setPolishedOutline(null);
+                  }}
+                >
+                  {t("采用润色结果")}
+                </button>
+                <button type="button" disabled={locked || polishingOutline} onClick={() => void handlePolishOutline()}>
+                  {t("重新润色")}
+                </button>
+                <button type="button" onClick={() => setPolishedOutline(null)}>{t("放弃")}</button>
+              </div>
+            </div>
+          )}
+          <div className="comic-actions comic-drama-step-footer comic-drama-step-footer--split">
+            <div className="comic-actions">
+              {!locked && (
+                <button
+                  type="button"
+                  className="comic-ai-button"
+                  disabled={!outlineValue.trim() || polishingOutline}
+                  onClick={() => void handlePolishOutline()}
+                >
+                  <SparklesIcon size={14} />
+                  <span>{t(polishingOutline ? "AI 润色中…" : "AI 润色")}</span>
+                </button>
+              )}
+              {polishingOutline && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    polishAbort.current?.abort();
+                    polishAbort.current = null;
+                    setPolishingOutline(false);
+                  }}
+                >
+                  {t("取消")}
+                </button>
+              )}
+              {!locked && outlineUndo !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOutlineDraft(outlineUndo);
+                    setOutlineUndo(null);
+                  }}
+                >
+                  {t("撤销润色")}
+                </button>
+              )}
+            </div>
             <button type="button" className="primary" onClick={() => setTab("cast")}>
               <span>{t("下一步：设定全剧角色")}</span>
               <ArrowRightIcon size={14} />
@@ -307,6 +427,8 @@ export function DramaHub({
             key={drama.id}
             scope="drama"
             seriesId={drama.id}
+            dramaId={drama.id}
+            dramaTitle={drama.title}
             revision={drama.revision}
             cast={cast}
             disabled={locked || !!issue}
@@ -334,6 +456,18 @@ export function DramaHub({
               <small>{scriptValue.length} / {COMIC_DRAMA_SCRIPT_MAX_CHARS}</small>
               {!locked && (
                 <>
+                  <button
+                    type="button"
+                    className="comic-ai-button"
+                    disabled={importing}
+                    onClick={() => {
+                      setImportError(null);
+                      setScriptGenOpen(true);
+                    }}
+                  >
+                    <SparklesIcon size={14} />
+                    <span>{t("AI 生成剧本")}</span>
+                  </button>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -366,12 +500,72 @@ export function DramaHub({
               onChange={event => setScriptDraft(event.target.value)}
             />
           </label>
-          <div className="comic-actions comic-drama-step-footer">
-            <button type="button" onClick={() => setTab("cast")}>{t("上一步：角色")}</button>
-            <button type="button" className="primary" onClick={() => setTab("episodes")}>
-              <span>{t("下一步：创建分集")}</span>
-              <ArrowRightIcon size={14} />
-            </button>
+          {generatedScriptPreview && (
+            <div className="comic-ai-preview">
+              <header>
+                <strong>{t("AI 生成的全剧剧本")}</strong>
+                <small>{generatedScriptPreview.script.length} / {COMIC_DRAMA_SCRIPT_MAX_CHARS}</small>
+              </header>
+              <textarea
+                aria-label={t("AI 生成的全剧剧本")}
+                rows={12}
+                maxLength={COMIC_DRAMA_SCRIPT_MAX_CHARS}
+                disabled={locked}
+                value={generatedScriptPreview.script}
+                onChange={event => setGeneratedScriptPreview(cur => cur ? { ...cur, script: event.target.value } : cur)}
+              />
+              <div className="comic-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={locked || !generatedScriptPreview.script.trim()}
+                  onClick={() => {
+                    setScriptUndo(scriptValue);
+                    setScriptDraft(generatedScriptPreview.script);
+                    setImportNote(t(generatedScriptPreview.truncated ? "已截取前 50,000 个字符，请检查内容" : "AI 已生成全剧剧本并自动保存"));
+                    setGeneratedScriptPreview(null);
+                  }}
+                >
+                  {t("替换当前剧本")}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked || !generatedScriptPreview.script.trim()}
+                  onClick={() => {
+                    const combined = (scriptValue.trimEnd() + "\n\n" + generatedScriptPreview.script).slice(0, COMIC_DRAMA_SCRIPT_MAX_CHARS);
+                    setScriptUndo(scriptValue);
+                    setScriptDraft(combined);
+                    setImportNote(t("AI 已生成全剧剧本并自动保存"));
+                    setGeneratedScriptPreview(null);
+                  }}
+                >
+                  {t("追加到末尾")}
+                </button>
+                <button type="button" onClick={() => setGeneratedScriptPreview(null)}>{t("放弃")}</button>
+              </div>
+            </div>
+          )}
+          <div className="comic-actions comic-drama-step-footer comic-drama-step-footer--split">
+            <div className="comic-actions">
+              {!locked && scriptUndo !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScriptDraft(scriptUndo);
+                    setScriptUndo(null);
+                  }}
+                >
+                  {t("撤销生成")}
+                </button>
+              )}
+            </div>
+            <div className="comic-actions">
+              <button type="button" onClick={() => setTab("cast")}>{t("上一步：角色")}</button>
+              <button type="button" className="primary" onClick={() => setTab("episodes")}>
+                <span>{t("下一步：创建分集")}</span>
+                <ArrowRightIcon size={14} />
+              </button>
+            </div>
           </div>
         </section>
       )}
@@ -463,6 +657,71 @@ export function DramaHub({
         </section>
       )}
 
+      {scriptGenOpen && (
+        <LibraryDialog
+          title={t("AI 生成全剧剧本")}
+          submitLabel={t("开始生成")}
+          close={() => setScriptGenOpen(false)}
+          describeError={comicDirectorError}
+          save={async (form, signal) => {
+            const episodeCount = Number(form.get("episodeCount"));
+            const notes = String(form.get("notes") ?? "").trim();
+            const language = locale === "en" || locale === "id" ? locale : "zh";
+            const res = await comicDramaApi.generateDramaScript(drama.id, {
+              episodeCount,
+              notes,
+              outline: outlineValue,
+              language,
+            }, signal);
+            if (signal.aborted) return;
+            setImportError(null);
+            if (!scriptValue.trim()) {
+              setScriptUndo("");
+              setScriptDraft(res.script);
+              setGeneratedScriptPreview(null);
+              setImportNote(t(res.truncated ? "已截取前 50,000 个字符，请检查内容" : "AI 已生成全剧剧本并自动保存"));
+            } else {
+              setGeneratedScriptPreview({ script: res.script, truncated: res.truncated });
+            }
+          }}
+        >
+          <div className="comic-cut-badges">
+            <small className="comic-pill" data-tone={hasOutline ? "done" : "idle"}>
+              {t("大纲")} · {hasOutline ? t("已填 {0} 字", [outlineValue.trim().length]) : t("未填写")}
+            </small>
+            <small className="comic-pill" data-tone={cast.length > 0 ? "done" : "idle"}>
+              {t("全剧角色")} · {t("已选 {0} 名", [cast.length])}
+            </small>
+          </div>
+          <label>
+            {t("一共多少集")}
+            <input
+              name="episodeCount"
+              type="number"
+              min={1}
+              max={50}
+              step={1}
+              autoFocus
+              required
+              defaultValue={defaultEpisodeCount(outlineValue, episodes.length)}
+            />
+          </label>
+          <label>
+            {t("其他补充信息（可选）")}
+            <textarea
+              name="notes"
+              rows={4}
+              maxLength={4000}
+              placeholder={t("例如：每集 60 秒左右节奏紧凑；第 3 集结尾留反转钩子；男女主对白偏生活化幽默…")}
+            />
+          </label>
+          <small>
+            {t(scriptValue.trim()
+              ? "生成完成后可预览并选择替换当前剧本或追加到末尾。"
+              : "将结合全剧大纲与全剧角色设定按集分段生成总剧本。")}
+          </small>
+        </LibraryDialog>
+      )}
       {sequel && (
         <LibraryDialog title={t("续写下一集")} submitLabel={t("创建并打开")} close={() => setSequel(null)} save={async form => {
           if (!await onDeriveEpisode(sequel.id, "sequel", form.get("inherit") === "on")) {

@@ -303,4 +303,56 @@ describe("comic-drama route security checks", () => {
     expect(syncRes.status).toBe(200);
     expect(syncEpisodeCastFromDrama).toHaveBeenCalledWith(ownerId, seriesId, 1);
   });
+
+  it("supports drama options and AI outline polish / master script generation routes", async () => {
+    const listDramaOptions = vi.fn(async () => [{ id: dramaId, title: "雨夜便利店", archived: false }]);
+    const polishOutline = vi.fn(async () => ({ outline: "润色后的全剧大纲", modelId: "deepseek-v4.1-flash" }));
+    const generateScript = vi.fn(async () => ({
+      script: "【第 1 集：风铃】\n场景：便利店。",
+      truncated: false,
+      modelId: "deepseek-v4.1-flash",
+    }));
+    const repo = { listDramaOptions } as unknown as ComicDramaRepository;
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicDramaRoutes(repo, async () => true, undefined, undefined, { polishOutline, generateScript }));
+
+    const optsRes = await app.request("/dramas/options");
+    expect(optsRes.status).toBe(200);
+    expect(await optsRes.json()).toEqual([{ id: dramaId, title: "雨夜便利店", archived: false }]);
+
+    const badPolish = await app.request(`/dramas/${dramaId}/outline/polish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outline: "  " }),
+    });
+    expect(badPolish.status).toBe(400);
+
+    const okPolish = await app.request(`/dramas/${dramaId}/outline/polish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outline: "女孩失恋来到便利店。", language: "zh" }),
+    });
+    expect(okPolish.status).toBe(200);
+    expect(await okPolish.json()).toEqual({ outline: "润色后的全剧大纲", modelId: "deepseek-v4.1-flash" });
+
+    const badScript = await app.request(`/dramas/${dramaId}/script/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodeCount: 0 }),
+    });
+    expect(badScript.status).toBe(400);
+
+    const okScript = await app.request(`/dramas/${dramaId}/script/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodeCount: 8, notes: "节奏紧凑", outline: "大纲", language: "zh" }),
+    });
+    expect(okScript.status).toBe(200);
+    expect(await okScript.json()).toEqual({
+      script: "【第 1 集：风铃】\n场景：便利店。",
+      truncated: false,
+      modelId: "deepseek-v4.1-flash",
+    });
+  });
 });

@@ -91,6 +91,7 @@ import { createComicDirectorLlmResolver, createComicDirectorModelPolicy } from "
 import { ComicLibraryError } from "./comic-drama/library-db.js";
 import { PgComicDirector } from "./comic-drama/director-repository.js";
 import { createComicDirectorRoutes } from "./comic-drama/director-routes.js";
+import { ComicDramaAi } from "./comic-drama/drama-ai.js";
 import { PgComicSettings } from "./comic-drama/settings-repository.js";
 import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
@@ -289,12 +290,13 @@ async function main() {
   const comicSettings = new PgComicSettings(service.db.pool);
   const directorRepo = new PgComicDirector(service.db.pool);
   const comicDirectorModels = createComicDirectorModelPolicy();
-  const directorExtension = createComicDirectorExtension(directorRepo, createComicDirectorLlmResolver({
+  const resolveComicDirectorLlm = createComicDirectorLlmResolver({
     getUserApiKey: (owner, managed) => service.db.getUserApiKey(owner, managed),
     managedKeysEnabled: service.managedKeysEnabled,
     listLlmModels: async (owner, key) => (await service.getUserModelCatalog(owner, key))?.llm.map(model => model.id) ?? [],
     llm: (model, key) => service.providerFactory.llm(model, key),
-  }, comicDirectorModels), comicDramaEnabled);
+  }, comicDirectorModels);
+  const directorExtension = createComicDirectorExtension(directorRepo, resolveComicDirectorLlm, comicDramaEnabled);
   registerAgentExtension(directorExtension);
   service.agentRegistry.register(comicDirectorDefinition);
   app.route("/api/public/product", createProductRoutes(async c => {
@@ -528,6 +530,8 @@ async function main() {
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/proposals`,
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/chat`,
+      `${COMIC_DRAMA_API_ROOT}/dramas/:dramaId/outline/polish`,
+      `${COMIC_DRAMA_API_ROOT}/dramas/:dramaId/script/generate`,
     ], generationRateLimit);
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/series/:id/director/import`,
@@ -566,10 +570,15 @@ async function main() {
           throw new ComicLibraryError("MODEL_UNAVAILABLE", 400);
         }
       }));
+    const dramaAi = new ComicDramaAi({
+      repo: series,
+      resolveModel: resolveComicDirectorLlm,
+      accepting: rollout.accepting,
+    });
     app.route(COMIC_DRAMA_API_ROOT, createComicDramaRoutes(series, canSelectComicVideo, async owner => {
       const [prefs, { catalog }] = await Promise.all([comicSettings.getPreferences(owner), comicModelCatalog(owner)]);
       return selectComicVideoModel(catalog?.video ?? [], prefs.defaultVideoModel);
-    }, parser));
+    }, parser, dramaAi));
     if (service.jobQueue instanceof BullmqJobQueue) {
       app.on("POST", [
         `${COMIC_DRAMA_API_ROOT}/series/:id/generate`,

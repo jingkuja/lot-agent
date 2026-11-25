@@ -6,6 +6,7 @@ export type ComicBatchPlan = {
   totalCount: number;
   pendingIds: string[];
   batchIds: string[];
+  busyIds: string[];
   remainingCount: number;
   busyCount: number;
   blockedCount: number;
@@ -21,6 +22,7 @@ export function computeComicBatchPlan(
   mode: ComicGenerationMode,
 ): ComicBatchPlan {
   const pendingIds: string[] = [];
+  const busyIds: string[] = [];
   let busyCount = 0;
   let blockedCount = 0;
   let completedCount = 0;
@@ -31,15 +33,19 @@ export function computeComicBatchPlan(
       const done = Boolean(p?.keyframeApproved && !p?.keyframeStale);
       const busy = Boolean(p && ACTIVE_STATES.has(p.keyframeState));
       if (done) completedCount += 1;
-      else if (busy) busyCount += 1;
-      else pendingIds.push(clip.id);
+      else if (busy) {
+        busyCount += 1;
+        busyIds.push(clip.id);
+      } else pendingIds.push(clip.id);
     } else {
       const done = Boolean(p?.adoptedVideoTakeId && !p?.adoptedStale);
       const busy = Boolean(p && ACTIVE_STATES.has(p.videoState));
       const needsFrame = mode === "from_keyframe" && !p?.keyframeApproved;
       if (done) completedCount += 1;
-      else if (busy) busyCount += 1;
-      else if (needsFrame) blockedCount += 1;
+      else if (busy) {
+        busyCount += 1;
+        busyIds.push(clip.id);
+      } else if (needsFrame) blockedCount += 1;
       else pendingIds.push(clip.id);
     }
   }
@@ -51,6 +57,7 @@ export function computeComicBatchPlan(
     totalCount: clips.length,
     pendingIds,
     batchIds,
+    busyIds,
     remainingCount,
     busyCount,
     blockedCount,

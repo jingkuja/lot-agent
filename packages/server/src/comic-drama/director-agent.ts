@@ -452,6 +452,7 @@ export function createComicDirectorTools(
           name, ok: true, summary: `检索到 ${result.entries.length} 个角色`,
           data: result.entries.map(item => ({
             id: item.id, name: item.name, aliases: item.aliases, roleKey: item.roleKey,
+            dramaId: item.dramaId ?? null, dramaTitle: item.dramaTitle ?? null,
             appearance: item.appearance.slice(0, 120),
           })),
         };

@@ -7,6 +7,7 @@ import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { COMIC_BATCH_LIMIT, computeComicBatchPlan } from "./batch-plan.js";
 import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
+import { ArrowDownIcon } from "./ComicStudioIcons.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError, GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
@@ -44,7 +45,13 @@ export function ComicImageGeneration({
   const [mode, setMode] = useState(initialMode);
   const [replaceAdopted, setReplaceAdopted] = useState(false);
   const [visual, setVisual] = useState<ChosenVideoReference[]>([]);
+  const [resultsHighlight, setResultsHighlight] = useState(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastQuickToken = useRef(0);
+  useEffect(() => () => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
   const isVideo = mode !== "keyframe";
   const videoModel = comicVideoModel(detail.series.videoModel);
   const supportedModes: ReadonlyArray<readonly [ComicGenerationMode, string]> = [
@@ -109,6 +116,23 @@ export function ComicImageGeneration({
       setBatchNotice(t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [plan.busyCount]));
     }
   }, [detail.clips, disabled, onQuickActionHandled, preview, quickAction, t]);
+  const focusGenerationTasks = useCallback(() => {
+    if (batchPlan.busyIds.length > 0 && (!clip || !batchPlan.busyIds.includes(clip.id))) {
+      select(batchPlan.busyIds[0]!);
+    }
+    const moveFocus = () => {
+      const target = resultsRef.current;
+      if (!target) return;
+      target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      target.focus?.({ preventScroll: true });
+      setResultsHighlight(true);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setResultsHighlight(false), 1200);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(moveFocus);
+    else moveFocus();
+  }, [batchPlan.busyIds, clip, select]);
+
   const dramaTitle = detail.drama?.title ?? detail.series.seriesGroup ?? detail.series.title;
   const episodeNo = detail.series.episodeNo ?? 1;
   const clipOrigin: ComicClipOrigin = {
@@ -140,13 +164,26 @@ export function ComicImageGeneration({
               : "全部首帧已审核完成；如需重新生成，请手动勾选分镜后再预览费用。")}</small>
           ) : batchPlan.pendingIds.length > 0 ? (
             <>
-              <small>
-                {batchPlan.remainingCount > 0
-                  ? t("待处理 {0} 个（单批上限 10，本批 {1} + 余 {2}）",
-                    [batchPlan.pendingIds.length, batchPlan.batchIds.length, batchPlan.remainingCount])
-                  : t("待处理 {0} 个", [batchPlan.pendingIds.length])}
-                {batchPlan.busyCount > 0 ? ` · ${t("生成中 {0}", [batchPlan.busyCount])}` : ""}
-              </small>
+              <div className="comic-batch-busy-row">
+                <small>
+                  {batchPlan.remainingCount > 0
+                    ? t("待处理 {0} 个（单批上限 10，本批 {1} + 余 {2}）",
+                      [batchPlan.pendingIds.length, batchPlan.batchIds.length, batchPlan.remainingCount])
+                    : t("待处理 {0} 个", [batchPlan.pendingIds.length])}
+                  {batchPlan.busyCount > 0 ? ` · ${t("生成中 {0}", [batchPlan.busyCount])}` : ""}
+                </small>
+                {batchPlan.busyCount > 0 && (
+                  <button
+                    type="button"
+                    className="comic-jump-task-btn"
+                    onClick={focusGenerationTasks}
+                    aria-label={t("定位到下方生成任务")}
+                  >
+                    <span>{t("查看任务")}</span>
+                    <ArrowDownIcon size={13} />
+                  </button>
+                )}
+              </div>
               <div className="comic-actions">
                 <button type="button" disabled={quoting} onClick={() => {
                   setChecked(batchPlan.batchIds);
@@ -167,11 +204,24 @@ export function ComicImageGeneration({
               </div>
             </>
           ) : (
-            <small>
-              {batchPlan.blockedCount > 0 && mode === "from_keyframe"
-                ? t("尚有 {0} 个分镜未确认首帧，请先审核首帧或切换到直接参考生成。", [batchPlan.blockedCount])
-                : t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [batchPlan.busyCount])}
-            </small>
+            <div className="comic-batch-busy-row">
+              <small>
+                {batchPlan.blockedCount > 0 && mode === "from_keyframe"
+                  ? t("尚有 {0} 个分镜未确认首帧，请先审核首帧或切换到直接参考生成。", [batchPlan.blockedCount])
+                  : t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [batchPlan.busyCount])}
+              </small>
+              {batchPlan.busyCount > 0 && !(batchPlan.blockedCount > 0 && mode === "from_keyframe") && (
+                <button
+                  type="button"
+                  className="comic-jump-task-btn"
+                  onClick={focusGenerationTasks}
+                  aria-label={t("定位到下方生成任务")}
+                >
+                  <span>{t("查看任务")}</span>
+                  <ArrowDownIcon size={13} />
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -205,7 +255,11 @@ export function ComicImageGeneration({
         </button>
       </>}
     </section>
-    <div className="comic-generation-results">
+    <div
+      ref={resultsRef}
+      tabIndex={-1}
+      className={`comic-generation-results${resultsHighlight ? " is-focused-target" : ""}`}
+    >
       {error && <p className="comic-error" role="alert">{t(error)}</p>}
       {clip && (isVideo ? <ClipVideoVersions key={clip.id} seriesId={scope.id} clip={clip} origin={clipOrigin} refresh={refresh} disabled={disabled}
         choose={choose} quoting={quoting} preview={() => void preview([clip.id])} onSeriesChanged={onSeriesChanged} /> :

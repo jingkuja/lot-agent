@@ -102,7 +102,7 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
       <label>{t("剧集名称")}<input name="seriesQuery" maxLength={120} /></label>
       <label>{t("出镜人物")}<select name="characterId">
         <option value="">{t("全部角色")}</option>
-        {characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        {characters.map(c => <option key={c.id} value={c.id}>{c.dramaTitle ? `${c.name}（《${c.dramaTitle}》）` : c.name}</option>)}
       </select></label>
       <label>{t("采用状态")}<select name="adopted">
         <option value="">{t("全部")}</option><option value="true">{t("已采用")}</option><option value="false">{t("未采用")}</option>

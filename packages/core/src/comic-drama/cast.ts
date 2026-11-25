@@ -36,7 +36,13 @@ export const comicSequelOptionsSchema = z.object({ inheritCastAndStyle: z.boolea
 export type ComicCastSnapshot = z.infer<typeof comicCastSnapshotSchema>;
 export type ComicCastAsset = ComicCastSnapshot["assets"][number];
 export type ComicClipCasting = z.infer<typeof comicClipCastingSchema>;
-export type ComicSeriesCast = { snapshot: ComicCastSnapshot; archived: boolean; hasUpdates: boolean };
+export type ComicSeriesCast = {
+  snapshot: ComicCastSnapshot;
+  archived: boolean;
+  hasUpdates: boolean;
+  originDramaId?: string | null;
+  originDramaTitle?: string | null;
+};
 export type ComicCastChange =
   | { action: "add" | "outfit"; characterId: string; outfitId: string }
   | { action: "sync" | "remove"; characterId: string };

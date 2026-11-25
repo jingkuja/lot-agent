@@ -68,7 +68,9 @@ export function SaveComicFrame({ take, initialTime, close, saved }: {
         setRoleId(""); setQuery(event.target.value);
       }} /></label>
       <label>{t("角色名称")}<select value={roleId} onChange={event => setRoleId(event.target.value)} required>
-        <option value="">{t("请选择")}</option>{roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
+        <option value="">{t("请选择")}</option>{roles.map(role => (
+          <option key={role.id} value={role.id}>{role.dramaTitle ? `${role.name}（《${role.dramaTitle}》）` : role.name}</option>
+        ))}
       </select></label>
       {mode === "slot" && <label>{t("造型套装")}<select name="outfit" required defaultValue="">
         <option value="">{t("请选择")}</option>{outfits.map(outfit => <option key={outfit.id} value={outfit.id}>{outfit.name}</option>)}

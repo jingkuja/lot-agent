@@ -4024,3 +4024,139 @@ ul.comic-version-list pre {
     grid-template-columns: 1fr;
   }
 }
+
+.comic-drama-step-footer--split {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.comic-ai-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.comic-ai-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+}
+
+.comic-ai-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
+}
+
+.comic-ai-preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comic-ai-preview textarea {
+  width: 100%;
+  min-height: 160px;
+  background: var(--bg);
+}
+
+.comic-character-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.comic-character-filter-bar .comic-history-controls {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.comic-character-drama-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.comic-character-drama-filter select {
+  min-width: 150px;
+}
+
+.comic-drama-origin-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.comic-drama-origin-tag[data-unassigned="true"] {
+  border-color: var(--border);
+  background: var(--overlay-sink);
+  color: var(--text-secondary);
+}
+
+.comic-drama-origin-tag[data-cross-drama="true"] {
+  border-color: color-mix(in srgb, var(--gold) 44%, var(--border));
+  background: color-mix(in srgb, var(--gold) 12%, var(--bg-card));
+  color: var(--gold);
+}
+
+.comic-batch-busy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comic-jump-task-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.comic-jump-task-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
+}
+
+.comic-generation-results {
+  scroll-margin-top: 16px;
+}
+
+.comic-generation-results:focus {
+  outline: none;
+}
+
+.comic-generation-results.is-focused-target > .comic-edit-card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}

@@ -142,6 +142,14 @@ export function ArrowRightIcon({ size = 14 }: IconProps) {
   );
 }
 
+export function ArrowDownIcon({ size = 14 }: IconProps) {
+  return (
+    <Icon size={size}>
+      <path d="M12 5v14M6 13l6 6 6-6" />
+    </Icon>
+  );
+}
+
 /** Editorial storyboard drafting-desk artwork rendered with theme CSS variables only. */
 export function StudioDeskArtwork() {
   return (

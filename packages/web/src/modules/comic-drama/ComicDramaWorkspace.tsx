@@ -779,7 +779,7 @@ export function ComicDramaWorkspace({
             onDeriveEpisode={(epId, action, inherit) => run(async () => saved(await comicDramaApi.derive(epId, action, inherit)))}
             onChangeEpisode={handleChangeEpisode}
             onOpenHistory={() => void leave(() => navigate(historyPath))}
-            onOpenCharacters={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
+            onOpenCharacters={charId => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters" + (charId ? "/" + charId : "")))}
             onRegisterFlush={setDramaFlush}
           />
         ) : !series || !detail ? (
@@ -1036,10 +1036,10 @@ export function ComicDramaWorkspace({
                   </section>
                 );
               })() : stage === "选角" ? (
-                <CastPanel key={series.id} seriesId={series.id} revision={series.revision} cast={detail.cast}
-                  dramaCastCount={detail.dramaCastCount ?? 0}
+                <CastPanel key={series.id} seriesId={series.id} dramaId={series.dramaId} dramaTitle={dramaTitle} revision={series.revision}
+                  cast={detail.cast} dramaCastCount={detail.dramaCastCount ?? 0}
                   onSyncDramaCast={() => changeContent((id, revision) => comicDramaApi.syncEpisodeCastFromDrama(id, revision))}
-                  onOpenLibrary={() => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters"))}
+                  onOpenLibrary={charId => void leave(() => navigate(COMIC_DRAMA_ROOT + "/characters" + (charId ? "/" + charId : "")))}
                   disabled={locked || !!editor.issue} change={change => changeContent((id, revision) => comicDramaApi.changeCast(id, revision, change))} />
               ) : stage === "生成" ? (
                 <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}

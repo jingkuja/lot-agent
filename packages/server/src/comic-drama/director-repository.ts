@@ -108,10 +108,10 @@ export class PgComicDirector {
 
   async episode(owner: string, series: string, db: ComicQuery = this.pool, lock = false) {
     const { rows: [row] } = await db.query<{
-      title: string; logline: string; seriesGroup?: string | null; episodeNo?: number | null;
+      dramaId?: string | null; title: string; logline: string; seriesGroup?: string | null; episodeNo?: number | null;
       styleKey: string; aspectRatio: string; videoModel: string | null; revision: number; archived: boolean;
     }>(
-      `SELECT title,logline,series_group AS "seriesGroup",episode_no AS "episodeNo",
+      `SELECT drama_id AS "dramaId",title,logline,series_group AS "seriesGroup",episode_no AS "episodeNo",
          style_key AS "styleKey",aspect_ratio AS "aspectRatio",video_model AS "videoModel",
          revision,archived_at IS NOT NULL AS archived
        FROM ${cd}.cd_series WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL ${lock ? "FOR UPDATE" : ""}`,
@@ -728,8 +728,8 @@ export class PgComicDirector {
           ({ characterId, outfitId } = input);
         } else {
           const { rows: [character] } = await db.query<{ id: string }>(`INSERT INTO ${cd}.cd_characters
-            (owner_id,name,aliases,tags,age,personality,appearance) VALUES($1,$2,'{}','{}','','',$3) RETURNING id`,
-          [owner, suggestion.name, suggestion.description]);
+            (owner_id,name,aliases,tags,drama_id,age,personality,appearance) VALUES($1,$2,'{}','{}',$3,'','',$4) RETURNING id`,
+          [owner, suggestion.name, targetEpisode.dramaId ?? null, suggestion.description]);
           characterId = character.id;
           const { rows: [outfit] } = await db.query<{ id: string }>(`INSERT INTO ${cd}.cd_character_outfits(owner_id,character_id,name)
             VALUES($1,$2,$3) RETURNING id`, [owner, characterId, input.outfitName]);

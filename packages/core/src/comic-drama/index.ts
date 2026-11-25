@@ -52,6 +52,19 @@ export const comicDramaMasterScriptWriteSchema = z.object({
   content: z.string().max(COMIC_DRAMA_SCRIPT_MAX_CHARS),
 }).strict();
 
+export const comicDramaOutlinePolishSchema = z.object({
+  outline: z.string().trim().min(1).max(COMIC_DRAMA_OUTLINE_MAX_CHARS).refine(v => !v.includes("\0")),
+  instruction: z.string().trim().max(1000).refine(v => !v.includes("\0")).optional(),
+  language: z.enum(["zh", "en", "id"]).default("zh"),
+}).strict();
+
+export const comicDramaScriptGenerateSchema = z.object({
+  episodeCount: z.number().int().min(1).max(50),
+  notes: z.string().trim().max(4000).refine(v => !v.includes("\0")).optional().default(""),
+  outline: z.string().max(COMIC_DRAMA_OUTLINE_MAX_CHARS).refine(v => !v.includes("\0")).optional(),
+  language: z.enum(["zh", "en", "id"]).default("zh"),
+}).strict();
+
 export const comicDramaSetCurrentDramaSchema = z.object({ dramaId: id }).strict();
 
 export const comicDramaSchema = comicDramaFieldsSchema.extend({
@@ -255,6 +268,11 @@ export const comicDramaRevisionConflictSchema = z.object({
 export type ComicDrama = z.infer<typeof comicDramaSchema>;
 export type ComicDramaCreateInput = z.infer<typeof createComicDramaSchema>;
 export type ComicDramaUpdateInput = z.infer<typeof updateComicDramaSchema>;
+export type ComicDramaOutlinePolishInput = z.infer<typeof comicDramaOutlinePolishSchema>;
+export type ComicDramaOutlinePolishResult = { outline: string; modelId: string };
+export type ComicDramaScriptGenerateInput = z.infer<typeof comicDramaScriptGenerateSchema>;
+export type ComicDramaScriptGenerateResult = { script: string; truncated: boolean; modelId: string };
+export type ComicDramaOption = { id: string; title: string; archived: boolean };
 export type ComicDramaEpisodeCreateInput = z.infer<typeof createComicEpisodeSchema>;
 export type ComicDramaSeries = z.infer<typeof comicDramaSeriesSchema>;
 export type ComicDramaClip = z.infer<typeof comicDramaClipSchema> & { progress?: ComicClipProgress };
@@ -446,6 +464,7 @@ export type ComicDramaContent = Pick<ComicDramaDetail, "clips" | "script" | "cas
 
 export interface ComicDramaRepository {
   listDramas?(owner: string, query: ComicDramaHierarchyListQuery): Promise<ComicDramaTreeListing>;
+  listDramaOptions?(owner: string): Promise<ComicDramaOption[]>;
   getDrama?(owner: string, dramaId: string): Promise<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[]; cast?: ComicSeriesCast[] }>;
   openDrama?(owner: string, dramaId: string): Promise<ComicDramaView>;
   currentDrama?(owner: string): Promise<ComicDramaCurrentState>;

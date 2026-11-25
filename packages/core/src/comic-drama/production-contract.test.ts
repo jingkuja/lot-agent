@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   adaptComicClipDraftForModel, analyzeComicModelSwitch, applyComicScriptEnhancements, buildComicDramaHierarchy,
-  buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues,
-  COMIC_SPEECH_PRESET_CATALOG, comicDirectorApplySchema, comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema,
-  comicDramaClipDraftSchema, comicDramaSchema, comicDramaSeriesSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions,
-  comicRenderDurationToleranceMs, comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema, comicUserPreferencesSchema, comicVideoOptions,
+  buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG,
+  comicCharacterInput, comicCharacterSearch, comicDirectorApplySchema, comicDirectorChatInputSchema,
+  comicDirectorDismissSchema, comicDirectorInputSchema, comicDramaClipDraftSchema, comicDramaOutlinePolishSchema,
+  comicDramaSchema, comicDramaScriptGenerateSchema, comicDramaSeriesSchema, comicFrozenGenerationSchema,
+  comicGenerationPreviewSchema, comicImageOptions, comicRenderDurationToleranceMs, comicRenderIssue,
+  comicSpeechReleaseSchema, comicTimelineSchema, comicUserPreferencesSchema, comicVideoOptions,
   comicVideoProfile, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, countComicClipFoldedReferences, countComicClipReferences,
   createComicDramaSchema, estimateComicDialogueMs, extractComicScriptExcerptSegments,
   layoutComicTimeline, mapComicVideoResolution, matchComicCharacters, normalizeShotDurationShares, planClipSfxPlacements,
@@ -547,6 +549,18 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
       `1:${uuid(2)}:门口风铃:4000`,
       `2:${uuid(2)}:柜台重逢:5000`,
     ]);
+
+    expect(comicDramaOutlinePolishSchema.safeParse({ outline: "大纲正文", language: "zh" }).success).toBe(true);
+    expect(comicDramaOutlinePolishSchema.safeParse({ outline: "   ", language: "zh" }).success).toBe(false);
+    expect(comicDramaScriptGenerateSchema.safeParse({ episodeCount: 12, notes: "节奏紧凑", language: "zh" }).success).toBe(true);
+    expect(comicDramaScriptGenerateSchema.safeParse({ episodeCount: 0 }).success).toBe(false);
+    expect(comicDramaScriptGenerateSchema.safeParse({ episodeCount: 51 }).success).toBe(false);
+    expect(comicCharacterInput.safeParse({
+      name: "林夏", aliases: [], tags: [], roleKey: "lead", dramaId: uuid(99), age: "24", personality: "坚韧", appearance: "黑发",
+    }).success).toBe(true);
+    expect(comicCharacterSearch.safeParse({ dramaId: uuid(99), page: "1" }).success).toBe(true);
+    expect(comicCharacterSearch.safeParse({ dramaId: "unassigned", archived: "false" }).success).toBe(true);
+    expect(comicCharacterSearch.safeParse({ dramaId: "not-a-uuid" }).success).toBe(false);
   });
 });
 

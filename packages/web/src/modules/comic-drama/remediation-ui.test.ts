@@ -50,7 +50,13 @@ describe("P2 #10: batch quick generation shows 10 + remainder and avoids silent 
     expect(plan.allCompleted).toBe(true);
     expect(plan.pendingIds).toEqual([]);
     expect(plan.batchIds).toEqual([]);
+    expect(plan.busyIds).toEqual([]);
     expect(plan.remainingCount).toBe(0);
+
+    const busyClips = [makeClip(1, { keyframeState: "running" }), makeClip(2)];
+    const busyPlan = computeComicBatchPlan(busyClips, "keyframe");
+    expect(busyPlan.busyCount).toBe(1);
+    expect(busyPlan.busyIds).toEqual([uuid(1)]);
   });
 });
 

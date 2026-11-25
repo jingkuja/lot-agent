@@ -65,6 +65,7 @@ export const comicSystemDictionary: Record<ComicDictionaryDomain, readonly Comic
 const words = z.array(label).max(20);
 export const comicCharacterInput = z.object({
   name: label, aliases: words, tags: words, roleKey: key.nullable(),
+  dramaId: id.nullable().optional(),
   age: z.string().trim().max(120), personality: z.string().trim().max(2000), appearance: z.string().trim().max(2000),
 }).strict();
 export const comicOutfitInput = z.object({ name: label }).strict();
@@ -94,6 +95,9 @@ export const comicLibrarySearch = z.object({
   query: z.string().trim().max(120).optional(), archived: z.enum(["true", "false"]).default("false"),
   page: z.coerce.number().int().min(1).max(10000).default(1),
 }).strict();
+export const comicCharacterSearch = comicLibrarySearch.extend({
+  dramaId: z.union([id, z.literal("unassigned")]).optional(),
+}).strict();
 export const comicMaterialSearch = comicLibrarySearch.extend({
   kind: comicMaterialKind.optional(), mime: z.enum(["image", "audio", "video"]).optional(),
 }).strict();
@@ -105,6 +109,7 @@ export type ComicMaterialUpdate = z.infer<typeof comicMaterialUpdate>;
 export type ComicSaveMediaAsMaterial = z.infer<typeof comicSaveMediaAsMaterial>;
 export type ComicUserPreferences = z.infer<typeof comicUserPreferencesSchema>;
 export type ComicLibrarySearch = z.infer<typeof comicLibrarySearch>;
+export type ComicCharacterSearch = z.infer<typeof comicCharacterSearch>;
 export type ComicMaterialSearch = z.infer<typeof comicMaterialSearch>;
 export type ComicDictionaryUpdate = z.infer<typeof comicDictionaryUpdate>;
 export type ComicLibraryPage<T> = { entries: T[]; more: boolean };
@@ -115,7 +120,10 @@ export type ComicMediaLinks = { url: string; thumbnailUrl: string | null };
 export type ComicMediaVersion = { version: number; media: ComicMedia };
 export type ComicCharacterAsset = { kind: "slot" | "expression"; key: string; outfitId: string | null } & ComicMediaVersion;
 export type ComicOutfit = { id: string; name: string; sort?: number };
-export type ComicCharacter = ComicCharacterInput & { id: string; archived: boolean; cover: ComicMedia | null };
+export type ComicCharacter = ComicCharacterInput & {
+  id: string; archived: boolean; cover: ComicMedia | null;
+  dramaId?: string | null; dramaTitle?: string | null;
+};
 export type ComicCharacterDetail = ComicCharacter & { outfits: ComicOutfit[]; assets: ComicCharacterAsset[] };
 export type ComicMaterial = ComicMaterialInput & { id: string; archived: boolean } & ComicMediaVersion;
 export type ComicStylePreset = { styleKey: string; mediaId: string; media: ComicMedia; updatedAt: string };
@@ -133,7 +141,7 @@ export type StoredComicMedia = ComicMedia & { owner: string; storageKey: string;
 export interface ComicLibraryRepository {
   media(owner: string, id: string): Promise<StoredComicMedia | undefined>;
   file(key: string): Promise<{ id: string; owner: string } | undefined>;
-  listCharacters(owner: string, input: ComicLibrarySearch): Promise<ComicLibraryPage<ComicCharacter>>;
+  listCharacters(owner: string, input: ComicCharacterSearch): Promise<ComicLibraryPage<ComicCharacter>>;
   getCharacter(owner: string, id: string): Promise<ComicCharacterDetail>;
   createCharacter(owner: string, input: ComicCharacterInput): Promise<string>;
   editCharacter(owner: string, id: string, input: ComicCharacterInput): Promise<void>;

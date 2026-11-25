@@ -217,15 +217,16 @@ export function LibraryPagination({ page, more, change }: { page: number; more: 
   </div>;
 }
 
-export function LibrarySearch({ query, search, archived, onArchived }: {
-  query: string; search: (value: string) => void; archived: boolean; onArchived: (value: boolean) => void;
+export function LibrarySearch({ query, search, archived, onArchived, placeholder }: {
+  query: string; search: (value: string) => void; archived: boolean; onArchived: (value: boolean) => void; placeholder?: string;
 }) {
   const { t } = useI18n();
+  const label = placeholder ?? t("搜索名称或标签");
   return <form className="comic-history-controls" onSubmit={event => {
     event.preventDefault();
     search(String(new FormData(event.currentTarget).get("query") ?? "").trim());
   }}>
-    <input key={query} aria-label={t("搜索名称或标签")} name="query" defaultValue={query} maxLength={120} placeholder={t("搜索名称或标签")} />
+    <input key={query} aria-label={label} name="query" defaultValue={query} maxLength={120} placeholder={label} />
     <button>{t("搜索")}</button>
     <label><input type="checkbox" checked={archived} onChange={event => onArchived(event.target.checked)} />{t("已归档")}</label>
   </form>;

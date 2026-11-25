@@ -23,20 +23,24 @@ const currentSnapshot = `jsonb_build_object(
 
 export async function readSeriesCast(db: ComicQuery, seriesId: string): Promise<ComicSeriesCast[]> {
   const { rows } = await db.query<ComicSeriesCast>(`SELECT s.snapshot,(c.archived_at IS NOT NULL) AS archived,
-    (c.archived_at IS NULL AND s.snapshot IS DISTINCT FROM ${currentSnapshot}) AS "hasUpdates"
+    (c.archived_at IS NULL AND s.snapshot IS DISTINCT FROM ${currentSnapshot}) AS "hasUpdates",
+    d.id AS "originDramaId",d.title AS "originDramaTitle"
     FROM lot_comic_drama.cd_series_cast s
     JOIN lot_comic_drama.cd_characters c ON c.owner_id=s.owner_id AND c.id=s.character_id
     JOIN lot_comic_drama.cd_character_outfits o ON o.owner_id=s.owner_id AND o.character_id=s.character_id AND o.id=s.outfit_id
+    LEFT JOIN lot_comic_drama.cd_dramas d ON d.owner_id=c.owner_id AND d.id=c.drama_id AND d.deleted_at IS NULL
     WHERE s.series_id=$1 ORDER BY s.snapshot->>'name',s.character_id`, [seriesId]);
   return rows.map(row => ({ ...row, snapshot: comicCastSnapshotSchema.parse(row.snapshot) }));
 }
 
 export async function readDramaCast(db: ComicQuery, dramaId: string): Promise<ComicSeriesCast[]> {
   const { rows } = await db.query<ComicSeriesCast>(`SELECT s.snapshot,(c.archived_at IS NOT NULL) AS archived,
-    (c.archived_at IS NULL AND s.snapshot IS DISTINCT FROM ${currentSnapshot}) AS "hasUpdates"
+    (c.archived_at IS NULL AND s.snapshot IS DISTINCT FROM ${currentSnapshot}) AS "hasUpdates",
+    d.id AS "originDramaId",d.title AS "originDramaTitle"
     FROM lot_comic_drama.cd_drama_cast s
     JOIN lot_comic_drama.cd_characters c ON c.owner_id=s.owner_id AND c.id=s.character_id
     JOIN lot_comic_drama.cd_character_outfits o ON o.owner_id=s.owner_id AND o.character_id=s.character_id AND o.id=s.outfit_id
+    LEFT JOIN lot_comic_drama.cd_dramas d ON d.owner_id=c.owner_id AND d.id=c.drama_id AND d.deleted_at IS NULL
     WHERE s.drama_id=$1 ORDER BY s.snapshot->>'name',s.character_id`, [dramaId]);
   return rows.map(row => ({ ...row, snapshot: comicCastSnapshotSchema.parse(row.snapshot) }));
 }

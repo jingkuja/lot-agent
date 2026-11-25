@@ -10,12 +10,15 @@ import { api } from "../../api/client.js";
 import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
+import { CastPanel } from "./CastPanel.js";
+import { ComicImageGeneration } from "./ComicImageGeneration.js";
 import { DramaDialog } from "./DramaDialog.js";
 import { DramaHub } from "./DramaHub.js";
 import { SeriesDialog } from "./SeriesDialog.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { Storyboard } from "./Storyboard.js";
 import { comicDramaApi } from "./api.js";
+import { comicGenerationApi } from "./generation-api.js";
 import { comicLibraryApi } from "./library-api.js";
 
 const uuid = (n: number) => `abcdef01-2345-4567-8abc-${String(n).padStart(12, "0")}`;
@@ -378,5 +381,236 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
     expect(epHost.textContent).toContain("《雨夜便利店》");
     expect(epHost.textContent).toContain("自动带入全剧角色（3 名）");
     expect(epHost.textContent).not.toContain("新建整部剧集");
+  });
+
+  it("supports DramaHub AI outline polish, CastPanel quick character creation with drama attribution, AI script modal, and jump-to-task focus", async () => {
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async (domain) => [
+      ...(comicSystemDictionary[domain] ?? []),
+    ] as never);
+    vi.spyOn(comicDramaApi, "listDramaOptions").mockResolvedValue([
+      { id: uuid(100), title: "雨夜便利店", archived: false },
+      { id: uuid(200), title: "长安雨夜", archived: false },
+    ]);
+    const polishSpy = vi.spyOn(comicDramaApi, "polishDramaOutline").mockResolvedValue({
+      outline: "润色后的十集大纲：暴雨夜的便利店串联十位夜归人的执念与救赎。",
+      modelId: "deepseek-v4.1-flash",
+    });
+    const genScriptSpy = vi.spyOn(comicDramaApi, "generateDramaScript").mockResolvedValue({
+      script: "【第 1 集：风铃】\n场景：深夜便利店。",
+      truncated: false,
+      modelId: "deepseek-v4.1-flash",
+    });
+
+    const dramaId = uuid(100);
+    const view: ComicDramaView = {
+      drama: {
+        id: dramaId,
+        title: "雨夜便利店",
+        synopsis: "都市奇幻短剧",
+        outline: "女孩失恋后来到深夜便利店。",
+        scriptContent: "",
+        styleKey: "thick_painting",
+        aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-0",
+        revision: 1,
+        archivedAt: null,
+      },
+      episodes: [],
+      cast: [{
+        snapshot: {
+          schemaVersion: 1,
+          characterId: uuid(301),
+          name: "沈青",
+          aliases: [],
+          age: "26",
+          personality: "冷静",
+          appearance: "风衣",
+          roleKey: "lead",
+          outfitId: uuid(401),
+          outfitName: "雨夜风衣",
+          assets: [],
+        },
+        archived: false,
+        hasUpdates: false,
+        originDramaId: uuid(200),
+        originDramaTitle: "长安雨夜",
+      }],
+    };
+    vi.spyOn(comicDramaApi, "dramaCast").mockResolvedValue({ cast: view.cast, dramaRevision: 1 });
+
+    const hubHost = await mount(createElement(DramaHub, {
+      view,
+      busy: false,
+      onUpdated: vi.fn(),
+      onReload: vi.fn(async () => {}),
+      onEditDrama: vi.fn(),
+      onAddEpisode: vi.fn(),
+      onOpenEpisode: vi.fn(),
+      onDeriveEpisode: vi.fn(async () => true),
+      onChangeEpisode: vi.fn(async () => true),
+      onOpenHistory: vi.fn(),
+      onOpenCharacters: vi.fn(),
+    }), "zh");
+
+    // 1. Step 1: AI polish button below outline -> shows preview -> adopt updates textarea
+    const polishBtn = Array.from(hubHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("AI 润色"));
+    expect(polishBtn).toBeTruthy();
+    await act(async () => {
+      polishBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(polishSpy).toHaveBeenCalledWith(dramaId, { outline: "女孩失恋后来到深夜便利店。", language: "zh" }, expect.any(AbortSignal));
+    expect(hubHost.textContent).toContain("AI 润色建议");
+    const adoptPolishBtn = Array.from(hubHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("采用润色结果"));
+    act(() => { adoptPolishBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    const outlineArea = hubHost.querySelector('textarea[aria-label="全剧大纲"]') as HTMLTextAreaElement | null;
+    expect(outlineArea?.value).toContain("润色后的十集大纲");
+
+    // 2. Step 2: CastPanel shows cross-drama origin badge & "+ 新增角色" button with current drama preselected
+    const castStepBtn = Array.from(hubHost.querySelectorAll("nav button")).find(btn => btn.textContent?.includes("角色"));
+    await act(async () => {
+      castStepBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(hubHost.textContent).toContain("跨剧 · 《长安雨夜》");
+
+    const createCharSpy = vi.spyOn(comicLibraryApi, "createCharacter").mockResolvedValue({ id: uuid(302) });
+    const createOutfitSpy = vi.spyOn(comicLibraryApi, "outfit").mockResolvedValue({ id: uuid(402), name: "默认造型" });
+    const changeCastSpy = vi.fn(async () => true);
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const castHost = await mount(createElement(CastPanel, {
+      scope: "drama",
+      seriesId: dramaId,
+      dramaId,
+      dramaTitle: "雨夜便利店",
+      revision: 1,
+      cast: [],
+      disabled: false,
+      change: changeCastSpy,
+      onOpenLibrary: vi.fn(),
+    }), "zh");
+
+    const newCharBtn = Array.from(castHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("新增角色"));
+    expect(newCharBtn).toBeTruthy();
+    await act(async () => {
+      newCharBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const dramaSelect = castHost.querySelector('select[name="dramaId"]') as HTMLSelectElement | null;
+    expect(dramaSelect?.value).toBe(dramaId);
+    const charNameInput = castHost.querySelector('input[name="name"]') as HTMLInputElement | null;
+    if (charNameInput) charNameInput.value = "林夏";
+    const charForm = castHost.querySelector("dialog form") as HTMLFormElement | null;
+    await act(async () => {
+      charForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(createCharSpy).toHaveBeenCalledWith(expect.objectContaining({ name: "林夏", dramaId }));
+    expect(createOutfitSpy).toHaveBeenCalledWith(uuid(302), "默认造型");
+    expect(changeCastSpy).toHaveBeenCalledWith({ action: "add", characterId: uuid(302), outfitId: uuid(402) });
+
+    // 3. Step 3: DramaHub "AI 生成剧本" opens dialog with episodeCount & notes and populates script
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const scriptHubHost = await mount(createElement(DramaHub, {
+      view,
+      busy: false,
+      initialTab: "script",
+      onUpdated: vi.fn(),
+      onReload: vi.fn(async () => {}),
+      onEditDrama: vi.fn(),
+      onAddEpisode: vi.fn(),
+      onOpenEpisode: vi.fn(),
+      onDeriveEpisode: vi.fn(async () => true),
+      onChangeEpisode: vi.fn(async () => true),
+      onOpenHistory: vi.fn(),
+      onOpenCharacters: vi.fn(),
+    }), "zh");
+    const aiScriptBtn = Array.from(scriptHubHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("AI 生成剧本"));
+    expect(aiScriptBtn).toBeTruthy();
+    act(() => { aiScriptBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    const epCountInput = scriptHubHost.querySelector('input[name="episodeCount"]') as HTMLInputElement | null;
+    const notesInput = scriptHubHost.querySelector('textarea[name="notes"]') as HTMLTextAreaElement | null;
+    expect(epCountInput).toBeTruthy();
+    expect(notesInput).toBeTruthy();
+    if (epCountInput) epCountInput.value = "8";
+    if (notesInput) notesInput.value = "每集结尾加悬念";
+    const genForm = scriptHubHost.querySelector("dialog form") as HTMLFormElement | null;
+    await act(async () => {
+      genForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(genScriptSpy).toHaveBeenCalledWith(dramaId, {
+      episodeCount: 8,
+      notes: "每集结尾加悬念",
+      outline: "女孩失恋后来到深夜便利店。",
+      language: "zh",
+    }, expect.any(AbortSignal));
+    const scriptArea = scriptHubHost.querySelector('textarea[aria-label="全剧剧本"]') as HTMLTextAreaElement | null;
+    expect(scriptArea?.value).toContain("【第 1 集：风铃】");
+
+    // 4. Step 4: ComicImageGeneration renders jump button beside "生成中" and focuses generation results below
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    vi.spyOn(comicGenerationApi, "videos").mockResolvedValue([]);
+    vi.spyOn(comicGenerationApi, "keyframes").mockResolvedValue({ takes: [], approvedTakeId: null, approvedMediaId: null, selectionRevision: 1 });
+    const selectClip = vi.fn();
+    const clipA: ComicDramaClip = {
+      id: uuid(501),
+      revision: 1,
+      selectionRevision: 1,
+      ordinal: 1,
+      draft: {
+        schemaVersion: 1, durationMs: 5000, scene: "便利店内",
+        shots: [{ id: uuid(601), framingKey: "medium", movementKey: "fixed", description: "镜1", durationShare: 100 }],
+        lines: [],
+      },
+      progress: {
+        keyframeState: "ready", keyframeMediaId: uuid(701), keyframeApproved: true, keyframeStale: false,
+        videoState: "running", videoTakeCount: 1, adoptedVideoTakeId: null, adoptedVideoVersion: null,
+        adoptedVideoMediaId: null, adoptedStale: false, castSnapshotStale: false,
+      },
+    };
+    const genHost = await mount(createElement(ComicImageGeneration, {
+      detail: {
+        series: {
+          id: uuid(11), dramaId, parentId: null, title: "第一集", logline: "", seriesGroup: "雨夜便利店",
+          episodeNo: 1, styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-0",
+          revision: 1, archivedAt: null,
+        },
+        clips: [clipA],
+        script: null,
+        cast: [],
+      },
+      selected: clipA.id,
+      select: selectClip,
+      getSaved: async () => null,
+      disabled: false,
+      initialMode: "from_keyframe",
+      choose: vi.fn(),
+      editClip: vi.fn(),
+    }), "zh");
+
+    expect(genHost.textContent).toContain("当前有 1 个分镜正在生成中，请稍候查看进度。");
+    const jumpBtn = genHost.querySelector(".comic-jump-task-btn") as HTMLButtonElement | null;
+    expect(jumpBtn).toBeTruthy();
+    const resultsEl = genHost.querySelector(".comic-generation-results") as HTMLDivElement | null;
+    const scrollMock = vi.fn();
+    const focusMock = vi.fn();
+    if (resultsEl) {
+      resultsEl.scrollIntoView = scrollMock;
+      resultsEl.focus = focusMock;
+    }
+    act(() => { jumpBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    });
+    expect(scrollMock).toHaveBeenCalled();
+    expect(focusMock).toHaveBeenCalled();
   });
 });

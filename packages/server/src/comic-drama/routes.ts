@@ -3,12 +3,14 @@ import { bodyLimit } from "hono/body-limit";
 import {
   COMIC_DRAMA_SCRIPT_MAX_CHARS, COMIC_SCRIPT_DOCX, COMIC_SCRIPT_FILE_BYTES, comicAddClipSchema, comicCastAddSchema,
   comicCastOutfitSchema, comicDramaIdSchema, comicDramaListSchema, comicDramaMasterScriptWriteSchema,
-  comicDramaOutlineWriteSchema, comicDramaRevisionSchema, comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
-  comicDramaSetCurrentDramaSchema, comicDramaSetCurrentSchema, comicSequelOptionsSchema, comicVideoProfile,
-  createComicDramaSchema, createComicDramaSeriesSchema, createComicEpisodeSchema, reorderComicDramaClipsSchema,
-  updateComicDramaClipSchema, updateComicDramaSchema, updateComicDramaSeriesSchema, type ComicDramaRepository,
+  comicDramaOutlinePolishSchema, comicDramaOutlineWriteSchema, comicDramaRevisionSchema, comicDramaScriptGenerateSchema,
+  comicDramaScriptWriteSchema, comicDramaSeriesListSchema, comicDramaSetCurrentDramaSchema, comicDramaSetCurrentSchema,
+  comicSequelOptionsSchema, comicVideoProfile, createComicDramaSchema, createComicDramaSeriesSchema, createComicEpisodeSchema,
+  reorderComicDramaClipsSchema, updateComicDramaClipSchema, updateComicDramaSchema, updateComicDramaSeriesSchema,
+  type ComicDramaRepository,
 } from "@lot-agent/core/comic-drama";
 import { parseIsolated } from "../knowledge/ingestion/parser-process.js";
+import type { ComicDramaAi } from "./drama-ai.js";
 import { ComicLibraryError } from "./library-db.js";
 import { ComicDramaError } from "./repository.js";
 
@@ -19,6 +21,7 @@ export function createComicDramaRoutes(
   canSelectModel: (owner: string, model: string) => Promise<boolean>,
   resolveDefaultVideoModel?: (owner: string) => Promise<string | null>,
   parser?: string,
+  dramaAi?: Pick<ComicDramaAi, "polishOutline" | "generateScript">,
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const jsonLimit = bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
@@ -75,6 +78,10 @@ export function createComicDramaRoutes(
     if (!resolved.ok) return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
     return c.json(await repo.createDrama(owner, { ...input.data, videoModel: resolved.videoModel }), 201);
   });
+  app.get("/dramas/options", async c => {
+    if (!repo.listDramaOptions) return c.json([]);
+    return c.json(await repo.listDramaOptions(c.get("userId")));
+  });
   app.get("/dramas/current", async c => {
     if (!repo.currentDrama) {
       return c.json({ dramaId: null, seriesId: null, drama: null, episodeCount: 0, castCount: 0 });
@@ -112,12 +119,28 @@ export function createComicDramaRoutes(
       c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision, input.data.outline,
     ));
   });
+  app.post("/dramas/:dramaId/outline/polish", async c => {
+    if (!dramaAi) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaOutlinePolishSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await dramaAi.polishOutline(
+      c.get("userId"), seriesId(c.req.param("dramaId")), input.data, c.req.raw.signal,
+    ));
+  });
   app.put("/dramas/:dramaId/script", async c => {
     if (!repo.saveDramaScript) return c.json({ code: "NOT_FOUND" }, 404);
     const input = comicDramaMasterScriptWriteSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     return c.json(await repo.saveDramaScript(
       c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision, input.data.content,
+    ));
+  });
+  app.post("/dramas/:dramaId/script/generate", async c => {
+    if (!dramaAi) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaScriptGenerateSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await dramaAi.generateScript(
+      c.get("userId"), seriesId(c.req.param("dramaId")), input.data, c.req.raw.signal,
     ));
   });
   app.post("/dramas/:dramaId/import", fileLimit, async c => {

@@ -1,14 +1,16 @@
 import type { Pool } from "pg";
 import type {
-  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload, ComicLibraryPage, ComicLibrarySearch,
-  ComicLibraryRepository, ComicMaterial, ComicMaterialInput, ComicMaterialSearch, ComicMaterialUpdate, ComicMediaVersion, ComicOutfit, StoredComicMedia,
+  ComicCharacter, ComicCharacterAsset, ComicCharacterDetail, ComicCharacterInput, ComicCharacterSearch, ComicCharacterUpload,
+  ComicLibraryPage, ComicLibraryRepository, ComicMaterial, ComicMaterialInput, ComicMaterialSearch, ComicMaterialUpdate,
+  ComicMediaVersion, ComicOutfit, StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { requireComicChoice } from "./dictionary.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
 const tables = "lot_comic_drama";
 const pageSize = 24;
-const characterColumns = `c.id,name,aliases,tags,role_key AS "roleKey",age,personality,appearance,(archived_at IS NOT NULL) AS archived`;
+const characterColumns = `c.id,c.name,c.aliases,c.tags,c.role_key AS "roleKey",d.id AS "dramaId",d.title AS "dramaTitle",
+  c.age,c.personality,c.appearance,(c.archived_at IS NOT NULL) AS archived`;
 const materialColumns = `m.id,kind,name,category_key AS "categoryKey",tags,(archived_at IS NOT NULL) AS archived`;
 const mediaValue = `jsonb_build_object('id',f.id,'mime',f.mime,'sizeBytes',f.size_bytes,'width',f.width,'height',f.height,
   'durationMs',f.duration_ms,'hasThumbnail',f.thumbnail_key IS NOT NULL)`;
@@ -63,21 +65,54 @@ export class PgComicLibrary implements ComicLibraryRepository {
     return rows[0];
   }
 
-  async listCharacters(owner: string, input: ComicLibrarySearch) {
-    const { rows } = await this.pool.query<ComicCharacter>(`SELECT ${characterColumns},hero.cover
-      FROM ${tables}.cd_characters c LEFT JOIN LATERAL (
-        SELECT ${mediaValue} AS cover FROM ${tables}.cd_character_assets a JOIN ${tables}.cd_media f ON f.id=a.media_id
-        WHERE a.character_id=c.id AND a.deleted_at IS NULL ORDER BY (a.kind='slot' AND a.key='front') DESC,f.created_at DESC,f.id DESC LIMIT 1
-      ) hero ON true
-      WHERE c.owner_id=$1 AND (c.archived_at IS NOT NULL)=$2
-        AND strpos(lower(c.name || ' ' || array_to_string(c.aliases,' ') || ' ' || array_to_string(c.tags,' ')),lower($3))>0
-      ORDER BY updated_at DESC,c.id LIMIT $4 OFFSET $5`, [owner, input.archived === "true", input.query ?? "", pageSize + 1, (input.page - 1) * pageSize]);
+  private async verifyCharacterDrama(db: ComicQuery, owner: string, dramaId: string | null | undefined) {
+    if (!dramaId) return;
+    const { rowCount } = await db.query(
+      `SELECT 1 FROM ${tables}.cd_dramas WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL`,
+      [owner, dramaId],
+    );
+    if (!rowCount) throw new ComicLibraryError("INVALID_INPUT", 400);
+  }
+
+  async listCharacters(owner: string, input: ComicCharacterSearch) {
+    const dramaFilter = input.dramaId === "unassigned"
+      ? "AND d.id IS NULL"
+      : input.dramaId
+        ? "AND d.id=$6::uuid"
+        : "";
+    const params: unknown[] = [
+      owner,
+      input.archived === "true",
+      input.query ?? "",
+      pageSize + 1,
+      (input.page - 1) * pageSize,
+      ...(input.dramaId && input.dramaId !== "unassigned" ? [input.dramaId] : []),
+    ];
+    const { rows } = await this.pool.query<ComicCharacter>(
+      `SELECT ${characterColumns},hero.cover
+       FROM ${tables}.cd_characters c
+       LEFT JOIN ${tables}.cd_dramas d ON d.owner_id=c.owner_id AND d.id=c.drama_id AND d.deleted_at IS NULL
+       LEFT JOIN LATERAL (
+         SELECT ${mediaValue} AS cover FROM ${tables}.cd_character_assets a JOIN ${tables}.cd_media f ON f.id=a.media_id
+         WHERE a.character_id=c.id AND a.deleted_at IS NULL ORDER BY (a.kind='slot' AND a.key='front') DESC,f.created_at DESC,f.id DESC LIMIT 1
+       ) hero ON true
+       WHERE c.owner_id=$1 AND (c.archived_at IS NOT NULL)=$2
+         AND strpos(lower(c.name || ' ' || array_to_string(c.aliases,' ') || ' ' || array_to_string(c.tags,' ')
+           || ' ' || coalesce(d.title,'')),lower($3))>0
+         ${dramaFilter}
+       ORDER BY c.updated_at DESC,c.id LIMIT $4 OFFSET $5`,
+      params,
+    );
     return page(rows);
   }
 
   private async character(db: ComicQuery, owner: string, id: string, write = false) {
-    const { rows } = await db.query<Omit<ComicCharacter, "cover">>(`SELECT ${characterColumns} FROM ${tables}.cd_characters c
-      WHERE owner_id=$1 AND id=$2 ${write ? "AND archived_at IS NULL FOR UPDATE" : ""}`, [owner, id]);
+    const { rows } = await db.query<Omit<ComicCharacter, "cover">>(
+      `SELECT ${characterColumns} FROM ${tables}.cd_characters c
+       LEFT JOIN ${tables}.cd_dramas d ON d.owner_id=c.owner_id AND d.id=c.drama_id AND d.deleted_at IS NULL
+       WHERE c.owner_id=$1 AND c.id=$2 ${write ? "AND c.archived_at IS NULL FOR UPDATE OF c" : ""}`,
+      [owner, id],
+    );
     if (!rows[0]) libraryMissing();
     return rows[0];
   }
@@ -96,10 +131,11 @@ export class PgComicLibrary implements ComicLibraryRepository {
   async createCharacter(owner: string, input: ComicCharacterInput) {
     return libraryTransaction(this.pool, async db => {
       await requireComicChoice(db, owner, "role", input.roleKey);
+      await this.verifyCharacterDrama(db, owner, input.dramaId);
       const { name, aliases, tags, roleKey, age, personality, appearance } = input;
       const { rows } = await db.query<{ id: string }>(`INSERT INTO ${tables}.cd_characters
-        (owner_id,name,aliases,tags,role_key,age,personality,appearance) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [owner, name, aliases, tags, roleKey, age, personality, appearance]);
+        (owner_id,name,aliases,tags,role_key,drama_id,age,personality,appearance) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [owner, name, aliases, tags, roleKey, input.dramaId ?? null, age, personality, appearance]);
       return rows[0].id;
     });
   }
@@ -108,9 +144,13 @@ export class PgComicLibrary implements ComicLibraryRepository {
     await libraryTransaction(this.pool, async db => {
       const current = await this.character(db, owner, id, true);
       if (current.roleKey !== input.roleKey) await requireComicChoice(db, owner, "role", input.roleKey);
+      const nextDramaId = input.dramaId === undefined ? (current.dramaId ?? null) : input.dramaId;
+      if (nextDramaId !== (current.dramaId ?? null)) {
+        await this.verifyCharacterDrama(db, owner, nextDramaId);
+      }
       const { name, aliases, tags, roleKey, age, personality, appearance } = input;
-      await db.query(`UPDATE ${tables}.cd_characters SET name=$2,aliases=$3,tags=$4,role_key=$5,age=$6,personality=$7,appearance=$8,
-        updated_at=clock_timestamp() WHERE id=$1`, [id, name, aliases, tags, roleKey, age, personality, appearance]);
+      await db.query(`UPDATE ${tables}.cd_characters SET name=$2,aliases=$3,tags=$4,role_key=$5,drama_id=$6,age=$7,personality=$8,appearance=$9,
+        updated_at=clock_timestamp() WHERE id=$1`, [id, name, aliases, tags, roleKey, nextDramaId, age, personality, appearance]);
     });
   }
 
