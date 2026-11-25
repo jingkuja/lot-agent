@@ -1,15 +1,29 @@
 import type {
-  ComicCastChange, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaDetail, ComicDramaEpisodeSummary, ComicDramaListing,
-  ComicDramaScriptVersion, ComicDramaSeries, ComicDramaSeriesInput, ComicSeriesCast,
+  ComicCastChange, ComicDrama, ComicDramaClip, ComicDramaClipDraft, ComicDramaContent, ComicDramaCreateInput, ComicDramaDetail,
+  ComicDramaEpisodeBrief, ComicDramaEpisodeCreateInput, ComicDramaEpisodeSummary, ComicDramaListing, ComicDramaScriptVersion,
+  ComicDramaSeries, ComicDramaSeriesInput, ComicDramaTreeListing, ComicDramaUpdateInput, ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
+const dramasRoot = "/comic-drama/dramas";
+const dramaPath = (id: string) => `${dramasRoot}/${encodeURIComponent(id)}`;
 const root = "/comic-drama/series";
 const path = (id: string) => `${root}/${encodeURIComponent(id)}`;
 const read = <T>(url: string, signal?: AbortSignal) => request<T>(url, { signal });
 const write = <T>(url: string, method: string, body: unknown) => request<T>(url, { method, body: JSON.stringify(body) });
 
 export const comicDramaApi = {
+  listDramas: (params: URLSearchParams, signal?: AbortSignal) => read<ComicDramaTreeListing>(`${dramasRoot}?${params}`, signal),
+  getDrama: (id: string, signal?: AbortSignal) =>
+    read<{ drama: ComicDrama; episodes: ComicDramaEpisodeBrief[] }>(dramaPath(id), signal),
+  createDrama: (fields: ComicDramaCreateInput) =>
+    write<{ drama: ComicDrama; detail: ComicDramaDetail | null }>(dramasRoot, "POST", fields),
+  updateDrama: (id: string, fields: ComicDramaUpdateInput) => write<ComicDrama>(dramaPath(id), "PATCH", fields),
+  createEpisode: (dramaId: string, fields: ComicDramaEpisodeCreateInput) =>
+    write<ComicDramaDetail>(`${dramaPath(dramaId)}/episodes`, "POST", fields),
+  archiveDrama: (id: string, expectedRevision: number) =>
+    write<{ ok: true }>(`${dramaPath(id)}/archive`, "POST", { expectedRevision }),
+  removeDrama: (id: string, expectedRevision: number) => write<{ ok: true }>(dramaPath(id), "DELETE", { expectedRevision }),
   list: (params: URLSearchParams, signal?: AbortSignal) => read<ComicDramaListing>(`${root}?${params}`, signal),
   get: (id: string, signal?: AbortSignal) => read<ComicDramaDetail>(path(id), signal),
   current: (signal?: AbortSignal) => read<{ seriesId: string | null }>(`${root}/current`, signal),

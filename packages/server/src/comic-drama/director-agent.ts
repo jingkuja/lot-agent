@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { complete, LLMIncompleteError, type ChatOptions, type LLMProvider, type Message, type Tool } from "@lot-agent/core";
 import {
-  checkComicSeriesIssues, COMIC_DIRECTOR_AGENT_ID, COMIC_DIRECTOR_TOOL_NAMES, comicDirectorBreakdownSchema,
+  buildComicDramaHierarchy, checkComicSeriesIssues, COMIC_DIRECTOR_AGENT_ID, COMIC_DIRECTOR_TOOL_NAMES, comicDirectorBreakdownSchema,
   comicDirectorClipEnhanceModelSchema, comicDirectorDefinition, comicDirectorModelSchema, comicDirectorScriptEnhanceModelSchema,
   comicDramaClipDraftSchema, comicDramaIdSchema, comicGenerationModeSchema, comicMaterialKind, comicVideoProfile, splitComicScriptSegments,
   type ComicDirectorChatInput, type ComicDirectorChatResponse, type ComicDirectorEnhanceTarget, type ComicDirectorProposal,
@@ -398,9 +398,24 @@ export function createComicDirectorTools(
         const detail = await deps.episodes.get(owner, seriesId);
         knownDetail = detail;
         if (!knownClips) knownClips = [...detail.clips];
+        const dramaTitle = detail.drama?.title ?? detail.series.seriesGroup ?? detail.series.title;
+        const epNo = detail.series.episodeNo ?? 1;
+        const dramaObj = detail.drama ?? {
+          id: detail.series.dramaId,
+          title: dramaTitle,
+          synopsis: detail.series.logline,
+          revision: 1,
+        };
+        const hierarchy = detail.hierarchy
+          ?? buildComicDramaHierarchy(dramaObj, detail.series, detail.clips, detail.episodes?.length || 1);
         return {
-          name, ok: true, summary: `已读取剧集「${detail.series.title}」（${detail.clips.length} 个分镜，${detail.cast.length} 名角色）`,
+          name, ok: true,
+          summary: `已读取《${dramaTitle}》第 ${epNo} 集「${detail.series.title}」（${detail.clips.length} 个分镜，${detail.cast.length} 名角色）`,
           data: {
+            drama: detail.drama ?? dramaObj,
+            episode: detail.series,
+            siblingEpisodes: detail.episodes ?? [],
+            hierarchy,
             series: detail.series,
             script: detail.script,
             cast: detail.cast.map(entry => ({
@@ -704,12 +719,16 @@ export class ComicDirector {
         ...(enhance ? { enhance } : {}),
       }, signal),
     });
+    const hierarchyNote = `Current workspace hierarchy: Drama "${initialDetail.drama?.title ?? initialDetail.series.seriesGroup ?? initialDetail.series.title}" `
+      + `(${initialDetail.episodes?.length ?? 1} episode(s)), Episode #${initialDetail.series.episodeNo ?? 1} "${initialDetail.series.title}", `
+      + `${initialDetail.clips.length} clip(s). Always keep drama / episode / clip context clear.`;
     const messages: Message[] = [
       {
         role: "system",
         content:
           comicDirectorDefinition.systemPrompt +
           " You are chatting inside the right-hand Director Assistant drawer of the comic-drama workspace. " +
+          hierarchyNote + " " +
           `Respond concisely in ${input.language === "en" ? "English" : input.language === "id" ? "Indonesian" : "Simplified Chinese"}. ` +
           "Use read_series, check_series, search_characters, search_materials, update_clip, reorder_clips, write_script, breakdown_script, " +
           "continue_series, propose_enhancement, and request_generation when helpful. " +

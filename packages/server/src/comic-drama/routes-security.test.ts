@@ -8,10 +8,11 @@ import type { ComicEditSpeech } from "./edit-speech.js";
 import { createComicGenerationRoutes } from "./generation-routes.js";
 import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
-import type { PgComicDramaRepository } from "./repository.js";
+import { ComicDramaError, type PgComicDramaRepository } from "./repository.js";
 import { createComicDramaRoutes } from "./routes.js";
 
 const seriesId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const dramaId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const clipId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const takeId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const ownerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -19,7 +20,7 @@ const ownerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 function makeSeries(videoModel: string | null): ComicDramaDetail {
   return {
     series: {
-      id: seriesId, parentId: null, title: "Test", logline: "", seriesGroup: null, episodeNo: null,
+      id: seriesId, dramaId, parentId: null, title: "Test", logline: "", seriesGroup: null, episodeNo: null,
       styleKey: "webtoon", aspectRatio: "9:16", videoModel, revision: 1, archivedAt: null,
     },
     clips: [], script: null, cast: [],
@@ -174,5 +175,87 @@ describe("comic-drama route security checks", () => {
     expect(auditionRes.status).toBe(200);
     expect(audition).toHaveBeenCalledTimes(1);
     expect(detail.series.id).toBe(seriesId);
+  });
+
+  it("enforces model validation and revision conflict checks on /dramas hierarchy routes", async () => {
+    const dramaRecord = {
+      id: dramaId,
+      title: "雨夜便利店",
+      synopsis: "城市奇幻",
+      styleKey: "thick_painting",
+      aspectRatio: "9:16" as const,
+      videoModel: "doubao-seedance-2-5",
+      revision: 2,
+      archivedAt: null,
+    };
+    const listDramas = vi.fn(async () => ({ dramas: [], nextCursor: null }));
+    const getDrama = vi.fn(async () => ({ drama: dramaRecord, episodes: [] }));
+    const createDrama = vi.fn(async (_u: string, input: { videoModel?: string | null }) => ({
+      drama: { ...dramaRecord, videoModel: input.videoModel ?? null },
+      detail: null,
+    }));
+    const updateDrama = vi.fn(async (_u: string, _id: string, input: { expectedRevision: number }) => {
+      if (input.expectedRevision !== 2) throw new ComicDramaError("REVISION_CONFLICT", 2);
+      return { ...dramaRecord, revision: 3 };
+    });
+    const createEpisode = vi.fn(async (userId: string, dId: string, input: { title: string }) => {
+      const base = makeSeries("doubao-seedance-2-5");
+      return { ...base, series: { ...base.series, dramaId: dId, title: `${userId}:${input.title}`, episodeNo: 2 } };
+    });
+    const repo = { listDramas, getDrama, createDrama, updateDrama, createEpisode } as unknown as ComicDramaRepository;
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicDramaRoutes(repo, async (_u, m) => m === "doubao-seedance-2-5", async () => "doubao-seedance-2-5"));
+
+    const listRes = await app.request("/dramas?query=雨夜");
+    expect(listRes.status).toBe(200);
+    expect(listDramas).toHaveBeenCalledWith(ownerId, { archived: "false", query: "雨夜" });
+
+    const badCreate = await app.request("/dramas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "新剧", styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "unsupported-model" }),
+    });
+    expect(badCreate.status).toBe(400);
+    expect((await badCreate.json() as { code: string }).code).toBe("MODEL_UNAVAILABLE");
+
+    const okCreate = await app.request("/dramas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "雨夜便利店", styleKey: "thick_painting", aspectRatio: "9:16", videoModel: null }),
+    });
+    expect(okCreate.status).toBe(201);
+    expect((await okCreate.json() as { drama: { videoModel: string | null } }).drama.videoModel).toBe("doubao-seedance-2-5");
+
+    const badPatch = await app.request(`/dramas/${dramaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedRevision: 2, title: "新剧名", synopsis: "新简介",
+        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "unsupported-model",
+      }),
+    });
+    expect(badPatch.status).toBe(400);
+    expect((await badPatch.json() as { code: string }).code).toBe("MODEL_UNAVAILABLE");
+
+    const conflictUpdate = await app.request(`/dramas/${dramaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedRevision: 1, title: "新剧名", synopsis: "新简介",
+        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5",
+      }),
+    });
+    expect(conflictUpdate.status).toBe(409);
+    expect((await conflictUpdate.json() as { code: string }).code).toBe("REVISION_CONFLICT");
+
+    const epRes = await app.request(`/dramas/${dramaId}/episodes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "第 2 集：风铃", styleKey: "thick_painting", aspectRatio: "9:16", videoModel: null }),
+    });
+    expect(epRes.status).toBe(201);
+    expect(createEpisode).toHaveBeenCalledTimes(1);
+    expect((await epRes.json() as ComicDramaDetail).series.episodeNo).toBe(2);
   });
 });

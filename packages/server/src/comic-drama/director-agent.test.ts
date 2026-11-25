@@ -143,8 +143,26 @@ describe("comic director §8.5 tools and default text model resolver", () => {
   const mediaA = "88888888-8888-4888-8888-888888888888";
 
   const detail: ComicDramaDetail = {
+    drama: {
+      id: "99999999-1111-4111-8111-111111111111", title: "雨夜", synopsis: "雨夜奇幻短剧",
+      styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
+    },
+    episodes: [
+      {
+        id: seriesId, dramaId: "99999999-1111-4111-8111-111111111111", title: "雨夜便利店", logline: "雨夜重逢",
+        episodeNo: 1, revision: 3, clipCount: 1, completedCount: 0, generatingCount: 0, hasRender: false,
+        coverMediaId: null, status: "draft", archivedAt: null, updatedAt: "2026-11-25T00:00:00.000Z",
+      },
+      {
+        id: "99999999-2222-4222-8222-222222222222", dramaId: "99999999-1111-4111-8111-111111111111",
+        title: "雨夜便利店（二）", logline: "风铃又响", episodeNo: 2, revision: 1, clipCount: 3, completedCount: 1,
+        generatingCount: 0, hasRender: false, coverMediaId: null, status: "in_progress", archivedAt: null,
+        updatedAt: "2026-11-25T00:00:00.000Z",
+      },
+    ],
     series: {
-      id: seriesId, parentId: null, title: "雨夜便利店", logline: "雨夜重逢", seriesGroup: "雨夜", episodeNo: 1,
+      id: seriesId, dramaId: "99999999-1111-4111-8111-111111111111", parentId: null,
+      title: "雨夜便利店", logline: "雨夜重逢", seriesGroup: "雨夜", episodeNo: 1,
       styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 3, archivedAt: null,
     },
     script: { version: 1, content: "林夏走进雨夜便利店。" },
@@ -212,6 +230,19 @@ describe("comic director §8.5 tools and default text model resolver", () => {
     const readRes = await tools.execute("read_series", {});
     expect(readRes.ok).toBe(true);
     expect(readRes.summary).toContain("雨夜便利店");
+    expect(readRes.summary).toContain("雨夜");
+    expect(readRes.summary).toContain("第 1 集");
+    const readData = readRes.data as {
+      drama?: { title: string };
+      episode?: { episodeNo: number | null; title: string };
+      siblingEpisodes?: Array<{ episodeNo: number | null }>;
+      hierarchy?: { drama: { episodeCount: number }; episode: { clipCount: number } };
+    };
+    expect(readData.drama?.title).toBe("雨夜");
+    expect(readData.episode?.episodeNo).toBe(1);
+    expect(readData.siblingEpisodes?.length).toBe(2);
+    expect(readData.hierarchy?.drama.episodeCount).toBe(2);
+    expect(readData.hierarchy?.episode.clipCount).toBe(2);
 
     const checkRes = await tools.execute("check_series", {});
     expect(checkRes.ok).toBe(true);
@@ -539,9 +570,9 @@ describe("comic director AI enhancement (script & storyboard clips)", () => {
   function makeEnhanceHarness() {
     const state = {
       series: {
-        id: seriesId, ownerId, parentId: null as string | null, title: "雨夜便利店", logline: "雨夜重逢",
-        seriesGroup: null as string | null, episodeNo: 1, styleKey: "thick_painting", aspectRatio: "9:16",
-        videoModel: "doubao-seedance-2-5", revision: 1, archived: false,
+        id: seriesId, dramaId: "99999999-1111-4111-8111-111111111111", ownerId, parentId: null as string | null,
+        title: "雨夜便利店", logline: "雨夜重逢", seriesGroup: null as string | null, episodeNo: 1,
+        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 1, archived: false,
       },
       scriptVersion: 1,
       script: "第一段：林夏独自站在雨夜街头。\n\n第二段：推门进入便利店，老板抬头看她。",
@@ -585,7 +616,8 @@ describe("comic director AI enhancement (script & storyboard clips)", () => {
           }
           return {
             rows: [{
-              id: state.series.id, parentId: state.series.parentId, title: state.series.title, logline: state.series.logline,
+              id: state.series.id, dramaId: state.series.dramaId, parentId: state.series.parentId,
+              title: state.series.title, logline: state.series.logline,
               seriesGroup: state.series.seriesGroup, episodeNo: state.series.episodeNo, styleKey: state.series.styleKey,
               aspectRatio: state.series.aspectRatio, videoModel: state.series.videoModel, revision: state.series.revision,
               archivedAt: null,
@@ -934,7 +966,8 @@ describe("comic director AI enhancement (script & storyboard clips)", () => {
       episodes: {
         get: vi.fn(async () => ({
           series: {
-            id: seriesId, parentId: null, title: "T", logline: "", seriesGroup: null, episodeNo: 1,
+            id: seriesId, dramaId: "99999999-1111-4111-8111-111111111111", parentId: null,
+            title: "T", logline: "", seriesGroup: null, episodeNo: 1,
             styleKey: "thick_painting", aspectRatio: "9:16" as const, videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
           },
           script: { version: 1, content: "第一段" },

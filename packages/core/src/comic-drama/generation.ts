@@ -222,6 +222,9 @@ export type ComicKeyframeHistory = {
   takes: ComicImageTake[];
 };
 export type ComicVideoTake = ComicTake & {
+  dramaId?: string;
+  dramaTitle?: string;
+  episodeNo?: number | null;
   seriesId: string; seriesTitle: string; scene: string; ordinal: number | null; adopted: boolean;
   version: number; modelId: string; durationMs: number; completedAt: string | null;
   posterMediaId?: string | null;

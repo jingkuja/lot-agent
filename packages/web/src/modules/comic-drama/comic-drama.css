@@ -2830,3 +2830,316 @@
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
+
+/* ── 3-Tier Drama -> Episode -> Clip Hierarchy UI ── */
+.comic-hierarchy-bar {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--bg-card) 84%, var(--bg));
+}
+
+.comic-hierarchy-tier {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.comic-hierarchy-level {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.comic-hierarchy-tier[data-tier="episode"] .comic-hierarchy-level,
+.comic-origin-node:nth-of-type(2) small {
+  background: color-mix(in srgb, var(--cd-azure) 14%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--cd-azure) 32%, var(--border));
+  color: var(--cd-azure);
+}
+
+.comic-hierarchy-tier[data-tier="clip"] .comic-hierarchy-level,
+.comic-origin-node[data-tier="clip"] small {
+  background: color-mix(in srgb, var(--cd-gold) 18%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--cd-gold) 36%, var(--border));
+  color: var(--gold-strong);
+}
+
+.comic-hierarchy-name {
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.comic-hierarchy-count,
+.comic-hierarchy-muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.comic-hierarchy-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.comic-page button.comic-hierarchy-btn,
+.comic-page button.comic-hierarchy-clip-btn {
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.comic-page button.comic-hierarchy-clip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.comic-hierarchy-clip-scene {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.comic-hierarchy-sep {
+  color: var(--text-muted);
+  font-weight: 700;
+  user-select: none;
+}
+
+.comic-page select.comic-hierarchy-select {
+  width: auto;
+  max-width: 240px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.comic-clip-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-card));
+  font-size: 12px;
+}
+
+.comic-origin-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.comic-origin-node small {
+  margin: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.comic-origin-node strong {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.comic-strip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.comic-nav-drama-name {
+  color: var(--accent);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.comic-nav-episodes {
+  display: grid;
+  gap: 3px;
+  margin-top: 2px;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.comic-sidebar .comic-nav button.comic-nav-ep-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.comic-sidebar .comic-nav button.comic-nav-ep-item[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.comic-nav-ep-no {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.comic-nav-ep-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comic-sidebar .comic-nav button.comic-nav-ep-add {
+  padding: 5px 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  justify-content: center;
+}
+
+.comic-drama-tree {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.comic-drama-group {
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 92%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-drama-group[data-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-drama-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.comic-drama-group-meta {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.comic-drama-group-meta h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.comic-drama-group-meta p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.comic-director-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--overlay-sink);
+  font-size: 12px;
+}
+
+.comic-director-context small {
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.comic-director-context strong {
+  color: var(--text);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.comic-take-origin {
+  display: block;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 650;
+  margin-bottom: 2px;
+}
+
+@media (max-width: 820px) {
+  .comic-nav-episodes {
+    display: none;
+  }
+  .comic-page select.comic-hierarchy-select {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 550px) {
+  .comic-drama-group {
+    padding: 14px;
+  }
+  .comic-hierarchy-bar {
+    padding: 8px 10px;
+  }
+}

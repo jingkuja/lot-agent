@@ -2,14 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComicDramaClip, ComicMediaLinks, ComicTake, ComicVideoReceipt, ComicVideoTake } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
+import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { SaveComicFrame } from "./SaveComicFrame.js";
 
-export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, preview, choose, onSeriesChanged }: {
-  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
+export type ComicClipOrigin = {
+  dramaTitle: string;
+  episodeNo: number;
+  episodeTitle: string;
+  totalClips: number;
+};
+
+export function ClipVideoVersions({ seriesId, clip, origin, refresh, disabled, quoting, preview, choose, onSeriesChanged }: {
+  seriesId: string; clip: ComicDramaClip; origin?: ComicClipOrigin; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
   choose: (id: string) => void; onSeriesChanged?: () => void;
 }) {
   const { t } = useI18n();
@@ -18,7 +26,19 @@ export function ClipVideoVersions({ seriesId, clip, refresh, disabled, quoting, 
   const busy = history.current?.some(take => ["pending", "running", "unknown", "recoverable"].includes(take.state));
   const selectionRevision = history.current?.[0]?.clipSelectionRevision ?? clip.selectionRevision ?? 1;
   return <section className="comic-edit-card">
-    <header><h2>{t("视频版本 · 分镜 {0}", [clip.ordinal])}</h2>
+    <header>
+      <div>
+        {origin && (
+          <ComicClipOriginBadge
+            dramaTitle={origin.dramaTitle}
+            episodeNo={origin.episodeNo}
+            episodeTitle={origin.episodeTitle}
+            clipOrdinal={clip.ordinal}
+            totalClips={origin.totalClips}
+          />
+        )}
+        <h2>{t("视频版本 · 分镜 {0}", [clip.ordinal])}</h2>
+      </div>
       {!disabled && <button type="button" disabled={quoting || busy} onClick={preview}>{t("预览视频费用")}</button>}
     </header>
     {history.failed && <button type="button" onClick={history.refresh}>{t("重新读取")}</button>}
@@ -158,6 +178,11 @@ export function VideoTakeCard({ take, adopt, refresh, open, choose, addToEdit, s
           if (renewed.current) setLinks("error");
           else { renewed.current = true; reload(value => value + 1); }
         }} />}
+    {(open || selected) && take.dramaTitle && (
+      <small className="comic-take-origin">
+        {take.dramaTitle}{take.episodeNo ? ` · ${t("第 {0} 集", [take.episodeNo])}` : ""}
+      </small>
+    )}
     <strong>
       {open || selected ? take.seriesTitle + " · " : ""}
       {take.ordinal !== null ? t("分镜 {0}", [take.ordinal]) + " · " : ""}

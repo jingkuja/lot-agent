@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicAddClipSchema, comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema, comicDramaRevisionSchema,
-  comicDramaScriptWriteSchema, comicDramaSeriesListSchema, comicDramaSetCurrentSchema, comicVideoProfile,
-  createComicDramaSeriesSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema,
+  comicAddClipSchema, comicCastAddSchema, comicCastOutfitSchema, comicSequelOptionsSchema, comicDramaIdSchema,
+  comicDramaListSchema, comicDramaRevisionSchema, comicDramaScriptWriteSchema, comicDramaSeriesListSchema,
+  comicDramaSetCurrentSchema, comicVideoProfile, createComicDramaSchema, createComicDramaSeriesSchema,
+  createComicEpisodeSchema, reorderComicDramaClipsSchema, updateComicDramaClipSchema, updateComicDramaSchema,
   updateComicDramaSeriesSchema, type ComicDramaRepository,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError } from "./library-db.js";
@@ -17,7 +18,10 @@ export function createComicDramaRoutes(
   resolveDefaultVideoModel?: (owner: string) => Promise<string | null>,
 ) {
   const app = new Hono<{ Variables: Variables }>();
-  app.use("/series/*", bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) }));
+  const jsonLimit = bodyLimit({ maxSize: 256 * 1024, onError: c => c.json({ code: "BODY_TOO_LARGE" }, 413) });
+  app.use("/series/*", jsonLimit);
+  app.use("/dramas", jsonLimit);
+  app.use("/dramas/*", jsonLimit);
   app.onError((error, c) => {
     if (error instanceof ComicLibraryError) return c.json({ code: error.code }, error.status);
     if (error instanceof ComicDramaError) {
@@ -32,6 +36,88 @@ export function createComicDramaRoutes(
     if (!parsed.success) throw new ComicDramaError("NOT_FOUND");
     return parsed.data;
   };
+  const resolveVideoModelForCreate = async (owner: string, requested: string | null | undefined) => {
+    let videoModel = requested ?? null;
+    if (videoModel) {
+      if (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel)) {
+        return { ok: false as const };
+      }
+      return { ok: true as const, videoModel };
+    }
+    if (resolveDefaultVideoModel) {
+      const candidate = await resolveDefaultVideoModel(owner).catch(() => null);
+      if (candidate && comicVideoProfile(candidate) && await canSelectModel(owner, candidate)) {
+        videoModel = candidate;
+      }
+    }
+    return { ok: true as const, videoModel };
+  };
+
+  app.get("/dramas", async c => {
+    if (!repo.listDramas) return c.json({ dramas: [], nextCursor: null });
+    const input = comicDramaListSchema.safeParse(c.req.query());
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.listDramas(c.get("userId"), input.data));
+  });
+  app.post("/dramas", async c => {
+    if (!repo.createDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = createComicDramaSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const owner = c.get("userId");
+    const resolved = await resolveVideoModelForCreate(owner, input.data.videoModel);
+    if (!resolved.ok) return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    return c.json(await repo.createDrama(owner, { ...input.data, videoModel: resolved.videoModel }), 201);
+  });
+  app.get("/dramas/:dramaId", async c => {
+    if (!repo.getDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    return c.json(await repo.getDrama(c.get("userId"), seriesId(c.req.param("dramaId"))));
+  });
+  app.patch("/dramas/:dramaId", async c => {
+    if (!repo.updateDrama || !repo.getDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = updateComicDramaSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const owner = c.get("userId");
+    const dramaId = seriesId(c.req.param("dramaId"));
+    const { videoModel } = input.data;
+    if (videoModel && videoModel !== (await repo.getDrama(owner, dramaId)).drama.videoModel
+      && (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel))) {
+      return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    }
+    return c.json(await repo.updateDrama(owner, dramaId, input.data));
+  });
+  app.post("/dramas/:dramaId/episodes", async c => {
+    if (!repo.createEpisode) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = createComicEpisodeSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    const owner = c.get("userId");
+    const dramaId = seriesId(c.req.param("dramaId"));
+    let videoModel = input.data.videoModel;
+    if (videoModel !== undefined) {
+      if (videoModel && (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel))) {
+        return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+      }
+    } else if (resolveDefaultVideoModel) {
+      const candidate = await resolveDefaultVideoModel(owner).catch(() => null);
+      if (candidate && comicVideoProfile(candidate) && await canSelectModel(owner, candidate)) {
+        videoModel = candidate;
+      }
+    }
+    return c.json(await repo.createEpisode(owner, dramaId, { ...input.data, ...(videoModel !== undefined ? { videoModel } : {}) }), 201);
+  });
+  app.post("/dramas/:dramaId/archive", async c => {
+    if (!repo.archiveDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    await repo.archiveDrama(c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision);
+    return c.json({ ok: true });
+  });
+  app.delete("/dramas/:dramaId", async c => {
+    if (!repo.removeDrama) return c.json({ code: "NOT_FOUND" }, 404);
+    const input = comicDramaRevisionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    await repo.removeDrama(c.get("userId"), seriesId(c.req.param("dramaId")), input.data.expectedRevision);
+    return c.json({ ok: true });
+  });
 
   app.get("/series", async c => {
     const input = comicDramaSeriesListSchema.safeParse(c.req.query());
@@ -42,18 +128,9 @@ export function createComicDramaRoutes(
     const input = createComicDramaSeriesSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     const owner = c.get("userId");
-    let videoModel = input.data.videoModel;
-    if (videoModel) {
-      if (!comicVideoProfile(videoModel) || !await canSelectModel(owner, videoModel)) {
-        return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
-      }
-    } else if (resolveDefaultVideoModel) {
-      const candidate = await resolveDefaultVideoModel(owner).catch(() => null);
-      if (candidate && comicVideoProfile(candidate) && await canSelectModel(owner, candidate)) {
-        videoModel = candidate;
-      }
-    }
-    return c.json(await repo.create(owner, { ...input.data, videoModel }), 201);
+    const resolved = await resolveVideoModelForCreate(owner, input.data.videoModel);
+    if (!resolved.ok) return c.json({ code: "MODEL_UNAVAILABLE" }, 400);
+    return c.json(await repo.create(owner, { ...input.data, videoModel: resolved.videoModel }), 201);
   });
   app.get("/series/current", async c => {
     if (c.req.query("summary") === "1" && repo.currentSummary) {

@@ -63,9 +63,11 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
   }, [cursor, query, refresh]);
 
   const grouped = (entries: ComicVideoTake[]) => {
-    const map = new Map<string, { title: string; takes: ComicVideoTake[] }>();
+    const map = new Map<string, { title: string; dramaTitle?: string; episodeNo?: number | null; takes: ComicVideoTake[] }>();
     for (const take of entries) {
-      const bucket = map.get(take.seriesId) ?? { title: take.seriesTitle, takes: [] };
+      const bucket = map.get(take.seriesId) ?? {
+        title: take.seriesTitle, dramaTitle: take.dramaTitle, episodeNo: take.episodeNo, takes: [],
+      };
       bucket.takes.push(take);
       map.set(take.seriesId, bucket);
     }
@@ -117,7 +119,17 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
           <div className="comic-video-groups">
             {grouped(data.entries).map(([seriesId, group]) => (
               <section key={seriesId} className="comic-edit-card">
-                <header><h2>{group.title}</h2><small>{t("{0} 条成片", [group.takes.length])}</small></header>
+                <header>
+                  <div>
+                    {group.dramaTitle && (
+                      <small className="comic-take-origin">
+                        {group.dramaTitle}{group.episodeNo ? ` · ${t("第 {0} 集", [group.episodeNo])}` : ""}
+                      </small>
+                    )}
+                    <h2>{group.title}</h2>
+                  </div>
+                  <small>{t("{0} 条成片", [group.takes.length])}</small>
+                </header>
                 <div className="comic-library-grid">{group.takes.map(renderCard)}</div>
               </section>
             ))}

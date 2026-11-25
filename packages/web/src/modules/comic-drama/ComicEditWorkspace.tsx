@@ -257,7 +257,15 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
 
   return <>
     <header className="comic-heading">
-      <div><h1>{project.title}</h1><small role="status">{t(saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small></div>
+      <div>
+        {project.dramaTitle && (
+          <small className="comic-take-origin">
+            {project.dramaTitle}{project.episodeNo ? ` › ${t("第 {0} 集", [project.episodeNo])}` : ""}
+            {project.episodeTitle ? ` · ${project.episodeTitle}` : ""}
+          </small>
+        )}
+        <h1>{project.title}</h1><small role="status">{t(saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small>
+      </div>
       <div className="comic-actions">
         <button type="button" onClick={() => setShelfOpen(v => !v)}>{t(shelfOpen ? "收起片源架" : "展开片源架")}</button>
         <button type="button" disabled={saving || dirty || !video.length} onClick={openAutoDialogue}>{t("一键配音与字幕")}</button>
@@ -307,7 +315,12 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
                 }}>
                 <button className="comic-track-label" type="button" aria-pressed={item?.id === entry.id} onClick={() => setSelected(entry.id)}>
                   <strong>{meta?.scene || meta?.seriesTitle || t("片源不可用，请重新选择")}</strong>
-                  <small>{meta?.seriesTitle} · {t("版本 {0}", [meta?.version ?? "—"])} · {t("{0} 秒", [seconds(entry.outMs - entry.inMs)])}</small>
+                  <small>
+                    {meta?.dramaTitle ? `${meta.dramaTitle} › ` : ""}
+                    {meta?.episodeNo ? `${t("第 {0} 集", [meta.episodeNo])} › ` : ""}
+                    {meta?.clipOrdinal ? `${t("分镜 {0}", [meta.clipOrdinal])} · ` : ""}
+                    {meta?.seriesTitle} · {t("版本 {0}", [meta?.version ?? "—"])} · {t("{0} 秒", [seconds(entry.outMs - entry.inMs)])}
+                  </small>
                 </button>
                 <div className="comic-actions">
                   <button type="button" disabled={index === 0} onClick={() => move(index, -1)}>{t("上移")}</button>
@@ -603,7 +616,11 @@ function EditorSourceShelf({ seriesId, disabled, addTake, addAudio, browseAll }:
               <div key={take.id} className="comic-shelf-item">
                 <div>
                   <strong>{take.ordinal !== null ? t("分镜 {0}", [take.ordinal]) + " · " : ""}{take.scene || take.seriesTitle}</strong>
-                  <small>{t("版本 {0}", [take.version])} · {t("{0} 秒", [+(take.durationMs / 1000).toFixed(1)])}</small>
+                  <small>
+                    {take.dramaTitle ? `${take.dramaTitle} · ` : ""}
+                    {take.episodeNo ? `${t("第 {0} 集", [take.episodeNo])} · ` : ""}
+                    {t("版本 {0}", [take.version])} · {t("{0} 秒", [+(take.durationMs / 1000).toFixed(1)])}
+                  </small>
                 </div>
                 <button type="button" disabled={disabled} onClick={() => addTake(take.id)}>＋ {t("入轨")}</button>
               </div>

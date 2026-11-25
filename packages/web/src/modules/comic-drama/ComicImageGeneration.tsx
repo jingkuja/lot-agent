@@ -6,12 +6,13 @@ import type {
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { COMIC_BATCH_LIMIT, computeComicBatchPlan } from "./batch-plan.js";
+import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError, GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { MediaPreview } from "./LibraryParts.js";
-import { ClipVideoVersions, VideoTakeActions } from "./ComicVideoTakes.js";
+import { ClipVideoVersions, VideoTakeActions, type ComicClipOrigin } from "./ComicVideoTakes.js";
 import { ComicVideoReferences, type ChosenVideoReference } from "./ComicVideoReferences.js";
 import { SaveMediaAsMaterialDialog } from "./SaveMediaAsMaterialDialog.js";
 
@@ -108,9 +109,22 @@ export function ComicImageGeneration({
       setBatchNotice(t("当前有 {0} 个分镜正在生成中，请稍候查看进度。", [plan.busyCount]));
     }
   }, [detail.clips, disabled, onQuickActionHandled, preview, quickAction, t]);
+  const dramaTitle = detail.drama?.title ?? detail.series.seriesGroup ?? detail.series.title;
+  const episodeNo = detail.series.episodeNo ?? 1;
+  const clipOrigin: ComicClipOrigin = {
+    dramaTitle,
+    episodeNo,
+    episodeTitle: detail.series.title,
+    totalClips: detail.clips.length,
+  };
   return <div className="comic-board">
     <section className="comic-edit-card comic-generation-picker">
-      <header><h2>{t(isVideo ? "生成视频" : "生成首帧")}</h2></header>
+      <header>
+        <div>
+          <small className="comic-take-origin">{dramaTitle} › {t("第 {0} 集", [episodeNo])} · {detail.series.title}</small>
+          <h2>{t(isVideo ? "生成视频" : "生成首帧")}</h2>
+        </div>
+      </header>
       <div className="comic-actions comic-generation-modes" role="group" aria-label={t("生成模式")}>
         {supportedModes.map(([value, label]) =>
           <button type="button" key={value} aria-pressed={mode === value} disabled={quoting} onClick={() => {
@@ -193,9 +207,9 @@ export function ComicImageGeneration({
     </section>
     <div className="comic-generation-results">
       {error && <p className="comic-error" role="alert">{t(error)}</p>}
-      {clip && (isVideo ? <ClipVideoVersions key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
+      {clip && (isVideo ? <ClipVideoVersions key={clip.id} seriesId={scope.id} clip={clip} origin={clipOrigin} refresh={refresh} disabled={disabled}
         choose={choose} quoting={quoting} preview={() => void preview([clip.id])} onSeriesChanged={onSeriesChanged} /> :
-        <KeyframeHistory key={clip.id} seriesId={scope.id} clip={clip} refresh={refresh} disabled={disabled}
+        <KeyframeHistory key={clip.id} seriesId={scope.id} clip={clip} origin={clipOrigin} refresh={refresh} disabled={disabled}
           quoting={quoting} preview={() => void preview([clip.id])} onSeriesChanged={onSeriesChanged} />)}
       {batch && batch.takes.length > 1 && <BatchStatus key={batch.id} request={batch} label={label} select={select}
         refreshed={() => { setRefresh(value => value + 1); onSeriesChanged?.(); }} />}
@@ -210,8 +224,9 @@ export function ComicImageGeneration({
   </div>;
 }
 
-function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview, onSeriesChanged }: {
-  seriesId: string; clip: ComicDramaClip; refresh: number; disabled: boolean; quoting: boolean; preview: () => void; onSeriesChanged?: () => void;
+function KeyframeHistory({ seriesId, clip, origin, refresh, disabled, quoting, preview, onSeriesChanged }: {
+  seriesId: string; clip: ComicDramaClip; origin?: ComicClipOrigin; refresh: number; disabled: boolean; quoting: boolean;
+  preview: () => void; onSeriesChanged?: () => void;
 }) {
   const { t, locale } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.keyframes(seriesId, clip.id, signal), [seriesId, clip.id]);
@@ -271,7 +286,18 @@ function KeyframeHistory({ seriesId, clip, refresh, disabled, quoting, preview, 
   };
   return <section className="comic-edit-card">
     <header>
-      <h2>{t("首帧审核 · 分镜 {0}", [clip.ordinal])}</h2>
+      <div>
+        {origin && (
+          <ComicClipOriginBadge
+            dramaTitle={origin.dramaTitle}
+            episodeNo={origin.episodeNo}
+            episodeTitle={origin.episodeTitle}
+            clipOrdinal={clip.ordinal}
+            totalClips={origin.totalClips}
+          />
+        )}
+        <h2>{t("首帧审核 · 分镜 {0}", [clip.ordinal])}</h2>
+      </div>
       {!disabled && <div className="comic-actions">
         <label className="comic-file-button">
           {t("上传首帧")}

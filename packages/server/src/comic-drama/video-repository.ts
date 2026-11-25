@@ -12,13 +12,16 @@ import { ComicLibraryError, ComicSelectionConflictError, libraryMissing, library
 import { insertComicMedia } from "./library-repository.js";
 
 const tables = "lot_comic_drama";
-const videoColumns = `${takeColumns},r.series_id AS "seriesId",s.title AS "seriesTitle",CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS ordinal,
+const videoColumns = `${takeColumns},r.series_id AS "seriesId",s.drama_id AS "dramaId",
+  coalesce(d.title, s.series_group, s.title) AS "dramaTitle",s.episode_no AS "episodeNo",
+  s.title AS "seriesTitle",CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS ordinal,
   coalesce(c.draft->>'scene','') AS scene,coalesce(c.adopted_video_take_id=t.id,false) AS adopted,
   c.selection_revision AS "clipSelectionRevision",
   t.video_version AS version,t.input->>'modelId' AS "modelId",
   coalesce(m.duration_ms,(t.input->>'durationMs')::int) AS "durationMs",t.completed_at AS "completedAt",
   coalesce(c.keyframe_media_id, kt.media_id) AS "posterMediaId"`;
 const joinVideos = `${joinTakes} JOIN ${tables}.cd_series s ON (s.owner_id,s.id)=(r.owner_id,r.series_id)
+  LEFT JOIN ${tables}.cd_dramas d ON (d.owner_id,d.id)=(s.owner_id,s.drama_id)
   LEFT JOIN ${tables}.cd_clips c ON c.id=t.target_id AND c.series_id=r.series_id
   LEFT JOIN ${tables}.cd_takes kt ON kt.owner_id=t.owner_id AND kt.id=c.keyframe_take_id AND kt.status='ready'
   LEFT JOIN ${tables}.cd_media m ON (m.owner_id,m.id)=(t.owner_id,t.media_id)`;
@@ -180,7 +183,7 @@ export class PgComicVideo {
       WHERE t.owner_id=$1 AND t.status='ready' AND t.video_version IS NOT NULL AND ($2::uuid IS NULL OR r.series_id=$2)
       AND ($3::boolean IS NULL OR coalesce(c.adopted_video_take_id=t.id,false)=$3)
       AND ($4::timestamptz IS NULL OR t.completed_at>=$4) AND ($5::timestamptz IS NULL OR t.completed_at<$5)
-      AND ($8='' OR strpos(lower(s.title),lower($8))>0)
+      AND ($8='' OR strpos(lower(s.title),lower($8))>0 OR strpos(lower(coalesce(d.title,'')),lower($8))>0)
       AND ($9::text IS NULL OR coalesce(c.draft->'cast','[]'::jsonb) @> jsonb_build_array(jsonb_build_object('characterId',$9::text))
         OR coalesce(t.input->'references','[]'::jsonb) @> jsonb_build_array(jsonb_build_object('characterId',$9::text)))
       AND ($6::timestamptz IS NULL OR (t.completed_at,t.id)<($6,$7::uuid)) ORDER BY t.completed_at DESC,t.id DESC LIMIT $10`,

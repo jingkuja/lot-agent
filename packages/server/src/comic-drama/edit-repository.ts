@@ -8,7 +8,11 @@ import {
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
 const cd = "lot_comic_drama";
-const columns = 'id,series_id AS "seriesId",title,revision,updated_at AS "updatedAt"';
+const joinedColumns = `e.id,e.series_id AS "seriesId",s.drama_id AS "dramaId",
+  coalesce(d.title,s.series_group,s.title) AS "dramaTitle",s.episode_no AS "episodeNo",
+  s.title AS "episodeTitle",e.title,e.revision,e.updated_at AS "updatedAt"`;
+const joinSeries = `LEFT JOIN ${cd}.cd_series s ON (s.owner_id,s.id)=(e.owner_id,e.series_id) AND s.deleted_at IS NULL
+  LEFT JOIN ${cd}.cd_dramas d ON (d.owner_id,d.id)=(s.owner_id,s.drama_id) AND d.deleted_at IS NULL`;
 type EditRow = Omit<ComicEdit, "sources" | "audioSources" | "updatedAt"> & { updatedAt: Date };
 type SourceRow = ComicEditSource & { seriesId: string };
 
@@ -20,21 +24,27 @@ export class PgComicEdits {
   constructor(private readonly pool: Pool) {}
 
   private async read(db: ComicQuery, owner: string, id: string, write = false): Promise<EditRow> {
-    const { rows: [row] } = await db.query<EditRow>(`SELECT ${columns},timeline FROM ${cd}.cd_edits
-      WHERE owner_id=$1 AND id=$2 ${write ? "FOR UPDATE" : "FOR SHARE"}`, [owner, id]);
+    const { rows: [row] } = await db.query<EditRow>(`SELECT ${joinedColumns},e.timeline FROM ${cd}.cd_edits e
+      ${joinSeries}
+      WHERE e.owner_id=$1 AND e.id=$2 ${write ? "FOR UPDATE OF e" : "FOR SHARE OF e"}`, [owner, id]);
     if (!row) libraryMissing();
     return { ...row, timeline: comicTimelineSchema.parse(row.timeline) };
   }
 
   private async sources(db: ComicQuery, owner: string, takes: string[]): Promise<SourceRow[]> {
     if (!takes.length) return [];
-    const { rows } = await db.query<SourceRow>(`SELECT t.id AS "takeId",t.media_id AS "mediaId",s.title AS "seriesTitle",
-      s.id AS "seriesId",CASE WHEN s.deleted_at IS NULL THEN c.id END AS "clipId",coalesce(c.draft->>'scene','') AS scene,
+    const { rows } = await db.query<SourceRow>(`SELECT t.id AS "takeId",t.media_id AS "mediaId",
+      s.drama_id AS "dramaId",coalesce(d.title,s.series_group,s.title) AS "dramaTitle",s.episode_no AS "episodeNo",
+      s.title AS "seriesTitle",s.id AS "seriesId",
+      CASE WHEN s.deleted_at IS NULL THEN c.id END AS "clipId",
+      CASE WHEN s.deleted_at IS NULL THEN c.ordinal END AS "clipOrdinal",
+      coalesce(c.draft->>'scene','') AS scene,
       t.video_version AS version,m.duration_ms AS "durationMs",t.input->>'aspectRatio' AS "aspectRatio",
       CASE WHEN a.id IS NOT NULL AND am.duration_ms IS NOT NULL
         THEN jsonb_build_object('takeId',a.id,'version',a.video_version,'durationMs',am.duration_ms) END AS adopted
       FROM ${cd}.cd_takes t JOIN ${cd}.cd_generation_requests r ON (r.owner_id,r.id)=(t.owner_id,t.request_id)
       JOIN ${cd}.cd_series s ON (s.owner_id,s.id)=(t.owner_id,r.series_id)
+      LEFT JOIN ${cd}.cd_dramas d ON (d.owner_id,d.id)=(s.owner_id,s.drama_id)
       JOIN ${cd}.cd_media m ON (m.owner_id,m.id)=(t.owner_id,t.media_id)
       LEFT JOIN ${cd}.cd_clips c ON c.id=t.target_id AND c.series_id=r.series_id AND s.deleted_at IS NULL
       LEFT JOIN ${cd}.cd_takes a ON (a.owner_id,a.id)=(t.owner_id,c.adopted_video_take_id) AND a.status='ready' AND a.video_version IS NOT NULL
@@ -104,8 +114,9 @@ export class PgComicEdits {
     }
     const [{ rows }, { rows: [stateRow] }] = await Promise.all([
       this.pool.query<Omit<ComicEditListEntry, "updatedAt"> & { updatedAt: Date; stamp: string }>(
-        `SELECT ${columns},updated_at::text AS stamp FROM ${cd}.cd_edits WHERE owner_id=$1
-        AND ($2::timestamptz IS NULL OR (updated_at,id)<($2,$3::uuid)) ORDER BY updated_at DESC,id DESC LIMIT 25`,
+        `SELECT ${joinedColumns},e.updated_at::text AS stamp FROM ${cd}.cd_edits e ${joinSeries}
+         WHERE e.owner_id=$1
+         AND ($2::timestamptz IS NULL OR (e.updated_at,e.id)<($2,$3::uuid)) ORDER BY e.updated_at DESC,e.id DESC LIMIT 25`,
         [owner, stamp ?? null, id ?? null],
       ),
       this.pool.query<{ editorLastId: string | null }>(
@@ -204,8 +215,11 @@ export class PgComicEdits {
       const paired = initial.map(source => ({ videoItem: comicVideoItem(randomUUID(), source), clipId: source.clipId }));
       timeline.video = paired.map(entry => entry.videoItem);
       timeline.sfx = await this.initialClipSfx(db, owner, paired);
-      const { rows: [row] } = await db.query<EditRow>(`INSERT INTO ${cd}.cd_edits(owner_id,series_id,title,timeline)
-        VALUES($1,$2,$3,$4) RETURNING ${columns},timeline`, [owner, seriesId, fields.title, timeline]);
+      const { rows: [inserted] } = await db.query<{ id: string }>(
+        `INSERT INTO ${cd}.cd_edits(owner_id,series_id,title,timeline) VALUES($1,$2,$3,$4) RETURNING id`,
+        [owner, seriesId, fields.title, timeline],
+      );
+      const row = await this.read(db, owner, inserted.id);
       const refs = await this.refs(db, owner, row.id, timeline);
       await this.rememberLastEdit(db, owner, row.id);
       return this.detail(row, refs);
@@ -214,8 +228,12 @@ export class PgComicEdits {
 
   private async save(db: ComicQuery, owner: string, row: EditRow, title: string, timeline: ComicTimeline) {
     const sources = await this.refs(db, owner, row.id, timeline);
-    const { rows: [next] } = await db.query<EditRow>(`UPDATE ${cd}.cd_edits SET title=$3,timeline=$4,revision=revision+1,updated_at=clock_timestamp()
-      WHERE owner_id=$1 AND id=$2 RETURNING ${columns},timeline`, [owner, row.id, title, timeline]);
+    await db.query(
+      `UPDATE ${cd}.cd_edits SET title=$3,timeline=$4,revision=revision+1,updated_at=clock_timestamp()
+       WHERE owner_id=$1 AND id=$2`,
+      [owner, row.id, title, timeline],
+    );
+    const next = await this.read(db, owner, row.id);
     await this.rememberLastEdit(db, owner, row.id);
     return this.detail(next, sources);
   }

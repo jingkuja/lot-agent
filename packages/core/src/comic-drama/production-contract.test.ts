@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyComicScriptEnhancements, buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues, COMIC_SPEECH_PRESET_CATALOG,
-  comicDirectorApplySchema, comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema, comicDramaClipDraftSchema,
-  comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions, comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema,
-  comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema,
-  estimateComicDialogueMs, extractComicScriptExcerptSegments, layoutComicTimeline, matchComicCharacters, normalizeShotDurationShares,
-  planClipSfxPlacements, rebalanceShotDurationShares, selectComicImageModel, selectComicVideoModel, splitComicScriptSegments,
-  validateComicVideoInput, type ComicGenerationTimedMedia,
-  type ComicCastSnapshot, type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
+  applyComicScriptEnhancements, buildComicDramaHierarchy, buildComicGenerationInput, checkComicClipIssues, checkComicSeriesIssues,
+  COMIC_SPEECH_PRESET_CATALOG, comicDirectorApplySchema, comicDirectorChatInputSchema, comicDirectorDismissSchema, comicDirectorInputSchema,
+  comicDramaClipDraftSchema, comicDramaSchema, comicDramaSeriesSchema, comicFrozenGenerationSchema, comicGenerationPreviewSchema, comicImageOptions,
+  comicRenderIssue, comicSpeechReleaseSchema, comicTimelineSchema, comicUserPreferencesSchema, comicVideoOptions, comicVideoProfile,
+  comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, createComicDramaSchema, estimateComicDialogueMs, extractComicScriptExcerptSegments,
+  layoutComicTimeline, matchComicCharacters, normalizeShotDurationShares, planClipSfxPlacements, rebalanceShotDurationShares, selectComicImageModel,
+  selectComicVideoModel, splitComicScriptSegments, validateComicVideoInput, type ComicGenerationTimedMedia, type ComicCastSnapshot,
+  type ComicDramaClip, type ComicDramaSeries, type ComicFrozenGenerationInput, type ComicSeriesCast,
 } from "./index.js";
 import { FakeComicGenerationProvider } from "./generation-fixture.js";
 
 const uuid = (n: number) => `abcdef01-2345-4567-8abc-${String(n).padStart(12, "0")}`;
 const series: ComicDramaSeries = {
-  id: uuid(1), title: "雨夜便利店", parentId: null, logline: "", seriesGroup: null, episodeNo: null,
+  id: uuid(1), dramaId: uuid(99), title: "雨夜便利店", parentId: null, logline: "", seriesGroup: null, episodeNo: null,
   styleKey: "thick_painting", videoModel: "doubao-seedance-2-5", aspectRatio: "9:16", revision: 4, archivedAt: null,
 };
 const snapshot: ComicCastSnapshot = {
@@ -466,5 +466,83 @@ describe("comic v1 quality checks, refs, presets and schemas", () => {
     }).success).toBe(true);
     expect(comicDirectorDismissSchema.safeParse({ itemIndex: 0 }).success).toBe(true);
     expect(comicDirectorDismissSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("models and computes the 3-tier drama -> episode -> clip hierarchy", () => {
+    expect(createComicDramaSchema.safeParse({
+      title: "雨夜便利店",
+      synopsis: "都市奇幻短剧",
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+    }).success).toBe(true);
+    expect(createComicDramaSchema.safeParse({ title: "" }).success).toBe(false);
+
+    expect(comicDramaSchema.safeParse({
+      id: uuid(99),
+      title: "雨夜便利店",
+      synopsis: "都市奇幻短剧",
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+      videoModel: "doubao-seedance-2-5",
+      revision: 2,
+      archivedAt: null,
+    }).success).toBe(true);
+
+    // Tier-2 episodes require a parent dramaId
+    expect(comicDramaSeriesSchema.safeParse({ ...series, dramaId: undefined }).success).toBe(false);
+    expect(comicDramaSeriesSchema.safeParse(series).success).toBe(true);
+
+    const hierarchy = buildComicDramaHierarchy(
+      {
+        id: uuid(99),
+        title: "雨夜便利店",
+        synopsis: "都市奇幻短剧",
+        revision: 2,
+      },
+      { ...series, id: uuid(2), title: "第 2 集：风铃", episodeNo: 2 },
+      [
+        {
+          id: uuid(20),
+          dramaId: uuid(99),
+          episodeId: uuid(2),
+          ordinal: 1,
+          revision: 1,
+          selectionRevision: 1,
+          draft: {
+            schemaVersion: 1,
+            durationMs: 4000,
+            scene: "门口风铃",
+            shots: [{ id: uuid(30), framingKey: "medium", movementKey: "fixed", description: "特写", durationShare: 100 }],
+            lines: [],
+          },
+        },
+        {
+          id: uuid(21),
+          dramaId: uuid(99),
+          episodeId: uuid(2),
+          ordinal: 2,
+          revision: 1,
+          selectionRevision: 1,
+          draft: {
+            schemaVersion: 1,
+            durationMs: 5000,
+            scene: "柜台重逢",
+            shots: [{ id: uuid(31), framingKey: "closeup", movementKey: "fixed", description: "重逢", durationShare: 100 }],
+            lines: [],
+          },
+        },
+      ],
+      2,
+    );
+
+    expect(hierarchy.drama.title).toBe("雨夜便利店");
+    expect(hierarchy.drama.episodeCount).toBe(2);
+    expect(hierarchy.episode.episodeNo).toBe(2);
+    expect(hierarchy.episode.title).toBe("第 2 集：风铃");
+    expect(hierarchy.episode.clipCount).toBe(2);
+    expect(hierarchy.clips.map(clip => `${clip.ordinal}:${clip.episodeId}:${clip.scene}:${clip.durationMs}`)).toEqual([
+      `1:${uuid(2)}:门口风铃:4000`,
+      `2:${uuid(2)}:柜台重逢:5000`,
+    ]);
   });
 });

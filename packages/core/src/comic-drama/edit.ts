@@ -23,9 +23,21 @@ export type ComicEditCreate = z.infer<typeof comicEditCreateSchema>;
 export type ComicEditUpdate = z.infer<typeof comicEditUpdateSchema>;
 export type ComicEditReplace = z.infer<typeof comicEditReplaceSchema>;
 export type ComicEditAppendSource = z.infer<typeof comicEditAppendSourceSchema>;
-export type ComicEditListEntry = { id: string; seriesId: string | null; title: string; revision: number; updatedAt: string };
+export type ComicEditListEntry = {
+  id: string;
+  seriesId: string | null;
+  dramaId?: string | null;
+  dramaTitle?: string | null;
+  episodeNo?: number | null;
+  episodeTitle?: string | null;
+  title: string;
+  revision: number;
+  updatedAt: string;
+};
 export type ComicEditSource = {
-  takeId: string; mediaId: string; seriesId?: string; seriesTitle: string; clipId: string | null; scene: string; version: number; durationMs: number;
+  takeId: string; mediaId: string;
+  dramaId?: string; dramaTitle?: string; episodeNo?: number | null; clipOrdinal?: number | null;
+  seriesId?: string; seriesTitle: string; clipId: string | null; scene: string; version: number; durationMs: number;
   aspectRatio: ComicTimeline["aspectRatio"]; adopted: { takeId: string; version: number; durationMs: number } | null;
 };
 export type ComicEditAudioSource = { id: string; durationMs: number };

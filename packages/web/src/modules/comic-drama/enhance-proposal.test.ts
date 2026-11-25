@@ -27,7 +27,7 @@ afterEach(() => {
 function makeDetail(): ComicDramaDetail {
   return {
     series: {
-      id: uuid(1), parentId: null, title: "雨夜便利店", logline: "重逢", seriesGroup: null, episodeNo: 1,
+      id: uuid(1), dramaId: uuid(99), parentId: null, title: "雨夜便利店", logline: "重逢", seriesGroup: null, episodeNo: 1,
       styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 3, archivedAt: null,
     },
     script: { version: 1, content: "第一段\n\n第二段" },

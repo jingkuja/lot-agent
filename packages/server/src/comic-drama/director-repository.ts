@@ -24,6 +24,8 @@ type ProposalRow = Omit<ComicDirectorProposal, "createdAt"> & { createdAt: Date 
 const view = (row: ProposalRow): ComicDirectorProposal => ({ ...row, createdAt: row.createdAt.toISOString() });
 
 export type DirectorEnhanceSeriesMeta = {
+  dramaTitle?: string;
+  episodeNo?: number | null;
   title: string;
   logline: string;
   styleKey: string;
@@ -106,10 +108,11 @@ export class PgComicDirector {
 
   async episode(owner: string, series: string, db: ComicQuery = this.pool, lock = false) {
     const { rows: [row] } = await db.query<{
-      title: string; logline: string; styleKey: string; aspectRatio: string; videoModel: string | null;
-      revision: number; archived: boolean;
+      title: string; logline: string; seriesGroup?: string | null; episodeNo?: number | null;
+      styleKey: string; aspectRatio: string; videoModel: string | null; revision: number; archived: boolean;
     }>(
-      `SELECT title,logline,style_key AS "styleKey",aspect_ratio AS "aspectRatio",video_model AS "videoModel",
+      `SELECT title,logline,series_group AS "seriesGroup",episode_no AS "episodeNo",
+         style_key AS "styleKey",aspect_ratio AS "aspectRatio",video_model AS "videoModel",
          revision,archived_at IS NOT NULL AS archived
        FROM ${cd}.cd_series WHERE owner_id=$1 AND id=$2 AND deleted_at IS NULL ${lock ? "FOR UPDATE" : ""}`,
       [owner, series],
@@ -259,7 +262,10 @@ export class PgComicDirector {
     db: ComicQuery,
     owner: string,
     series: string,
-    episode: { title: string; logline: string; styleKey: string; aspectRatio: string; videoModel: string | null },
+    episode: {
+      title: string; logline: string; seriesGroup?: string | null; episodeNo?: number | null;
+      styleKey: string; aspectRatio: string; videoModel: string | null;
+    },
     fullScript: string,
     input: ComicDirectorInput,
   ): Promise<DirectorEnhanceContext> {
@@ -268,6 +274,8 @@ export class PgComicDirector {
     const styles = await readComicDictionary(db, owner, "style");
     const styleLabel = styles.find(entry => entry.key === episode.styleKey)?.labels[input.language] ?? episode.styleKey;
     const seriesMeta: DirectorEnhanceSeriesMeta = {
+      dramaTitle: episode.seriesGroup ?? episode.title,
+      episodeNo: episode.episodeNo ?? 1,
       title: episode.title, logline: episode.logline, styleKey: episode.styleKey,
       styleLabel, aspectRatio: episode.aspectRatio, videoModel: episode.videoModel,
     };

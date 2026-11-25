@@ -7,6 +7,7 @@ import {
   type ComicVideoMaterialRef, type ComicVideoProfile,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
+import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
@@ -17,7 +18,8 @@ const videoInputLabels = { image: "参考图", audio: "参考音频", video: "�
 const refLabels = { scene: "场景", prop: "道具", sfx: "音效", ...videoInputLabels } as const;
 
 type Props = {
-  series?: Pick<ComicDramaSeries, "videoModel"> & Partial<Pick<ComicDramaSeries, "styleKey">>;
+  dramaTitle?: string;
+  series?: Pick<ComicDramaSeries, "videoModel"> & Partial<Pick<ComicDramaSeries, "styleKey" | "title" | "seriesGroup" | "episodeNo">>;
   clips: readonly ComicDramaClip[];
   cast: readonly ComicSeriesCast[];
   drafts: Readonly<Record<string, { draft: ComicDramaClipDraft }>>;
@@ -50,10 +52,13 @@ function clipProgressLabel(clip: ComicDramaClip): { stage: string; tone: string 
 }
 
 export function Storyboard({
-  series, clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder, onEnhanceClip,
+  dramaTitle, series, clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder, onEnhanceClip,
 }: Props) {
   const { t } = useI18n();
   const dragging = useRef<string | null>(null);
+  const resolvedDramaTitle = dramaTitle ?? series?.seriesGroup ?? series?.title ?? "";
+  const resolvedEpisodeNo = series?.episodeNo ?? 1;
+  const resolvedEpisodeTitle = series?.title ?? "";
   const clip = clips.find(entry => entry.id === selected) ?? clips[0];
   const activeDraft = clip ? (drafts[clip.id]?.draft ?? clip.draft) : null;
   const clipIssues = clip && activeDraft
@@ -69,6 +74,12 @@ export function Storyboard({
   };
   return <div className="comic-board">
     <section className="comic-strip" aria-label={t("分镜列表")}>
+      {resolvedDramaTitle && (
+        <div className="comic-strip-head">
+          <small>{resolvedDramaTitle} · {t("第 {0} 集", [resolvedEpisodeNo])}</small>
+          <small>{t("共 {0} 个分镜", [clips.length])}</small>
+        </div>
+      )}
       {clips.length === 0 && <p>{t("还没有分镜")}</p>}
       {clips.map((item, index) => {
         const badge = clipProgressLabel(item);
@@ -102,6 +113,15 @@ export function Storyboard({
     {clip && activeDraft && <section className="comic-edit-card">
       <header>
         <div>
+          {resolvedDramaTitle && (
+            <ComicClipOriginBadge
+              dramaTitle={resolvedDramaTitle}
+              episodeNo={resolvedEpisodeNo}
+              episodeTitle={resolvedEpisodeTitle || resolvedDramaTitle}
+              clipOrdinal={clip.ordinal}
+              totalClips={clips.length}
+            />
+          )}
           <h2>{t("分镜 {0}", [clip.ordinal])}</h2>
           <div className="comic-cut-badges">
             <small className="comic-pill" data-tone={clipProgressLabel(clip).tone}>{t("制作进度")} · {t(clipProgressLabel(clip).stage)}</small>

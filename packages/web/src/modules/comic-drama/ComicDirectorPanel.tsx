@@ -210,6 +210,9 @@ export function ComicDirectorPanel({
   const messages = state?.messages ?? [];
   const shown = proposals.find(item => item.id === selected) ?? proposals[0];
   const writing = proposals.some(item => item.status === "writing");
+  const dramaTitle = detail.drama?.title ?? detail.series.seriesGroup ?? detail.series.title;
+  const episodeNo = detail.series.episodeNo ?? 1;
+  const activeClip = selectedClipId ? detail.clips.find(item => item.id === selectedClipId) : undefined;
   return <section className="comic-edit-card comic-director">
     <header>
       <h2>{t("导演助手")}</h2>
@@ -218,6 +221,13 @@ export function ComicDirectorPanel({
         <button type="button" onClick={reload}>{t("刷新提案")}</button>
       </div>
     </header>
+    <div className="comic-director-context" aria-label={t("当前制作范围")}>
+      <small>{t("当前制作范围")}</small>
+      <strong>
+        {dramaTitle} › {t("第 {0} 集", [episodeNo])} · {detail.series.title}
+        {activeClip ? ` › ${t("分镜 {0}", [activeClip.ordinal])}` : ""}
+      </strong>
+    </div>
     <div className="comic-actions comic-director-tabs" role="tablist">
       <button type="button" role="tab" aria-selected={panelTab === "chat"} onClick={() => setPanelTab("chat")}>{t("多轮对话")}</button>
       <button type="button" role="tab" aria-selected={panelTab === "proposals"} onClick={() => setPanelTab("proposals")}>

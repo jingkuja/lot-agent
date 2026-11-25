@@ -2,6 +2,7 @@ import { COMIC_DRAMA_ROOT, type ComicDramaClip, type ComicDramaSeries } from "@l
 
 const series: ComicDramaSeries = {
   id: "4c8c9f0f-1f87-4efa-9b18-ba6e266a67ca",
+  dramaId: "4c8c9f0f-1f87-4efa-9b18-000000000001",
   parentId: null,
   title: "末世便利店 第 3 集",
   logline: "林夏在雨夜找到一间仍在营业的便利店。",

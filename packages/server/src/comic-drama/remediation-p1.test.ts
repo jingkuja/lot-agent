@@ -101,7 +101,7 @@ describe("P1 #1: settled vs estimated vs pending-reconcile episode costs by curr
 describe("episode budget predictions", () => {
   it("estimates each new speech request at 100 credits without an audio gateway estimate", async () => {
     const detail: ComicDramaDetail = { clips: [], cast: [], script: null, series: {
-      id: seriesId, parentId: null, title: "Budget", logline: "", seriesGroup: null, episodeNo: 1,
+      id: seriesId, dramaId: uuid(99), parentId: null, title: "Budget", logline: "", seriesGroup: null, episodeNo: 1,
       styleKey: "webtoon", aspectRatio: "9:16", videoModel: null, revision: 1, archivedAt: null,
     } };
     const predict = vi.fn().mockRejectedValue(new Error("Price unavailable"));
@@ -233,7 +233,7 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
     });
     const detail: ComicDramaDetail = {
       series: {
-        id: seriesId, parentId: null, title: "测试集", logline: "", seriesGroup: null, episodeNo: 1,
+        id: seriesId, dramaId: uuid(99), parentId: null, title: "测试集", logline: "", seriesGroup: null, episodeNo: 1,
         styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 4, archivedAt: null,
       },
       clips: [clipWithArchivedProp, clipWithValidScene],
@@ -324,9 +324,9 @@ describe("P1 #4: per-clip scene/prop reference validation and retryable query fa
     const client = {
       query: vi.fn(async (sql: string) => {
         if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
-        if (sql.includes("FROM lot_comic_drama.cd_series ")) {
+        if (sql.includes("FROM lot_comic_drama.cd_series WHERE")) {
           return { rows: [{
-            id: seriesId, parentId: null, title: "T", logline: "", seriesGroup: null, episodeNo: 1,
+            id: seriesId, dramaId: uuid(99), parentId: null, title: "T", logline: "", seriesGroup: null, episodeNo: 1,
             styleKey: "thick_painting", aspectRatio: "9:16", videoModel: null, revision: 3, archivedAt: null,
           }], rowCount: 1 };
         }
@@ -745,9 +745,9 @@ describe("P1 #7: concurrent episode opens on a small PG pool without nested conn
         const model = prefsByOwner.get(String(params[0])) ?? null;
         return { rows: [{ preferences: { defaultImageModel: model } }], rowCount: 1 };
       }
-      if (sql.includes("FROM lot_comic_drama.cd_series ")) {
+      if (sql.includes("FROM lot_comic_drama.cd_series WHERE")) {
         return { rows: [{
-          id: String(params[1]), parentId: null, title: "并发测试集", logline: "", seriesGroup: null, episodeNo: 1,
+          id: String(params[1]), dramaId: uuid(99), parentId: null, title: "并发测试集", logline: "", seriesGroup: null, episodeNo: 1,
           styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-5", revision: 1, archivedAt: null,
         }], rowCount: 1 };
       }
@@ -831,6 +831,10 @@ describe("P2 #8: shot-level SFX initialization into edit project and sync after 
     });
 
     let insertedTimeline: ComicEdit["timeline"] | null = null;
+    let insertedEdit: {
+      id: string; seriesId: string; dramaId: string; dramaTitle: string; episodeNo: number; episodeTitle: string;
+      title: unknown; revision: number; updatedAt: Date; timeline: ComicEdit["timeline"];
+    } | null = null;
     const client = {
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
         if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
@@ -861,9 +865,16 @@ describe("P2 #8: shot-level SFX initialization into edit project and sync after 
         }
         if (sql.includes("INSERT INTO lot_comic_drama.cd_edits")) {
           insertedTimeline = params[3] as ComicEdit["timeline"];
+          insertedEdit = {
+            id: uuid(820), seriesId, dramaId: uuid(99), dramaTitle: "测试剧", episodeNo: 1, episodeTitle: "测试集",
+            title: params[2], revision: 1, updatedAt: new Date(), timeline: insertedTimeline,
+          };
           return { rows: [{
             id: uuid(820), seriesId, title: params[2], revision: 1, updatedAt: new Date(), timeline: insertedTimeline,
           }], rowCount: 1 };
+        }
+        if (sql.includes("FROM lot_comic_drama.cd_edits e")) {
+          return { rows: insertedEdit ? [insertedEdit] : [], rowCount: insertedEdit ? 1 : 0 };
         }
         return { rows: [], rowCount: 0 };
       }),
