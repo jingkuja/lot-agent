@@ -6,7 +6,8 @@ import {
   type ComicDramaEditEpisodeItem, type ComicDramaEditTaskEntry, type ComicDramaEditTaskSummary,
   type ComicDramaEditTaskView, type ComicEdit, type ComicEditAppendSource, type ComicEditAudioSource,
   type ComicEditCreate, type ComicEditLastSummary, type ComicEditList, type ComicEditListEntry,
-  type ComicEditReplace, type ComicEditSource, type ComicEditUnaddedTake, type ComicEditUpdate, type ComicTimeline,
+  type ComicEditOutdatedTake, type ComicEditReplace, type ComicEditSource, type ComicEditUnaddedTake,
+  type ComicEditUpdate, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
@@ -15,11 +16,15 @@ const joinedColumns = `e.id,e.series_id AS "seriesId",e.drama_edit_task_id AS "d
   coalesce(s.drama_id,et.drama_id) AS "dramaId",
   coalesce(d.title,s.series_group,s.title) AS "dramaTitle",s.episode_no AS "episodeNo",
   s.title AS "episodeTitle",e.title,e.revision,e.updated_at AS "updatedAt",
-  d.archived_at AS "dramaArchivedAt"`;
+  coalesce(d.archived_at, CASE WHEN e.drama_edit_task_id IS NOT NULL THEN s.archived_at END) AS "dramaArchivedAt"`;
 const joinSeries = `LEFT JOIN ${cd}.cd_edit_tasks et ON (et.owner_id,et.id)=(e.owner_id,e.drama_edit_task_id)
   LEFT JOIN ${cd}.cd_series s ON (s.owner_id,s.id)=(e.owner_id,e.series_id) AND s.deleted_at IS NULL
   LEFT JOIN ${cd}.cd_dramas d ON (d.owner_id,d.id)=(e.owner_id,coalesce(s.drama_id,et.drama_id)) AND d.deleted_at IS NULL`;
-type EditRow = Omit<ComicEdit, "sources" | "audioSources" | "updatedAt" | "dramaArchivedAt" | "dramaEpisodes" | "unaddedAdoptedTakes"> & {
+type EditRow = Omit<
+  ComicEdit,
+  "sources" | "audioSources" | "updatedAt" | "dramaArchivedAt" | "dramaEpisodes" | "episodeClipCount"
+  | "episodeAdoptedCount" | "unaddedAdoptedTakes" | "outdatedAdoptedTakes"
+> & {
   updatedAt: Date;
   dramaArchivedAt?: Date | null;
 };
@@ -54,6 +59,12 @@ type EpisodeQueryRow = {
   editUpdatedAt: Date | null;
   renderCount: number;
   hasReadyRender: boolean;
+  latestReadyRenderId?: string | null;
+  latestReadyRenderDurationMs?: number | string | null;
+  latestReadyRenderFps?: number | string | null;
+  latestReadyRenderRevision?: number | string | null;
+  latestReadyRenderAt?: Date | string | null;
+  activeRenderStatus?: "pending" | "running" | null;
 };
 type EpisodeClipRow = {
   seriesId: string;
@@ -129,32 +140,38 @@ export class PgComicEdits {
     return rows;
   }
 
-  private async findUnaddedAdoptedTakes(
+  private async summarizeEpisodeClips(
     db: ComicQuery,
     owner: string,
     seriesId: string,
     timeline: ComicTimeline,
     sources: readonly SourceRow[],
-  ): Promise<ComicEditUnaddedTake[]> {
+  ): Promise<{
+    clipCount: number;
+    adoptedCount: number;
+    unaddedAdoptedTakes: ComicEditUnaddedTake[];
+    outdatedAdoptedTakes: ComicEditOutdatedTake[];
+  }> {
     const presentTakeIds = new Set(timeline.video.map(item => item.takeId));
+    const sourceByTake = new Map(sources.map(src => [src.takeId, src]));
     const presentClipIds = new Set(
       sources.map(src => src.clipId).filter((clipId): clipId is string => Boolean(clipId)),
     );
     const { rows } = await db.query<EpisodeClipRow>(
       `SELECT c.series_id AS "seriesId", c.id AS "clipId", c.ordinal,
          coalesce(c.draft->>'scene', '') AS scene,
-         c.adopted_video_take_id AS "adoptedTakeId",
+         CASE WHEN t.id IS NOT NULL AND m.id IS NOT NULL THEN c.adopted_video_take_id ELSE NULL END AS "adoptedTakeId",
          m.duration_ms AS "adoptedDurationMs"
        FROM ${cd}.cd_clips c
-       JOIN ${cd}.cd_takes t ON t.owner_id=$1 AND t.id=c.adopted_video_take_id
+       LEFT JOIN ${cd}.cd_takes t ON t.owner_id=$1 AND t.id=c.adopted_video_take_id
          AND t.status='ready' AND t.video_version IS NOT NULL
-       JOIN ${cd}.cd_media m ON (m.owner_id, m.id)=(t.owner_id, t.media_id)
+       LEFT JOIN ${cd}.cd_media m ON (m.owner_id, m.id)=(t.owner_id, t.media_id)
          AND m.mime='video/mp4' AND m.duration_ms>0
-       WHERE c.series_id=$2 AND c.adopted_video_take_id IS NOT NULL
+       WHERE c.series_id=$2
        ORDER BY c.ordinal ASC`,
       [owner, seriesId],
     );
-    return rows
+    const unaddedAdoptedTakes = rows
       .filter(row => row.adoptedTakeId && row.adoptedDurationMs
         && !presentTakeIds.has(row.adoptedTakeId) && !presentClipIds.has(row.clipId))
       .map(row => ({
@@ -164,6 +181,40 @@ export class PgComicEdits {
         takeId: row.adoptedTakeId!,
         durationMs: Number(row.adoptedDurationMs),
       }));
+    const outdatedAdoptedTakes: ComicEditOutdatedTake[] = [];
+    for (const item of timeline.video) {
+      const src = sourceByTake.get(item.takeId);
+      if (src?.clipId && src.adopted && src.adopted.takeId !== item.takeId) {
+        outdatedAdoptedTakes.push({
+          videoItemId: item.id,
+          clipId: src.clipId,
+          ordinal: Number(src.clipOrdinal ?? 0),
+          scene: src.scene,
+          currentTakeId: item.takeId,
+          currentVersion: Number(src.version),
+          adoptedTakeId: src.adopted.takeId,
+          adoptedVersion: Number(src.adopted.version),
+          adoptedDurationMs: Number(src.adopted.durationMs),
+        });
+      }
+    }
+    return {
+      clipCount: rows.length,
+      adoptedCount: rows.filter(row => Boolean(row.adoptedTakeId)).length,
+      unaddedAdoptedTakes,
+      outdatedAdoptedTakes,
+    };
+  }
+
+  private async findUnaddedAdoptedTakes(
+    db: ComicQuery,
+    owner: string,
+    seriesId: string,
+    timeline: ComicTimeline,
+    sources: readonly SourceRow[],
+  ): Promise<ComicEditUnaddedTake[]> {
+    const summary = await this.summarizeEpisodeClips(db, owner, seriesId, timeline, sources);
+    return summary.unaddedAdoptedTakes;
   }
 
   private async buildEpisodeItemsForDramas(
@@ -183,10 +234,30 @@ export class PgComicEdits {
           WHERE r.owner_id=s.owner_id AND r.edit_id=e.id AND r.deleted_at IS NULL AND r.ephemeral=FALSE) AS "renderCount",
          EXISTS (SELECT 1 FROM ${cd}.cd_renders r
           WHERE r.owner_id=s.owner_id AND r.edit_id=e.id AND r.deleted_at IS NULL AND r.ephemeral=FALSE
-            AND r.media_id IS NOT NULL) AS "hasReadyRender"
+            AND r.media_id IS NOT NULL) AS "hasReadyRender",
+         rr."latestReadyRenderId", rr."latestReadyRenderDurationMs", rr."latestReadyRenderFps",
+         rr."latestReadyRenderRevision", rr."latestReadyRenderAt",
+         ar."activeRenderStatus"
        FROM ${cd}.cd_series s
-       JOIN ${cd}.cd_edit_tasks et ON et.owner_id=s.owner_id AND et.drama_id=s.drama_id
+       LEFT JOIN ${cd}.cd_edit_tasks et ON et.owner_id=s.owner_id AND et.drama_id=s.drama_id
        LEFT JOIN ${cd}.cd_edits e ON e.owner_id=s.owner_id AND e.drama_edit_task_id=et.id AND e.series_id=s.id
+       LEFT JOIN LATERAL (
+         SELECT r.id AS "latestReadyRenderId", r.duration_ms AS "latestReadyRenderDurationMs",
+           CASE WHEN (r.frozen->>'outputFps') IN ('24','30') THEN (r.frozen->>'outputFps')::int END AS "latestReadyRenderFps",
+           r.edit_revision AS "latestReadyRenderRevision", r.created_at AS "latestReadyRenderAt"
+         FROM ${cd}.cd_renders r
+         WHERE r.owner_id=s.owner_id AND r.edit_id=e.id AND r.deleted_at IS NULL AND r.ephemeral=FALSE
+           AND r.media_id IS NOT NULL
+         ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+       ) rr ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT t.status AS "activeRenderStatus"
+         FROM ${cd}.cd_renders r
+         JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text
+         WHERE r.owner_id=s.owner_id AND r.edit_id=e.id AND r.deleted_at IS NULL AND r.ephemeral=FALSE
+           AND r.media_id IS NULL AND t.status IN ('pending','running')
+         ORDER BY r.created_at DESC LIMIT 1
+       ) ar ON TRUE
        WHERE s.owner_id=$1 AND s.drama_id=ANY($2::uuid[]) AND s.deleted_at IS NULL
          AND ($3::boolean OR s.archived_at IS NULL OR ($4::uuid IS NOT NULL AND s.id=$4::uuid))
        ORDER BY s.episode_no ASC, s.created_at ASC, s.id ASC`,
@@ -267,6 +338,11 @@ export class PgComicEdits {
       }
       const updatedAt = (row.editUpdatedAt ?? row.seriesUpdatedAt).toISOString();
       const list = result.get(row.dramaId) ?? [];
+      const readyAt = row.latestReadyRenderAt instanceof Date
+        ? row.latestReadyRenderAt.toISOString()
+        : typeof row.latestReadyRenderAt === "string"
+          ? row.latestReadyRenderAt
+          : null;
       list.push({
         seriesId: row.seriesId,
         episodeNo: Number(row.episodeNo ?? 1),
@@ -284,6 +360,12 @@ export class PgComicEdits {
         outdatedAdoptedCount,
         renderCount: Number(row.renderCount ?? 0),
         hasReadyRender: Boolean(row.hasReadyRender),
+        latestReadyRenderId: row.latestReadyRenderId ?? null,
+        latestReadyRenderDurationMs: row.latestReadyRenderDurationMs != null ? Number(row.latestReadyRenderDurationMs) : null,
+        latestReadyRenderFps: row.latestReadyRenderFps != null ? Number(row.latestReadyRenderFps) : null,
+        latestReadyRenderRevision: row.latestReadyRenderRevision != null ? Number(row.latestReadyRenderRevision) : null,
+        latestReadyRenderAt: readyAt,
+        activeRenderStatus: row.activeRenderStatus ?? null,
         updatedAt,
       });
       result.set(row.dramaId, list);
@@ -299,8 +381,8 @@ export class PgComicEdits {
     includeDramaEpisodes = false,
   ): Promise<ComicEdit> {
     const taskKind = row.dramaEditTaskId ? "drama" as const : "free" as const;
-    const [unaddedAdoptedTakes, episodeMap] = await Promise.all([
-      row.seriesId ? this.findUnaddedAdoptedTakes(db, owner, row.seriesId, row.timeline, refs.sources) : Promise.resolve([]),
+    const [clipSummary, episodeMap] = await Promise.all([
+      row.seriesId ? this.summarizeEpisodeClips(db, owner, row.seriesId, row.timeline, refs.sources) : Promise.resolve(null),
       includeDramaEpisodes && row.dramaEditTaskId && row.dramaId
         ? this.buildEpisodeItemsForDramas(db, owner, [row.dramaId], Boolean(row.dramaArchivedAt), row.seriesId)
         : Promise.resolve(undefined),
@@ -317,7 +399,12 @@ export class PgComicEdits {
       dramaEditTaskId: row.dramaEditTaskId ?? null,
       dramaArchivedAt: row.dramaArchivedAt?.toISOString() ?? null,
       ...(dramaEpisodes ? { dramaEpisodes } : {}),
-      ...(row.seriesId ? { unaddedAdoptedTakes } : {}),
+      ...(clipSummary ? {
+        episodeClipCount: clipSummary.clipCount,
+        episodeAdoptedCount: clipSummary.adoptedCount,
+        unaddedAdoptedTakes: clipSummary.unaddedAdoptedTakes,
+        outdatedAdoptedTakes: clipSummary.outdatedAdoptedTakes,
+      } : {}),
       title: row.title,
       revision: row.revision,
       updatedAt: row.updatedAt.toISOString(),
@@ -589,11 +676,9 @@ export class PgComicEdits {
          FROM ${cd}.cd_edit_tasks WHERE owner_id=$1 AND drama_id=$2`,
         [owner, dramaId],
       );
-      const episodes = taskRow
-        ? ((await this.buildEpisodeItemsForDramas(
-          db, owner, [dramaId], Boolean(drama.archivedAt), requestedSeriesId ?? null,
-        )).get(dramaId) ?? [])
-        : [];
+      const episodes = (await this.buildEpisodeItemsForDramas(
+        db, owner, [dramaId], Boolean(drama.archivedAt), requestedSeriesId ?? null,
+      )).get(dramaId) ?? [];
       if (requestedSeriesId && !episodes.some(ep => ep.seriesId === requestedSeriesId)) {
         libraryMissing();
       }

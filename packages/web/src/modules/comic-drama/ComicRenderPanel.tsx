@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  comicRenderIssue, type ComicEdit, type ComicRender, type ComicRenderFps, type ComicRenderFpsMode, type ComicRenderHistory,
+  comicRenderIssue, layoutComicTimeline, type ComicEdit, type ComicRender, type ComicRenderFps,
+  type ComicRenderFpsMode, type ComicRenderHistory, type ComicTimeline,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { ApiClientError } from "../../api/client.js";
@@ -8,7 +9,20 @@ import { comicEditApi, comicRenderError, editError } from "./edit-api.js";
 
 const active = (render: ComicRender) => render.status === "pending" || render.status === "running";
 
-export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEdit; dirty?: boolean }) {
+export function ComicRenderPanel({
+  project, dirty = false, readOnly = false, draftTimeline, nextEpisode, onEnsureSaved, onRenderUpdated,
+  onSwitchNextEpisode, onBackToSelect,
+}: {
+  project?: ComicEdit;
+  dirty?: boolean;
+  readOnly?: boolean;
+  draftTimeline?: ComicTimeline;
+  nextEpisode?: { episodeNo: number; seriesId: string; title: string } | null;
+  onEnsureSaved?: () => Promise<ComicEdit | null>;
+  onRenderUpdated?: () => void;
+  onSwitchNextEpisode?: (seriesId: string) => void;
+  onBackToSelect?: () => void;
+}) {
   const { t, locale } = useI18n();
   const [history, setHistory] = useState<ComicRenderHistory>();
   const [cursors, setCursors] = useState<string[]>([]);
@@ -21,11 +35,16 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
   const running = useRef(false);
   const removed = useRef(new Set<string>());
   const player = useRef<HTMLVideoElement>(null);
+  const prevActiveRef = useRef(false);
+  const onRenderUpdatedRef = useRef(onRenderUpdated);
+  onRenderUpdatedRef.current = onRenderUpdated;
   const request = useRef<{ revision: number; fpsMode: ComicRenderFpsMode; requestId: string }>(null);
   const targetFps: ComicRenderFps = fpsMode === "24" ? 24 : 30;
-  const issue = project ? comicRenderIssue(project.timeline, targetFps) : null;
+  const activeTimeline = draftTimeline ?? project?.timeline;
+  const issue = activeTimeline ? comicRenderIssue(activeTimeline, targetFps) : null;
   const edit = project?.id;
   const cursor = cursors.at(-1);
+  const isDramaEpisode = project?.taskKind === "drama";
   const reload = () => setRefresh(value => value + 1);
   useEffect(() => {
     const controller = new AbortController();
@@ -34,9 +53,13 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
       try {
         const result = await comicEditApi.renders(edit, cursor, controller.signal);
         if (controller.signal.aborted) return;
-        setHistory({ ...result, entries: result.entries.filter(render => !removed.current.has(render.id)) });
+        const filtered = result.entries.filter(render => !removed.current.has(render.id));
+        setHistory({ ...result, entries: filtered });
         setLoadError(false);
-        if (result.entries.some(active)) timer = setTimeout(poll, 1800);
+        const hasActive = filtered.some(active);
+        if (prevActiveRef.current && !hasActive) onRenderUpdatedRef.current?.();
+        prevActiveRef.current = hasActive;
+        if (hasActive) timer = setTimeout(poll, 1800);
       } catch { if (!controller.signal.aborted) setLoadError(true); }
     };
     void poll();
@@ -51,16 +74,26 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     finally { running.current = false; setPending(null); }
   };
   const submit = () => void action("submit", async () => {
-    if (!project || dirty || issue) return;
-    const nonce = request.current?.revision === project.revision && request.current?.fpsMode === fpsMode
+    if (!project || readOnly) return;
+    if (dirty && !onEnsureSaved) return;
+    const saved = dirty && onEnsureSaved ? await onEnsureSaved() : project;
+    if (!saved) return;
+    const savedIssue = comicRenderIssue(saved.timeline, targetFps);
+    if (savedIssue) {
+      setMessage(comicRenderError(savedIssue));
+      return;
+    }
+    const nonce = request.current?.revision === saved.revision && request.current?.fpsMode === fpsMode
       ? request.current
-      : { revision: project.revision, fpsMode, requestId: crypto.randomUUID() };
+      : { revision: saved.revision, fpsMode, requestId: crypto.randomUUID() };
     request.current = nonce;
     try {
-      await comicEditApi.startRender(project.id, { expectedRevision: nonce.revision, requestId: nonce.requestId, fpsMode: nonce.fpsMode });
+      await comicEditApi.startRender(saved.id, { expectedRevision: nonce.revision, requestId: nonce.requestId, fpsMode: nonce.fpsMode });
       request.current = null;
       setCursors([]);
+      prevActiveRef.current = true;
       reload();
+      onRenderUpdatedRef.current?.();
     } catch (error) {
       if (error instanceof ApiClientError && error.status < 500) request.current = null;
       throw error;
@@ -71,6 +104,7 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     const next = await comicEditApi.renderControl(render.id, operation);
     setHistory(current => current && { ...current, entries: current.entries.map(row => row.id === next.id ? next : row) });
     reload();
+    onRenderUpdatedRef.current?.();
   });
   const play = (render: ComicRender) => void action(render.id, async () => {
     const { url } = await comicEditApi.downloadRender(render.id, true);
@@ -98,15 +132,21 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
     setHistory(current => current && { ...current, entries: current.entries.filter(row => row.id !== render.id) });
     if (cursor && history?.entries.length === 1) setCursors(values => values.slice(0, -1));
     reload();
+    onRenderUpdatedRef.current?.();
   });
-  return <section className="comic-edit-card comic-render-panel">
+  const latestReady = isDramaEpisode ? history?.entries.find(r => r.status === "ready" && r.mediaId) : undefined;
+  const videoCount = activeTimeline?.video.length ?? 0;
+  const totalSec = activeTimeline ? +(layoutComicTimeline(activeTimeline).durationMs / 1000).toFixed(1) : 0;
+  const canSubmit = Boolean(project && !readOnly && pending === null && !issue && (!dirty || onEnsureSaved));
+
+  return <section id="comic-episode-merge-panel" className="comic-edit-card comic-render-panel">
     <header>
-      {project ? <h2>{t("合并导出")}</h2> : <h1>{t("导出历史")}</h1>}
+      {project ? <h2>{t(isDramaEpisode ? "合并为一集剧成果" : "合并导出")}</h2> : <h1>{t("导出历史")}</h1>}
       <div className="comic-actions">
         {project && (
           <label className="comic-render-fps">
             <span>{t("导出帧率")}</span>
-            <select aria-label={t("导出帧率")} value={fpsMode} disabled={pending !== null}
+            <select aria-label={t("导出帧率")} value={fpsMode} disabled={pending !== null || readOnly}
               onChange={event => setFpsMode(event.target.value as ComicRenderFpsMode)}>
               <option value="auto">{t("自动（全 24 fps 原生导出，混帧转 30 fps）")}</option>
               <option value="24">{t("24 fps（漫剧原生帧率）")}</option>
@@ -115,15 +155,50 @@ export function ComicRenderPanel({ project, dirty = false }: { project?: ComicEd
           </label>
         )}
         <button type="button" onClick={reload}>{t("重新读取导出状态")}</button>
-        {project && <button type="button" className="primary" onClick={submit} disabled={dirty || pending !== null || !!issue}>
-          {t(pending === "submit" ? "正在提交…" : "导出 MP4")}
+        {project && <button type="button" className="primary" onClick={submit} disabled={!canSubmit}>
+          {t(pending === "submit"
+            ? (isDramaEpisode ? "正在合并…" : "正在提交…")
+            : (isDramaEpisode ? "合并成一集成片" : "导出 MP4"))}
         </button>}
       </div>
     </header>
+    {project && isDramaEpisode && (
+      <p className="comic-generation-note">
+        {t("将第 {0} 集已剪辑的 {1} 段分镜（约 {2} 秒，含转场、配音、音效与字幕）合并合成为完整的一集剧集 MP4 成果。", [
+          project.episodeNo ?? 1, videoCount, totalSec,
+        ])}
+      </p>
+    )}
     <p className="comic-render-notice" role="note">{t("导出正片包含 AI 生成内容，发布至外部平台时请按平台规范标注“内容由 AI 生成”。")}</p>
-    {project && (dirty ? <p>{t("保存当前修订后即可导出")}</p> : issue ? <p>{t(comicRenderError(issue))}</p> : null)}
+    {project && !readOnly && (dirty
+      ? <p className="comic-generation-note">{t(onEnsureSaved ? "有未保存修改，合并时将自动保存当前分集修订" : "保存当前修订后即可导出")}</p>
+      : issue ? <p>{t(comicRenderError(issue))}</p> : null)}
     {message && <p role="alert" className="comic-error">{t(message)}</p>}
     {loadError && <p role="alert" className="comic-error">{t("导出历史暂时无法读取")}</p>}
+    {latestReady && (
+      <div className="comic-episode-result-highlight" role="status">
+        <div>
+          <strong>{t("本集最新合并成果")}</strong>
+          <small>
+            {t("导出修订 {0}", [latestReady.editRevision])} · {t("{0} 秒", [+(latestReady.durationMs / 1000).toFixed(1)])}
+            {latestReady.outputFps ? ` · ${latestReady.outputFps} fps` : ""}
+          </small>
+        </div>
+        <div className="comic-actions">
+          <button type="button" disabled={pending !== null} onClick={() => play(latestReady)}>{t("试看本集成片")}</button>
+          <button type="button" className="primary" disabled={pending !== null} onClick={() => download(latestReady)}>{t("下载本集 MP4")}</button>
+          {nextEpisode && onSwitchNextEpisode ? (
+            <button type="button" disabled={pending !== null} onClick={() => onSwitchNextEpisode(nextEpisode.seriesId)}>
+              {t("下一集：第 {0} 集", [nextEpisode.episodeNo])}
+            </button>
+          ) : onBackToSelect ? (
+            <button type="button" disabled={pending !== null} onClick={onBackToSelect}>
+              {t("返回选集")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    )}
     {!history && !loadError && <p role="status">{t("加载中…")}</p>}
     {history && (history.entries.length ? <ul className="comic-export-history">{history.entries.map(render => <li key={render.id} className="comic-render-result">
       <div>

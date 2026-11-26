@@ -1,7 +1,7 @@
-import { resolveVolcReference } from "../volc-assets/references.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import "../load-env.js";
+import { resolveSeedanceReference, seedanceUsesAssetLibrary } from "../volc-assets/references.js";
 import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
@@ -255,6 +255,7 @@ async function main() {
         ? imageProvider
         : videoProvider;
     const realVideo = mediaType === "video" && !!(apiKey || (!base.mock && base.apiKey));
+    const resolveSeedanceMedia = mediaType === "video" && isSeedanceModel(model) && (apiKey || !seedanceUsesAssetLibrary());
     const receipts = new PgImageCallStore(db.pool, resolve(ROOT, "data/image-receipts"), job.userId, job.id);
     const durable = mediaType === "image" && !!(apiKey || (!base.mock && base.apiKey));
     return {
@@ -262,8 +263,8 @@ async function main() {
         imageCallFingerprint(job.input, model, JSON.stringify([base.baseUrl, apiKey || base.apiKey, internationalModelsEnabled()]))) : provider,
       hasImageReceipts: durable ? async () => !!await receipts.get(0) : undefined,
       hasImageReceipt: durable ? async (slot) => !!await receipts.get(slot) : undefined,
-      resolveReferenceUrl: (url) => mediaType === "video" && apiKey && isSeedanceModel(model)
-        ? resolveVolcReference(db, job.userId, url, signal)
+      resolveReferenceUrl: (url) => resolveSeedanceMedia
+        ? resolveSeedanceReference(db, job.userId, url, signal)
         : resolveMaterialReference(db, job.userId, url),
       resolveImageReferenceUrl: (url) => resolveImageReferenceUrl(db, job.userId, url),
       prepareKlingVoices: realVideo

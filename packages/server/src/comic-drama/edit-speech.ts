@@ -130,9 +130,10 @@ export class ComicEditSpeech {
       lines: source ? comicDramaClipDraftSchema.parse(source.draft).lines.filter(line => line.text) : [] };
   }
 
-  async lines(owner: string, editId: string, itemId: string, expected?: number) {
+  async lines(owner: string, editId: string, itemId: string, expected?: number, requireWritable = false) {
     const edit = await this.edits.get(owner, editId);
     if (expected !== undefined && edit.revision !== expected) throw new ComicEditConflict(edit.revision);
+    if (requireWritable && edit.dramaArchivedAt) throw new ComicLibraryError("EDIT_DRAMA_ARCHIVED", 409);
     const item = edit.timeline.video.find(item => item.id === itemId);
     if (!item) libraryMissing();
     return this.linesForClip(owner, edit.sources.find(source => source.takeId === item.takeId)?.clipId ?? null);
@@ -176,8 +177,10 @@ export class ComicEditSpeech {
     return null;
   }
 
-  private async prepare(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest) {
-    const source = await this.lines(owner, editId, itemId, fields.expectedRevision);
+  private async prepare(
+    owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, requireWritable = false,
+  ) {
+    const source = await this.lines(owner, editId, itemId, fields.expectedRevision, requireWritable);
     if (source.clipRevision !== fields.expectedClipRevision) throw new ComicLibraryError("EDIT_DIALOGUE_CHANGED", 409);
     const line = source.lines.find(line => line.id === lineId);
     if (!line) libraryMissing();
@@ -551,6 +554,7 @@ export class ComicEditSpeech {
   ): Promise<ComicAutoDialogueResult> {
     const edit = await this.edits.get(owner, editId);
     if (edit.revision !== fields.expectedRevision) throw new ComicEditConflict(edit.revision);
+    if (edit.dramaArchivedAt) throw new ComicLibraryError("EDIT_DRAMA_ARCHIVED", 409);
     const emotions = await readComicDictionary(this.pool, owner, "emotion");
     const overrideMap = new Map<string, ComicEditAutoDialogueOverride>(
       (fields.overrides ?? []).map(entry => [`${entry.videoItemId}:${entry.lineId}`, entry]),
@@ -740,7 +744,7 @@ export class ComicEditSpeech {
   }
 
   async speak(owner: string, editId: string, itemId: string, lineId: string, fields: ComicSpeechRequest, signal: AbortSignal, accepting?: () => void) {
-    const { line, voice, clone, input, fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields);
+    const { line, voice, clone, input, fingerprint } = await this.prepare(owner, editId, itemId, lineId, fields, true);
     assertComicDramaCompliance([{ field: "dialogue", text: line.text }]);
     return this.synthesizeCached(owner, fingerprint, voice, clone, input, signal, accepting, { kind: "dialogue", editId, lineId });
   }

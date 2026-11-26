@@ -92,9 +92,12 @@ describe("comic-drama drama edit tasks and episode units", () => {
     };
     const editTasks = new Map<string, { id: string; ownerId: string; dramaId: string; lastSeriesId: string | null; updatedAt: Date }>();
     const edits = new Map<string, StoredEdit>();
-    const episodes = [
-      { id: ep1Id, dramaId, episodeNo: 1, title: "第一集", logline: "", aspectRatio: "9:16" as const, archivedAt: null, updatedAt: new Date() },
-      { id: ep2Id, dramaId, episodeNo: 2, title: "第二集", logline: "", aspectRatio: "9:16" as const, archivedAt: null, updatedAt: new Date() },
+    const episodes: Array<{
+      id: string; dramaId: string; episodeNo: number; title: string; logline: string;
+      aspectRatio: "9:16"; archivedAt: Date | null; updatedAt: Date;
+    }> = [
+      { id: ep1Id, dramaId, episodeNo: 1, title: "第一集", logline: "", aspectRatio: "9:16", archivedAt: null, updatedAt: new Date() },
+      { id: ep2Id, dramaId, episodeNo: 2, title: "第二集", logline: "", aspectRatio: "9:16", archivedAt: null, updatedAt: new Date() },
     ];
     const clips = new Map<string, { id: string; seriesId: string; ordinal: number; scene: string; adoptedTakeId: string | null }>([
       [clip1Id, { id: clip1Id, seriesId: ep1Id, ordinal: 1, scene: "分镜一", adoptedTakeId: take1Id }],
@@ -148,7 +151,13 @@ describe("comic-drama drama edit tasks and episode units", () => {
             seriesId: ep.id, dramaId: ep.dramaId, episodeNo: ep.episodeNo, title: ep.title, logline: ep.logline,
             aspectRatio: ep.aspectRatio, archivedAt: ep.archivedAt, seriesUpdatedAt: ep.updatedAt,
             editId: ed?.id ?? null, editRevision: ed?.revision ?? null, timeline: ed?.timeline ?? null,
-            editUpdatedAt: ed?.updatedAt ?? null, renderCount: 0, hasReadyRender: false,
+            editUpdatedAt: ed?.updatedAt ?? null, renderCount: ep.id === ep1Id ? 1 : 0, hasReadyRender: ep.id === ep1Id,
+            latestReadyRenderId: ep.id === ep1Id ? uuid(801) : null,
+            latestReadyRenderDurationMs: ep.id === ep1Id ? 4000 : null,
+            latestReadyRenderFps: ep.id === ep1Id ? 24 : null,
+            latestReadyRenderRevision: ep.id === ep1Id ? 1 : null,
+            latestReadyRenderAt: ep.id === ep1Id ? ep.updatedAt : null,
+            activeRenderStatus: null,
           };
         });
         return { rows, rowCount: rows.length };
@@ -167,7 +176,7 @@ describe("comic-drama drama edit tasks and episode units", () => {
       if (sql.includes("FROM lot_comic_drama.cd_clips c") && sql.includes("WHERE c.series_id=$2")) {
         const sId = String(params[1]);
         const rows = [...clips.values()]
-          .filter(c => c.seriesId === sId && c.adoptedTakeId)
+          .filter(c => c.seriesId === sId)
           .map(c => ({
             seriesId: c.seriesId, clipId: c.id, ordinal: c.ordinal, scene: c.scene,
             adoptedTakeId: c.adoptedTakeId,
@@ -223,7 +232,7 @@ describe("comic-drama drama edit tasks and episode units", () => {
             dramaTitle: hit.dramaEditTaskId ? "雨夜便利店" : null,
             episodeNo: ep?.episodeNo ?? null, episodeTitle: ep?.title ?? null,
             title: hit.title, revision: hit.revision, updatedAt: hit.updatedAt,
-            dramaArchivedAt: null, timeline: hit.timeline,
+            dramaArchivedAt: hit.dramaEditTaskId ? (ep?.archivedAt ?? null) : null, timeline: hit.timeline,
           }],
           rowCount: 1,
         };
@@ -297,10 +306,17 @@ describe("comic-drama drama edit tasks and episode units", () => {
     // 2. Adopt Clip 2 later -> unaddedAdoptedTakes shows Clip 2, syncEpisodeSources appends it cleanly
     clips.get(clip2Id)!.adoptedTakeId = take2Id;
     const reloaded = await repo.get(ownerId, openedEp1.edit!.id);
+    expect(reloaded.episodeClipCount).toBe(2);
+    expect(reloaded.episodeAdoptedCount).toBe(2);
     expect(reloaded.unaddedAdoptedTakes?.map(u => u.takeId)).toEqual([take2Id]);
     const synced = await repo.syncEpisodeSources(ownerId, reloaded.id, reloaded.revision);
     expect(synced.timeline.video.map(v => v.takeId)).toEqual([take1Id, take2Id]);
     expect(synced.unaddedAdoptedTakes).toEqual([]);
+
+    const dramaOverview = await repo.getDramaTask(ownerId, dramaId);
+    expect(dramaOverview.episodes[0]?.latestReadyRenderId).toBe(uuid(801));
+    expect(dramaOverview.episodes[0]?.latestReadyRenderDurationMs).toBe(4000);
+    expect(dramaOverview.episodes[0]?.latestReadyRenderFps).toBe(24);
 
     // 3. Switch to Episode 2 -> creates independent episode unit and updates lastSeriesId
     const openedEp2 = await repo.openDramaTask(ownerId, dramaId, ep2Id);
@@ -324,5 +340,16 @@ describe("comic-drama drama edit tasks and episode units", () => {
     await repo.remove(ownerId, freeEditId, 1);
     const listedAfterDelete = await repo.list(ownerId);
     expect(listedAfterDelete.entries).toEqual([]);
+
+    // 6. Archiving an episode locks its drama-bound edit unit against update and sync
+    episodes[0]!.archivedAt = new Date();
+    await expect(repo.syncEpisodeSources(ownerId, synced.id, synced.revision)).rejects.toMatchObject({
+      code: "EDIT_DRAMA_ARCHIVED",
+    });
+    await expect(repo.update(ownerId, synced.id, {
+      title: "Archived", expectedRevision: synced.revision, timeline: synced.timeline,
+    })).rejects.toMatchObject({
+      code: "EDIT_DRAMA_ARCHIVED",
+    });
   });
 });

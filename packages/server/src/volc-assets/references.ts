@@ -1,14 +1,20 @@
 import { setTimeout as wait } from "node:timers/promises";
 import type { DB } from "../db/database.js";
 import { GenerationError } from "../generation/errors.js";
-import { resolveMaterialReference } from "../generation/private-materials.js";
+import { resolveMaterialReference, signPrivateOutput } from "../generation/private-materials.js";
 import { assetType } from "./client.js";
 
 type ReferenceDb = Pick<DB, "pool" | "getUploadByStorageKey" | "getGeneratedByStorageKey">;
 
-/** Switch Agent-hosted media to an owned Ark asset. External references keep their existing API semantics. */
-export async function resolveVolcReference(db: ReferenceDb, owner: string, url: string, signal?: AbortSignal): Promise<string> {
+export function seedanceUsesAssetLibrary(): boolean {
+  return process.env.SEEDANCE_USE_ASSET_URLS !== "1";
+}
+
+/** Resolve an owned Seedance reference to an Ark asset or a vendor-readable URL. */
+export async function resolveSeedanceReference(db: ReferenceDb, owner: string, url: string, signal?: AbortSignal): Promise<string> {
+  const useLibrary = seedanceUsesAssetLibrary();
   if (/^asset:\/\//i.test(url)) {
+    if (!useLibrary) throw new GenerationError("GENERATION_FAILED", "当前 Seedance 渠道使用素材链接，请提供图片、视频或音频 URL。");
     const id = /^asset:\/\/([A-Za-z0-9_-]{1,128})$/i.exec(url)?.[1];
     if (!id) throw new GenerationError("GENERATION_FAILED", "素材地址无效。");
     const { rows } = await db.pool.query<{ owner_id: string; state: string; deleted: boolean }>(
@@ -22,7 +28,7 @@ export async function resolveVolcReference(db: ReferenceDb, owner: string, url: 
   const base = process.env.PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
   const local = base && url.startsWith(base + "/") ? url.slice(base.length) : url;
   const parts = /^\/static\/(uploads|assets)\/([^/?#]+)(?:\?[^#]*)?$/.exec(local);
-  if (!parts) return resolveMaterialReference(db, owner, url);
+  if (!parts || (!useLibrary && parts[1] === "uploads")) return resolveMaterialReference(db, owner, url);
   const key = decodeURIComponent(parts[2]);
   if (!key || /[\\/\u0000-\u001f\u007f]/.test(key) || key.includes("..")) {
     throw new GenerationError("GENERATION_FAILED", "素材地址无效。");
@@ -30,6 +36,14 @@ export async function resolveVolcReference(db: ReferenceDb, owner: string, url: 
   const asset = parts[1] === "uploads" ? await db.getUploadByStorageKey(key) : await db.getGeneratedByStorageKey(key);
   if (!asset || asset.user_id !== owner || asset.storage_key !== key || !assetType(asset.mime)) {
     throw new GenerationError("GENERATION_FAILED", "素材不存在。");
+  }
+
+  if (!useLibrary) {
+    const path = `/static/assets/${encodeURIComponent(key)}`;
+    if (!asset.is_private) return (base ?? "") + path;
+    const signed = signPrivateOutput(owner, path);
+    if (signed === path) throw new GenerationError("CONFIG_MISSING", "私有素材访问服务未配置。");
+    return (base ?? "") + signed;
   }
 
   // Existing uploads and generated assets are queued when first referenced. The asset lock serializes this insert with deletion.

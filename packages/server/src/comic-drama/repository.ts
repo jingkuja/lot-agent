@@ -434,7 +434,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
          s.archived_at AS "archivedAt", s.updated_at AS "updatedAt",
          (SELECT count(*)::int FROM lot_comic_drama.cd_clips WHERE series_id=s.id) AS "clipCount",
          EXISTS (SELECT 1 FROM lot_comic_drama.cd_renders r WHERE (r.owner_id,r.series_id)=(s.owner_id,s.id)
-           AND r.media_id IS NOT NULL) AS "hasRender",
+           AND r.deleted_at IS NULL AND r.ephemeral=FALSE AND r.media_id IS NOT NULL) AS "hasRender",
          (SELECT coalesce(c.keyframe_media_id, kt.media_id)
            FROM lot_comic_drama.cd_clips c
            LEFT JOIN lot_comic_drama.cd_takes kt ON kt.owner_id=s.owner_id AND kt.id=c.keyframe_take_id AND kt.status='ready'
@@ -724,7 +724,8 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       `WITH ep_stats AS (
          SELECT s.id, s.owner_id, s.drama_id,
            EXISTS (SELECT 1 FROM lot_comic_drama.cd_renders r
-             WHERE (r.owner_id,r.series_id)=(s.owner_id,s.id) AND r.media_id IS NOT NULL) AS has_render,
+             WHERE (r.owner_id,r.series_id)=(s.owner_id,s.id)
+               AND r.deleted_at IS NULL AND r.ephemeral=FALSE AND r.media_id IS NOT NULL) AS has_render,
            EXISTS (SELECT 1 FROM lot_comic_drama.cd_clips c JOIN lot_comic_drama.cd_takes t
              ON t.owner_id=s.owner_id AND t.target_id=c.id AND t.video_version IS NOT NULL AND t.status='ready'
              WHERE c.series_id=s.id)
@@ -1147,7 +1148,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
           d.title AS "dramaTitle", series.updated_at AS "updatedAt",
           (SELECT count(*)::int FROM lot_comic_drama.cd_clips WHERE series_id=series.id) AS "clipCount",
           EXISTS (SELECT 1 FROM lot_comic_drama.cd_renders r WHERE (r.owner_id,r.series_id)=(series.owner_id,series.id)
-            AND r.media_id IS NOT NULL) AS "hasRender",
+            AND r.deleted_at IS NULL AND r.ephemeral=FALSE AND r.media_id IS NOT NULL) AS "hasRender",
           (SELECT coalesce(c.keyframe_media_id, kt.media_id)
             FROM lot_comic_drama.cd_clips c
             LEFT JOIN lot_comic_drama.cd_takes kt ON kt.owner_id=series.owner_id AND kt.id=c.keyframe_take_id AND kt.status='ready'
@@ -1447,6 +1448,13 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         [id, targetDrama.id, title, logline, targetDrama.title, episodeNo, styleKey, aspectRatio, videoModel],
       );
       if (targetDrama.id !== current.dramaId) {
+        if (current.dramaId) {
+          await client.query(
+            `UPDATE lot_comic_drama.cd_edit_tasks SET last_series_id=NULL
+             WHERE owner_id=$1 AND drama_id=$2 AND last_series_id=$3`,
+            [owner, current.dramaId, id],
+          );
+        }
         await this.ensureDramaEditTask(client, owner, targetDrama.id, id);
         await client.query(
           `UPDATE lot_comic_drama.cd_edits e
@@ -1473,6 +1481,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       requireRevision(result.rows[0].revision, expected);
       await client.query(`UPDATE lot_comic_drama.cd_series SET ${column}=now(),revision=revision+1,updated_at=clock_timestamp() WHERE id=$1`, [id]);
       await client.query("UPDATE lot_comic_drama.cd_user_state SET current_series_id=NULL WHERE owner_id=$1 AND current_series_id=$2", [owner, id]);
+      await client.query("UPDATE lot_comic_drama.cd_edit_tasks SET last_series_id=NULL WHERE owner_id=$1 AND last_series_id=$2", [owner, id]);
       if (result.rows[0].dramaId) await this.touchDrama(client, owner, String(result.rows[0].dramaId));
     });
   }

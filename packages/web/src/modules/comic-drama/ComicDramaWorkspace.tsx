@@ -788,6 +788,7 @@ export function ComicDramaWorkspace({
           openVideo={openVideo}
           openDramaHub={(dId, tab) => openDramaHub(dId, tab)}
           openEpisodeProduction={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
+          openDramaTaskSelect={dId => void leave(() => navigate(dramaEditorPath(dId)))}
           openEpisodeEditor={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))}
           openCreateEpisode={openCreateEpisodeFromEditor}
           exit={() => void leave(() => navigate(editorPath))}
@@ -795,9 +796,12 @@ export function ComicDramaWorkspace({
         : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
           autoOpenDialogue={pendingAutoDialogueEditId === editId}
           onAutoDialogueOpened={() => setPendingAutoDialogueEditId(null)}
+          onOpenDramaSelect={dId => void leave(() => navigate(dramaEditorPath(dId)))}
+          onEpisodeProduction={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
           onSwitchEpisode={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))}
           exit={() => void leave(() => navigate(editorPath))} />
         : editorRoute && takeId ? <ComicEditorSource key={takeId} takeId={takeId} open={openVideo} openEdit={openEdit}
+          openDramaEdit={(dId, epId) => openDramaEditor(dId, epId)}
           browse={() => navigate(editorSourcesPath)} />
         : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo}
           choose={choose} openEdit={openEdit} openDramaEdit={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))} />

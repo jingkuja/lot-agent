@@ -107,10 +107,16 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
     }), "zh");
 
     expect(host.textContent).toContain("剧集剪辑任务");
-    expect(host.textContent).toContain("作业单位：分集");
+    expect(host.textContent).toContain("任务单位：整部剧");
+    expect(host.textContent).toContain("执行单位：分集");
     expect(host.textContent).toContain("《雨夜便利店》");
     expect(host.textContent).toContain("自由剪辑任务");
     expect(host.textContent).toContain("混剪预告片");
+
+    const selectBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent?.includes("选集进入操作台"));
+    expect(selectBtn).toBeTruthy();
+    act(() => { (selectBtn as HTMLButtonElement).click(); });
+    expect(openDramaTask).toHaveBeenCalledWith(dramaId);
 
     const ep1Chip = Array.from(host.querySelectorAll("button.comic-ep-chip")).find(b => b.textContent?.includes("第 1 集"));
     expect(ep1Chip).toBeTruthy();
@@ -122,7 +128,80 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
     expect(open).toHaveBeenCalledWith(freeId);
   });
 
-  it("renders episode unit switcher and empty-episode guidance in ComicDramaEditWorkspace across zh and en", async () => {
+  it("renders whole-drama episode selection view before opening episode workbench", async () => {
+    const dramaId = uuid(1);
+    const ep1Id = uuid(2);
+    const ep2Id = uuid(3);
+    const renderId = uuid(40);
+    const selectionView: ComicDramaEditTaskView = {
+      task: {
+        id: uuid(10), dramaId, dramaTitle: "雨夜便利店", synopsis: "悬疑短剧", styleKey: "thick_painting",
+        aspectRatio: "9:16", archivedAt: null, lastSeriesId: ep1Id, updatedAt: "2026-11-26T08:00:00.000Z",
+      },
+      episodes: [
+        {
+          seriesId: ep1Id, episodeNo: 1, title: "雨夜初遇", logline: "", aspectRatio: "9:16", archivedAt: null,
+          clipCount: 3, adoptedClipCount: 3, editId: uuid(21), editRevision: 2,
+          timelineClipCount: 3, timelineDurationMs: 14500, unaddedAdoptedCount: 0, outdatedAdoptedCount: 0,
+          renderCount: 1, hasReadyRender: true, latestReadyRenderId: renderId,
+          latestReadyRenderDurationMs: 14500, latestReadyRenderFps: 24, latestReadyRenderRevision: 2,
+          latestReadyRenderAt: "2026-11-26T08:05:00.000Z", activeRenderStatus: null,
+          updatedAt: "2026-11-26T08:05:00.000Z",
+        },
+        {
+          seriesId: ep2Id, episodeNo: 2, title: "柜台暗门", logline: "", aspectRatio: "9:16", archivedAt: null,
+          clipCount: 4, adoptedClipCount: 2, editId: null, editRevision: null,
+          timelineClipCount: 0, timelineDurationMs: 0, unaddedAdoptedCount: 2, outdatedAdoptedCount: 0,
+          renderCount: 0, hasReadyRender: false, latestReadyRenderId: null,
+          updatedAt: "2026-11-26T08:00:00.000Z",
+        },
+      ],
+      activeSeriesId: ep1Id,
+      edit: null,
+    };
+    const getSpy = vi.spyOn(comicEditApi, "getDramaTask").mockResolvedValue(selectionView);
+    const openSpy = vi.spyOn(comicEditApi, "openDramaTask").mockResolvedValue(selectionView);
+    const dlSpy = vi.spyOn(comicEditApi, "downloadRender").mockResolvedValue({
+      url: "https://example.com/ep1.mp4", filename: "ep1.mp4",
+    });
+    const openEpisodeEditor = vi.fn();
+
+    const host = await mount(createElement(ComicDramaEditWorkspace, {
+      dramaId,
+      exit: vi.fn(),
+      openDramaHub: vi.fn(),
+      openEpisodeProduction: vi.fn(),
+      openDramaTaskSelect: vi.fn(),
+      openEpisodeEditor,
+      openCreateEpisode: vi.fn(),
+      openVideo: vi.fn(),
+      setGuard: vi.fn(),
+    }), "zh");
+
+    expect(getSpy).toHaveBeenCalledWith(dramaId, undefined, expect.anything());
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("整部剧剪辑任务");
+    expect(host.textContent).toContain("选择分集进入操作台");
+    expect(host.textContent).toContain("一集剧成果已合并");
+    expect(host.textContent).toContain("试看本集成片");
+    expect(host.textContent).toContain("下载本集 MP4");
+
+    const previewBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent?.includes("试看本集成片"));
+    expect(previewBtn).toBeTruthy();
+    await act(async () => {
+      (previewBtn as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(dlSpy).toHaveBeenCalledWith(renderId, true);
+    expect(host.querySelector(".comic-temp-preview-stage video")?.getAttribute("src")).toBe("https://example.com/ep1.mp4");
+
+    const enterEp2 = Array.from(host.querySelectorAll("button")).find(b => b.textContent?.includes("进入操作台 · 第 2 集"));
+    expect(enterEp2).toBeTruthy();
+    act(() => { (enterEp2 as HTMLButtonElement).click(); });
+    expect(openEpisodeEditor).toHaveBeenCalledWith(dramaId, ep2Id);
+  });
+
+  it("renders tiered hierarchy breadcrumbs, episode workbench title and merge panel across zh and en", async () => {
     const dramaId = uuid(1);
     const ep1Id = uuid(2);
     const ep2Id = uuid(3);
@@ -135,7 +214,7 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       activeSeriesId: null,
       edit: null,
     };
-    vi.spyOn(comicEditApi, "openDramaTask").mockResolvedValue(emptyView);
+    vi.spyOn(comicEditApi, "getDramaTask").mockResolvedValue(emptyView);
 
     const openCreateEpisode = vi.fn();
     const host = await mount(createElement(ComicDramaEditWorkspace, {
@@ -143,6 +222,7 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       exit: vi.fn(),
       openDramaHub: vi.fn(),
       openEpisodeProduction: vi.fn(),
+      openDramaTaskSelect: vi.fn(),
       openEpisodeEditor: vi.fn(),
       openCreateEpisode,
       openVideo: vi.fn(),
@@ -150,13 +230,12 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
     }), "zh");
 
     expect(host.textContent).toContain("《新立项短剧》暂无可剪辑分集");
-    expect(host.textContent).toContain("作业单位：分集");
+    expect(host.textContent).toContain("执行单位：分集");
     const createBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent?.includes("创建第 1 集"));
     expect(createBtn).toBeTruthy();
     act(() => { (createBtn as HTMLButtonElement).click(); });
     expect(openCreateEpisode).toHaveBeenCalledWith(dramaId);
 
-    // Switch to populated drama edit workspace in English
     act(() => root?.unmount());
     document.body.replaceChildren();
 
@@ -168,7 +247,7 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       episodes: [
         {
           seriesId: ep1Id, episodeNo: 1, title: "Night 1", logline: "", aspectRatio: "9:16", archivedAt: null,
-          clipCount: 1, adoptedClipCount: 1, editId: uuid(21), editRevision: 1,
+          clipCount: 2, adoptedClipCount: 2, editId: uuid(21), editRevision: 1,
           timelineClipCount: 0, timelineDurationMs: 0, unaddedAdoptedCount: 0, outdatedAdoptedCount: 0,
           renderCount: 0, hasReadyRender: false, updatedAt: "2026-11-26T08:00:00.000Z",
         },
@@ -183,30 +262,83 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       edit: {
         id: uuid(21), seriesId: ep1Id, dramaId, dramaTitle: "Rainy Night Store", episodeNo: 1, episodeTitle: "Night 1",
         taskKind: "drama", dramaEditTaskId: uuid(10), dramaArchivedAt: null,
+        episodeClipCount: 2, episodeAdoptedCount: 2,
         title: "Rainy Night Store Ep 1", revision: 1, updatedAt: "2026-11-26T08:00:00.000Z",
         timeline: { schemaVersion: 1, aspectRatio: "9:16", video: [], voice: [], sfx: [], music: [], subtitles: [] },
         sources: [], audioSources: [],
       },
     };
-    vi.spyOn(comicEditApi, "openDramaTask").mockResolvedValue(populatedView);
-    vi.spyOn(comicEditApi, "renders").mockResolvedValue({ entries: [], nextCursor: null });
+    vi.spyOn(comicEditApi, "renders").mockResolvedValue({
+      entries: [{
+        id: uuid(99), editId: uuid(21), editRevision: 1, title: "Rainy Night Store Ep 1",
+        status: "ready", createdAt: "2026-11-26T08:05:00.000Z", durationMs: 9500,
+        mediaId: uuid(98), error: null, outputFps: 24, fpsMode: "auto", recoverable: false, ephemeral: false,
+      }],
+      nextCursor: null,
+    });
+    const hostWithRenderTimeline = {
+      ...populatedView,
+      edit: {
+        ...populatedView.edit!,
+        dramaEpisodes: populatedView.episodes,
+        timeline: {
+          schemaVersion: 1 as const,
+          aspectRatio: "9:16" as const,
+          video: [
+            {
+              id: uuid(51), takeId: uuid(61), sourceDurationMs: 5000, inMs: 0, outMs: 5000,
+              volume: 1, transitionIn: { kind: "cut" as const, durationMs: 0 as const },
+            },
+            {
+              id: uuid(52), takeId: uuid(62), sourceDurationMs: 5000, inMs: 0, outMs: 5000,
+              volume: 1, transitionIn: { kind: "crossfade" as const, durationMs: 500 },
+            },
+          ],
+          voice: [], sfx: [], music: [], subtitles: [],
+        },
+        sources: [
+          {
+            takeId: uuid(61), mediaId: uuid(71), seriesId: ep1Id, seriesTitle: "Night 1",
+            clipId: uuid(81), scene: "Shot 1", version: 1, durationMs: 5000, aspectRatio: "9:16" as const, adopted: null,
+          },
+          {
+            takeId: uuid(62), mediaId: uuid(72), seriesId: ep1Id, seriesTitle: "Night 1",
+            clipId: uuid(82), scene: "Shot 2", version: 1, durationMs: 5000, aspectRatio: "9:16" as const, adopted: null,
+          },
+        ],
+      },
+    };
+    vi.spyOn(comicEditApi, "openDramaTask").mockResolvedValue(hostWithRenderTimeline);
     const openEpisodeEditor = vi.fn();
+    const openDramaTaskSelect = vi.fn();
     const hostEn = await mount(createElement(ComicDramaEditWorkspace, {
       dramaId,
       seriesId: ep1Id,
       exit: vi.fn(),
       openDramaHub: vi.fn(),
       openEpisodeProduction: vi.fn(),
+      openDramaTaskSelect,
       openEpisodeEditor,
       openVideo: vi.fn(),
       setGuard: vi.fn(),
     }), "en");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
-    expect(hostEn.textContent).toContain("Drama editing tasks");
-    expect(hostEn.textContent).toContain("Unit: Episode");
-    const ep2Btn = Array.from(hostEn.querySelectorAll("button.comic-episode-unit-btn")).find(b => b.textContent?.includes("Ep. 2"));
-    expect(ep2Btn).toBeTruthy();
-    act(() => { (ep2Btn as HTMLButtonElement).click(); });
+    expect(hostEn.textContent).toContain("Workbench - Ep. 1 (Night 1)");
+    expect(hostEn.textContent).toContain("Merge into episode deliverable");
+    expect(hostEn.textContent).toContain("Merge into episode MP4");
+    expect(hostEn.textContent).toContain("~9.5s");
+    const nextEpBtn = Array.from(hostEn.querySelectorAll("button")).find(b => b.textContent?.includes("Next: Ep. 2"));
+    expect(nextEpBtn).toBeTruthy();
+    const select = hostEn.querySelector("select.comic-hierarchy-select") as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    act(() => {
+      select.value = ep2Id;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     expect(openEpisodeEditor).toHaveBeenCalledWith(dramaId, ep2Id);
   });
 });

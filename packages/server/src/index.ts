@@ -1,4 +1,3 @@
-import { enqueueVolcGroup, startVolcAssetSync } from "./volc-assets/sync.js";
 import { createHash } from "node:crypto";
 import { BullmqJobQueue } from "./jobs/bullmq-queue.js";
 import { createAnalysisAudioRoutes } from "./marketing-analysis/audio-url.js";
@@ -33,6 +32,8 @@ import { createKnowledgeManageRoutes, createKnowledgePreviewRoutes } from "./kno
 import { loadTwinVoiceConfig, TwinVoices } from "./digital-twin/voices.js";
 import { PgTwinVoiceStore } from "./digital-twin/voice-store.js";
 import "./load-env.js";
+import { enqueueVolcGroup, startVolcAssetSync } from "./volc-assets/sync.js";
+import { seedanceUsesAssetLibrary } from "./volc-assets/references.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -127,7 +128,10 @@ async function main() {
 
   const service = new AgentService(serviceConfig);
   await service.init();
-  const stopVolcAssetSync = startVolcAssetSync(service.db, process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1", service.managedKeysEnabled);
+  const useVolcAssetLibrary = seedanceUsesAssetLibrary();
+  const stopVolcAssetSync = useVolcAssetLibrary
+    ? startVolcAssetSync(service.db, process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1", service.managedKeysEnabled)
+    : undefined;
   const posterLibrary = new PosterLibrary();
   const stopPosterRefresh = startPosterLibraryRefresh(posterLibrary);
   const feishu = isFeishuEnabled() ? new FeishuService(new PgFeishuRepository(service.db.pool), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
@@ -287,7 +291,7 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind", loginRateLimit);
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
-  app.route("/api/auth", createAuthRoutes(service, (owner) => enqueueVolcGroup(service.db.pool, owner)));
+  app.route("/api/auth", createAuthRoutes(service, useVolcAssetLibrary ? (owner) => enqueueVolcGroup(service.db.pool, owner) : undefined));
   const rollout = comicRollout();
   const comicDramaEnabled = rollout.enabled;
   const comicSettings = new PgComicSettings(service.db.pool);
@@ -705,7 +709,7 @@ async function main() {
     await stopComicSettlementSync?.();
     await stopVirtualPayments();
     await feishuChannel?.stop();
-    await stopVolcAssetSync();
+    await stopVolcAssetSync?.();
     await service.shutdown();
     process.exit(0);
   };

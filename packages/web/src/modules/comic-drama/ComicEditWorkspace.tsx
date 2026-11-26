@@ -25,6 +25,7 @@ const seconds = (ms: number) => String(ms / 1000);
 export function ComicEditWorkspace({
   id,
   initialData,
+  dramaEpisodes: dramaEpisodesProp,
   embeddedInDramaTask = false,
   exit,
   openVideo,
@@ -32,10 +33,14 @@ export function ComicEditWorkspace({
   autoOpenDialogue,
   onAutoDialogueOpened,
   onProjectChange,
+  onOpenDramaSelect,
+  onEpisodeProduction,
+  onRenderUpdated,
   onSwitchEpisode,
 }: {
   id: string;
   initialData?: ComicEdit | null;
+  dramaEpisodes?: ComicEdit["dramaEpisodes"];
   embeddedInDramaTask?: boolean;
   exit: () => void;
   openVideo: (seriesId: string, clipId: string) => void;
@@ -43,6 +48,9 @@ export function ComicEditWorkspace({
   autoOpenDialogue?: boolean;
   onAutoDialogueOpened?: () => void;
   onProjectChange?: (project: ComicEdit) => void;
+  onOpenDramaSelect?: (dramaId: string) => void;
+  onEpisodeProduction?: (seriesId: string) => void;
+  onRenderUpdated?: () => void;
   onSwitchEpisode?: (dramaId: string, seriesId: string) => void;
 }) {
   const { t } = useI18n();
@@ -415,46 +423,78 @@ export function ComicEditWorkspace({
 
   const editorLocked = saving || readOnly;
   const unaddedAdopted = project.unaddedAdoptedTakes ?? [];
+  const outdatedAdopted = project.outdatedAdoptedTakes ?? [];
+  const episodeClipCount = project.episodeClipCount ?? 0;
+  const episodeAdoptedCount = project.episodeAdoptedCount ?? 0;
+  const unreadyClips = Math.max(0, episodeClipCount - episodeAdoptedCount);
+  const canLeaveStandalone = () => !pending.current && (!dirty || window.confirm(t("放弃未保存的工程修改？")));
+  const nextEpisode = (() => {
+    const eps = project.dramaEpisodes ?? dramaEpisodesProp ?? [];
+    if (!project.seriesId || !eps.length) return null;
+    const idx = eps.findIndex(ep => ep.seriesId === project.seriesId);
+    if (idx < 0 || idx + 1 >= eps.length) return null;
+    const next = eps[idx + 1]!;
+    return { episodeNo: next.episodeNo, seriesId: next.seriesId, title: next.title };
+  })();
 
   return <>
-    {!embeddedInDramaTask && project.taskKind === "drama" && project.dramaId && (project.dramaEpisodes?.length ?? 0) > 0 && (
-      <section className="comic-drama-task-banner" aria-label={t("剧集剪辑任务")}>
-        <div className="comic-drama-task-top">
-          <div className="comic-drama-task-title">
-            <div className="comic-cut-badges">
-              <span className="comic-hierarchy-level">{t("剧集剪辑任务")}</span>
-              <small className="comic-pill" data-tone="frame">{t("作业单位：分集")}</small>
-            </div>
-            <strong>《{project.dramaTitle}》</strong>
-          </div>
-          {onSwitchEpisode && (
-            <div className="comic-actions">
-              {project.dramaEpisodes!.map(ep => (
-                <button
-                  key={ep.seriesId}
-                  type="button"
-                  className="comic-episode-unit-btn"
-                  aria-current={ep.seriesId === project.seriesId ? "true" : undefined}
-                  onClick={() => {
-                    if (ep.seriesId !== project.seriesId && (!dirty || window.confirm(t("放弃未保存的工程修改？")))) {
-                      onSwitchEpisode(project.dramaId!, ep.seriesId);
-                    }
-                  }}
-                >
-                  <span className="comic-episode-unit-title">
-                    <strong>{t("第 {0} 集", [ep.episodeNo])}</strong>
-                    <span>{ep.title}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
+    {!embeddedInDramaTask && project.taskKind === "drama" && project.dramaId && (
+      <nav className="comic-hierarchy-bar" aria-label={t("剪辑层级路径")}>
+        <button type="button" className="comic-hierarchy-btn" onClick={exit}>{t("剪辑工作台")}</button>
+        <span className="comic-hierarchy-sep" aria-hidden="true">›</span>
+        <div className="comic-hierarchy-tier" data-tier="drama">
+          <span className="comic-hierarchy-level">{t("整部剧")}</span>
+          {onOpenDramaSelect ? (
+            <>
+              <button
+                type="button"
+                className="comic-hierarchy-drama-link"
+                onClick={() => onOpenDramaSelect(project.dramaId!)}
+              >
+                《{project.dramaTitle}》
+              </button>
+              <button
+                type="button"
+                className="comic-hierarchy-btn"
+                onClick={() => onOpenDramaSelect(project.dramaId!)}
+              >
+                {t("返回选集（{0} 集）", [project.dramaEpisodes?.length ?? 1])}
+              </button>
+            </>
+          ) : (
+            <strong className="comic-hierarchy-name">《{project.dramaTitle}》</strong>
           )}
         </div>
-      </section>
+        {(project.dramaEpisodes?.length ?? 0) > 0 && onSwitchEpisode && (
+          <>
+            <span className="comic-hierarchy-sep" aria-hidden="true">›</span>
+            <div className="comic-hierarchy-tier" data-tier="episode">
+              <span className="comic-hierarchy-level">{t("具体操作台")}</span>
+              <select
+                className="comic-hierarchy-select"
+                aria-label={t("切换分集操作台")}
+                value={project.seriesId ?? ""}
+                onChange={event => {
+                  const target = event.target.value;
+                  if (target && target !== project.seriesId && canLeaveStandalone()) {
+                    onSwitchEpisode(project.dramaId!, target);
+                  }
+                }}
+              >
+                {project.dramaEpisodes!.map(ep => (
+                  <option key={ep.seriesId} value={ep.seriesId}>
+                    {t("第 {0} 集（{1}）", [ep.episodeNo, ep.title])}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </nav>
     )}
     <header className="comic-heading">
       <div>
-        {!embeddedInDramaTask && project.dramaTitle && (
+        {!embeddedInDramaTask && project.dramaTitle && project.taskKind !== "drama" && (
           <small className="comic-take-origin">
             {project.dramaTitle}{project.episodeNo ? ` › ${t("第 {0} 集", [project.episodeNo])}` : ""}
             {project.episodeTitle ? ` · ${project.episodeTitle}` : ""}
@@ -463,14 +503,18 @@ export function ComicEditWorkspace({
         <div className="comic-cut-badges">
           {project.taskKind === "drama" ? (
             <small className="comic-pill" data-tone="frame">
-              {t("第 {0} 集", [project.episodeNo ?? 1])}
+              {t("执行单位：第 {0} 集", [project.episodeNo ?? 1])}
             </small>
           ) : (
             <small className="comic-pill" data-tone="idle">{t("自由任务")}</small>
           )}
           <small role="status">{t(readOnly ? "已归档" : saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small>
         </div>
-        <h1>{embeddedInDramaTask && project.episodeTitle ? project.episodeTitle : project.title}</h1>
+        <h1>
+          {project.taskKind === "drama"
+            ? t("操作台 - 第 {0} 集（{1}）", [project.episodeNo ?? 1, project.episodeTitle || project.title])
+            : project.title}
+        </h1>
       </div>
       <div className="comic-actions">
         <button type="button" onClick={() => setShelfOpen(v => !v)}>{t(shelfOpen ? "收起片源架" : "展开片源架")}</button>
@@ -484,17 +528,64 @@ export function ComicEditWorkspace({
     </header>
     {error && <p className="comic-error" role="alert">{t(error)}</p>}
     {notice && <p className="comic-generation-note" role="status">{notice}</p>}
-    {!readOnly && unaddedAdopted.length > 0 && (
-      <div className="comic-sync-banner" role="status">
-        <span>
-          {t("本集分镜新增 {0} 个已采用成片尚未入轨：{1}", [
-            unaddedAdopted.length,
-            unaddedAdopted.map(u => `${t("分镜 {0}", [u.ordinal])}${u.scene ? `（${u.scene}）` : ""}`).join("、"),
-          ])}
-        </span>
-        <button type="button" className="primary" disabled={editorLocked} onClick={syncEpisodeTakes}>
-          {t("同步入轨（+{0}）", [unaddedAdopted.length])}
-        </button>
+    {!picking && project.taskKind === "drama" && !readOnly && (
+      <div className="comic-episode-assembly-bar" role="region" aria-label={t("本集分镜合并进度")}>
+        <div className="comic-episode-assembly-info">
+          <div className="comic-cut-badges">
+            <strong>{t("本集分镜汇集")}</strong>
+            <small className="comic-pill" data-tone={unaddedAdopted.length === 0 && episodeAdoptedCount > 0 ? "done" : "frame"}>
+              {t("时间线 {0} 段 · 分镜已采用 {1}/{2}", [video.length, episodeAdoptedCount, episodeClipCount])}
+            </small>
+            {unreadyClips > 0 && (
+              <small className="comic-pill" data-tone="idle">
+                {t("尚有 {0} 个分镜未采用成片", [unreadyClips])}
+              </small>
+            )}
+          </div>
+          {unaddedAdopted.length > 0 && (
+            <small>
+              {t("本集分镜新增 {0} 个已采用成片尚未入轨：{1}", [
+                unaddedAdopted.length,
+                unaddedAdopted.map(u => `${t("分镜 {0}", [u.ordinal])}${u.scene ? `（${u.scene}）` : ""}`).join("、"),
+              ])}
+            </small>
+          )}
+        </div>
+        <div className="comic-actions">
+          {unaddedAdopted.length > 0 && (
+            <button type="button" className="primary" disabled={editorLocked} onClick={syncEpisodeTakes}>
+              {t("同步入轨（+{0}）", [unaddedAdopted.length])}
+            </button>
+          )}
+          {outdatedAdopted.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(outdatedAdopted[0]!.videoItemId);
+                setNotice(t("已定位到分镜 {0}，可在视频轨底部替换为最新采用版本", [outdatedAdopted[0]!.ordinal]));
+              }}
+            >
+              {t("待更新版本（{0}）", [outdatedAdopted.length])}
+            </button>
+          )}
+          {unreadyClips > 0 && project.seriesId && onEpisodeProduction && (
+            <button
+              type="button"
+              onClick={() => onEpisodeProduction(project.seriesId!)}
+            >
+              {t("去分镜补齐")}
+            </button>
+          )}
+          {video.length > 0 && (
+            <button
+              type="button"
+              className={unaddedAdopted.length === 0 ? "primary" : undefined}
+              onClick={() => document.getElementById("comic-episode-merge-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              {t("合并成一集剧成果")} ↓
+            </button>
+          )}
+        </div>
       </div>
     )}
     {picking ? <>
@@ -585,7 +676,21 @@ export function ComicEditWorkspace({
           })}
           subtitles={timeline.subtitles}
           addSubtitle={cue => apply({ ...timeline, subtitles: [...timeline.subtitles, cue] })} disabled={editorLocked} />}
-      <ComicRenderPanel project={project} dirty={dirty || saving} />
+      <ComicRenderPanel
+        project={project}
+        dirty={dirty || saving}
+        readOnly={readOnly}
+        draftTimeline={timeline}
+        nextEpisode={nextEpisode}
+        onEnsureSaved={ensureSaved}
+        onRenderUpdated={onRenderUpdated}
+        onSwitchNextEpisode={project.dramaId && onSwitchEpisode
+          ? epId => { if (canLeaveStandalone()) onSwitchEpisode(project.dramaId!, epId); }
+          : undefined}
+        onBackToSelect={project.dramaId && onOpenDramaSelect
+          ? () => onOpenDramaSelect(project.dramaId!)
+          : undefined}
+      />
     </>}
     {replacement && item && adopted && <LibraryDialog title={t("替换为采用版（版本 {0}）", [adopted.version])} submitLabel={t("确认替换")}
       close={() => setReplacement(false)} describeError={editError} save={async (form, signal) => {
@@ -617,7 +722,7 @@ export function ComicEditWorkspace({
       <ComicTempPreviewDialog
         aspectRatio={timeline.aspectRatio}
         ensureSaved={ensureSaved}
-        fixOverflowAndSave={fixOverflowAndSave}
+        fixOverflowAndSave={readOnly ? undefined : fixOverflowAndSave}
         close={() => setTempPreviewOpen(false)}
       />
     )}

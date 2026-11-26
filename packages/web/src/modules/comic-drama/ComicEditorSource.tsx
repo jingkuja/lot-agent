@@ -6,8 +6,12 @@ import { VideoTakeCard } from "./ComicVideoTakes.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { NewComicEdit } from "./ComicEditList.js";
 
-export function ComicEditorSource({ takeId, browse, open, openEdit }: {
-  takeId: string; browse: () => void; open: (seriesId: string, clipId: string) => void; openEdit: (id: string) => void;
+export function ComicEditorSource({ takeId, browse, open, openEdit, openDramaEdit }: {
+  takeId: string;
+  browse: () => void;
+  open: (seriesId: string, clipId: string) => void;
+  openEdit: (id: string) => void;
+  openDramaEdit?: (dramaId: string, seriesId: string) => void;
 }) {
   const { t } = useI18n();
   const [take, setTake] = useState<ComicVideoTake | "missing" | "error" | null>(null);
@@ -35,6 +39,11 @@ export function ComicEditorSource({ takeId, browse, open, openEdit }: {
         <VideoTakeCard key={take.id} take={take} refresh={retry} selected />
         <div className="comic-actions">
           <button type="button" className="primary" onClick={() => setCreate(true)}>{t("以此片源创建工程")}</button>
+          {take.dramaId && take.seriesId && openDramaEdit && (
+            <button type="button" onClick={() => openDramaEdit(take.dramaId!, take.seriesId)}>
+              {t("进入本集剪辑操作台")}
+            </button>
+          )}
           {take.ordinal !== null && <button type="button" onClick={() => open(take.seriesId, take.targetId)}>{t("打开对应分镜")}</button>}
         </div>
         {create && <NewComicEdit seed={{ takeId }} open={openEdit} close={() => setCreate(false)} />}

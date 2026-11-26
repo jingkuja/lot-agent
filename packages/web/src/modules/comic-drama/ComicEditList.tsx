@@ -132,7 +132,7 @@ export function ComicEditsIndex({
         <div>
           <h1>{t("剪辑工作台")}</h1>
           <p className="comic-workbench-subtitle">
-            {t("新建新剧自动关联剧集剪辑任务（按分集剪辑），也可随时创建自由任务混剪任意片源。")}
+            {t("关联剧集的剪辑任务以整部剧为单位、分集为执行单位；也可随时创建自由任务混剪任意片源。")}
           </p>
         </div>
         <div className="comic-actions">
@@ -161,7 +161,8 @@ export function ComicEditsIndex({
               <div className="comic-section-heading">
                 <div className="comic-cut-badges">
                   <h2>{t("剧集剪辑任务")}</h2>
-                  <small className="comic-pill" data-tone="frame">{t("作业单位：分集")}</small>
+                  <small className="comic-pill" data-tone="frame">{t("任务单位：整部剧")}</small>
+                  <small className="comic-pill" data-tone="done">{t("执行单位：分集")}</small>
                 </div>
                 <small className="comic-workbench-count">{t("{0} 部剧集", [sortedDramaTasks.length])}</small>
               </div>
@@ -175,7 +176,9 @@ export function ComicEditsIndex({
                       task={task}
                       isCurrent={task.dramaId === currentDramaId}
                       locale={locale}
-                      onOpen={(seriesId) => openDramaTask(task.dramaId, seriesId)}
+                      onOpen={(seriesId) => (seriesId
+                        ? openDramaTask(task.dramaId, seriesId)
+                        : openDramaTask(task.dramaId))}
                       onOpenHub={openDramaHub ? () => openDramaHub(task.dramaId) : undefined}
                     />
                   ))}
@@ -274,15 +277,19 @@ function DramaEditTaskCard({
         )}
         <div className="comic-drama-edit-meta">
           <div className="comic-cut-badges">
-            <span className="comic-hierarchy-level">{t("剧集任务")}</span>
+            <span className="comic-hierarchy-level">{t("整部剧")}</span>
             {isCurrent && <small className="comic-pill" data-tone="busy">{t("当前剧目")}</small>}
             <span className="comic-ratio">{task.aspectRatio}</span>
           </div>
-          <h3>《{task.dramaTitle}》</h3>
+          <h3>
+            <button type="button" className="comic-drama-title-link" onClick={() => onOpen()}>
+              《{task.dramaTitle}》
+            </button>
+          </h3>
           <div className="comic-episode-stats">
             <span>{t("共 {0} 集", [task.episodeCount])}</span>
             <span>{t("已剪 {0} 集", [task.editedEpisodeCount])}</span>
-            <span>{t("已导出 {0} 集", [task.exportedEpisodeCount])}</span>
+            <span>{t("已合成分集 {0}", [task.exportedEpisodeCount])}</span>
           </div>
           {task.lastEpisodeNo && (
             <small className="comic-drama-edit-last">
@@ -301,7 +308,7 @@ function DramaEditTaskCard({
             const state = ep.hasReadyRender ? "exported"
               : ep.timelineClipCount > 0 ? "edited"
                 : ep.adoptedClipCount > 0 ? "ready" : "idle";
-            const statusText = ep.hasReadyRender ? t("已导出")
+            const statusText = ep.hasReadyRender ? t("已成片")
               : ep.timelineClipCount > 0 ? t("{0} 段", [ep.timelineClipCount])
                 : ep.adoptedClipCount > 0 ? t("待入轨")
                   : t("待成片");
@@ -333,12 +340,17 @@ function DramaEditTaskCard({
           {onOpenHub && (
             <button type="button" onClick={onOpenHub}>{t("全剧筹备")}</button>
           )}
+          {task.lastSeriesId && task.lastEpisodeNo && (
+            <button type="button" onClick={() => onOpen(task.lastSeriesId!)}>
+              {t("继续第 {0} 集", [task.lastEpisodeNo])}
+            </button>
+          )}
           <button
             type="button"
             className="primary"
-            onClick={() => onOpen(task.lastSeriesId ?? undefined)}
+            onClick={() => onOpen()}
           >
-            {t("进入剪辑")}
+            {t("选集进入操作台")}
           </button>
         </div>
       </footer>

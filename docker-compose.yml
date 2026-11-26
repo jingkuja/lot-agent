@@ -67,6 +67,7 @@ x-app-env: &app-env
   # for same-origin access; set to the box address so generated download links
   # are reachable externally, e.g. http://192.168.1.50:3000
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  SEEDANCE_USE_ASSET_URLS: ${SEEDANCE_USE_ASSET_URLS:-0}
   LOT_AGENT_PUBLIC_URL: ${LOT_AGENT_PUBLIC_URL:-}
   TOKENHUB_PUBLIC_URL: ${TOKENHUB_PUBLIC_URL:-https://tokenhub.todoucloud.com}
   # Model configuration page linked from the digital employee; empty uses https://wetok.ai/.

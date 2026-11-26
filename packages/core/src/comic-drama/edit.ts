@@ -46,6 +46,12 @@ export type ComicDramaEditEpisodeItem = {
   outdatedAdoptedCount: number;
   renderCount: number;
   hasReadyRender: boolean;
+  latestReadyRenderId?: string | null;
+  latestReadyRenderDurationMs?: number | null;
+  latestReadyRenderFps?: number | null;
+  latestReadyRenderRevision?: number | null;
+  latestReadyRenderAt?: string | null;
+  activeRenderStatus?: "pending" | "running" | null;
   updatedAt: string;
 };
 export type ComicDramaEditTaskSummary = {
@@ -85,6 +91,17 @@ export type ComicEditUnaddedTake = {
   takeId: string;
   durationMs: number;
 };
+export type ComicEditOutdatedTake = {
+  videoItemId: string;
+  clipId: string;
+  ordinal: number;
+  scene: string;
+  currentTakeId: string;
+  currentVersion: number;
+  adoptedTakeId: string;
+  adoptedVersion: number;
+  adoptedDurationMs: number;
+};
 export type ComicEditListEntry = {
   id: string;
   seriesId: string | null;
@@ -109,7 +126,10 @@ export type ComicEdit = ComicEditListEntry & {
   dramaEditTaskId?: string | null;
   dramaArchivedAt?: string | null;
   dramaEpisodes?: ComicDramaEditEpisodeItem[];
+  episodeClipCount?: number;
+  episodeAdoptedCount?: number;
   unaddedAdoptedTakes?: ComicEditUnaddedTake[];
+  outdatedAdoptedTakes?: ComicEditOutdatedTake[];
   timeline: ComicTimeline;
   sources: ComicEditSource[];
   audioSources: ComicEditAudioSource[];

@@ -433,6 +433,21 @@ function createHierarchyPool() {
       }
       return { rows: [], rowCount: 1 };
     }
+    if (sql.startsWith("UPDATE lot_comic_drama.cd_edit_tasks SET last_series_id=NULL")) {
+      const owner = String(params[0]);
+      if (params.length === 3) {
+        const dramaId = String(params[1]);
+        const seriesId = String(params[2]);
+        const task = editTasks.get(dramaId);
+        if (task && task.ownerId === owner && task.lastSeriesId === seriesId) task.lastSeriesId = null;
+      } else {
+        const seriesId = String(params[1]);
+        for (const task of editTasks.values()) {
+          if (task.ownerId === owner && task.lastSeriesId === seriesId) task.lastSeriesId = null;
+        }
+      }
+      return { rows: [], rowCount: 1 };
+    }
     throw new Error(`Unexpected SQL in hierarchy mock: ${sql}`);
   });
 
