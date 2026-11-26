@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   adaptComicClipDraftForModel, checkComicClipIssues, COMIC_VIDEO_SAFE_COMMON_LIMITS, comicVideoDurationSupported,
-  comicVideoProfile, countComicClipFoldedReferences, rebalanceShotDurationShares, resolveComicVideoAudioMode,
-  type ComicClipCheckIssue, type ComicClipCasting, type ComicDramaClip,
+  comicVideoProfile, countComicClipFoldedReferences, isComicClipDraftBlank, rebalanceShotDurationShares,
+  resolveComicVideoAudioMode,
+  type ComicClipCheckIssue, type ComicClipCasting, type ComicDirectorProposal, type ComicDramaClip,
   type ComicDramaClipDraft, type ComicDramaSeries, type ComicLibraryPage, type ComicMaterial, type ComicMaterialImageKind,
   type ComicMaterialKind, type ComicMaterialRef, type ComicMedia, type ComicSeriesCast, type ComicShotSfxPosition, type ComicShotSfxRef,
   type ComicVideoAudioMode, type ComicVideoMaterialRef, type ComicVideoProfile,
@@ -10,8 +12,9 @@ import {
 import { useI18n } from "../../i18n/index.js";
 import { describeComicClipCheckIssue } from "./clip-check-copy.js";
 import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
+import { SparklesIcon } from "./ComicStudioIcons.js";
 import { comicGenerationApi } from "./generation-api.js";
-import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, hasActiveComicTakes, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { DictionaryOptions, MediaPreview, useComicChoices } from "./LibraryParts.js";
 import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
@@ -34,6 +37,19 @@ type Props = {
   remove: (id: string) => void;
   reorder: (ids: string[]) => void;
   onEnhanceClip?: (id: string) => void;
+  hasScript?: boolean;
+  scriptCharCount?: number;
+  breakdownBusy?: boolean;
+  breakdownError?: string | null;
+  breakdownNotice?: string | null;
+  breakdownProposal?: ComicDirectorProposal | null;
+  onGenerateFromScript?: () => void;
+  onCancelBreakdown?: () => void;
+  onDismissBreakdownError?: () => void;
+  onDismissBreakdownNotice?: () => void;
+  onApplyBreakdownPreview?: (decision: "append" | "replace") => void;
+  onDismissBreakdownPreview?: () => void;
+  onGoScript?: () => void;
 };
 
 function clipProgressLabel(clip: ComicDramaClip): { stage: string; tone: string } {
@@ -54,6 +70,9 @@ function clipProgressLabel(clip: ComicDramaClip): { stage: string; tone: string 
 
 export function Storyboard({
   dramaTitle, series, clips, cast, drafts, disabled, locked, selected, select, edit, add, copy, remove, reorder, onEnhanceClip,
+  hasScript = false, scriptCharCount = 0, breakdownBusy = false, breakdownError = null, breakdownNotice = null,
+  breakdownProposal = null, onGenerateFromScript, onCancelBreakdown, onDismissBreakdownError,
+  onDismissBreakdownNotice, onApplyBreakdownPreview, onDismissBreakdownPreview, onGoScript,
 }: Props) {
   const { t } = useI18n();
   const dragging = useRef<string | null>(null);
@@ -62,6 +81,9 @@ export function Storyboard({
   const resolvedEpisodeTitle = series?.title ?? "";
   const clip = clips.find(entry => entry.id === selected) ?? clips[0];
   const activeDraft = clip ? (drafts[clip.id]?.draft ?? clip.draft) : null;
+  const allClipsBlank = clips.length > 0
+    && clips.every(item => isComicClipDraftBlank(drafts[item.id]?.draft ?? item.draft));
+  const previewClips = breakdownProposal?.proposal?.clips ?? null;
   const clipIssues = clip && activeDraft
     ? checkComicClipIssues({ videoModel: series?.videoModel ?? null }, { ...clip, draft: activeDraft }, cast)
     : [];
@@ -106,56 +128,300 @@ export function Storyboard({
                 {item.progress?.adoptedVideoVersion != null && (
                   <small className="comic-pill" data-tone="done">{t("采用 v{0}", [item.progress.adoptedVideoVersion])}</small>
                 )}
-                {itemIssues.length > 0 && <small className="comic-pill" data-tone="warn">{t("{0} 项提醒", [itemIssues.length])}</small>}
+                {itemIssues.length > 0 && <ClipIssuePill ordinal={item.ordinal} issues={itemIssues} selected={item.id === clip?.id} />}
               </span>
             </span>
           </button>
         </div>;
       })}
+      {onGenerateFromScript && !locked && (
+        <button
+          type="button"
+          className="comic-ai-button comic-strip-ai-btn"
+          disabled={disabled || breakdownBusy || !hasScript}
+          onClick={onGenerateFromScript}
+        >
+          <SparklesIcon size={14} />
+          <span>{t(breakdownBusy ? "AI 拆分中…" : "AI 从剧本生成分镜")}</span>
+        </button>
+      )}
       <button type="button" className="comic-add" disabled={disabled} onClick={() => add()}>＋ {t("添加分镜")}</button>
     </section>
-    {clip && activeDraft && <section className="comic-edit-card">
-      <header>
-        <div>
-          {resolvedDramaTitle && (
-            <ComicClipOriginBadge
-              dramaTitle={resolvedDramaTitle}
-              episodeNo={resolvedEpisodeNo}
-              episodeTitle={resolvedEpisodeTitle || resolvedDramaTitle}
-              clipOrdinal={clip.ordinal}
-              totalClips={clips.length}
-            />
+    <div className="comic-storyboard-main">
+      {breakdownBusy && (
+        <div className="comic-storyboard-ai-banner" role="status">
+          <div className="comic-storyboard-ai-copy">
+            <strong><SparklesIcon size={15} /> {t("AI 正在根据本集剧本与选角自动拆分分镜…")}</strong>
+            <small>{t("正在解析场景、镜头景别运镜、人物对白与绑定出镜角色，请稍候。")}</small>
+          </div>
+          {onCancelBreakdown && (
+            <button type="button" onClick={onCancelBreakdown}>{t("取消")}</button>
           )}
-          <h2>{t("分镜 {0}", [clip.ordinal])}</h2>
-          <div className="comic-cut-badges">
-            <small className="comic-pill" data-tone={clipProgressLabel(clip).tone}>{t("制作进度")} · {t(clipProgressLabel(clip).stage)}</small>
-            <small className="comic-pill" data-tone={clip.progress?.adoptedVideoVersion ? "done" : "idle"}>
-              {t("当前采用版")} · {clip.progress?.adoptedVideoVersion != null ? t("版本 {0}", [clip.progress.adoptedVideoVersion]) : t("未采用")}
-            </small>
+        </div>
+      )}
+      {breakdownError && (
+        <div className="comic-error" role="alert">
+          <span>{breakdownError}</span>
+          <div className="comic-actions">
+            {onGenerateFromScript && hasScript && !locked && (
+              <button type="button" disabled={disabled || breakdownBusy} onClick={onGenerateFromScript}>{t("重试")}</button>
+            )}
+            {onDismissBreakdownError && (
+              <button type="button" onClick={onDismissBreakdownError}>{t("关闭")}</button>
+            )}
           </div>
         </div>
-        <div className="comic-actions">
-          {onEnhanceClip && <button type="button" disabled={disabled} onClick={() => onEnhanceClip(clip.id)}>{t("AI 增强")}</button>}
-          <button type="button" disabled={disabled || clip.ordinal === 1} onClick={() => move(clip.id, clip.ordinal - 2)}>{t("上移")}</button>
-          <button type="button" disabled={disabled || clip.ordinal === clips.length} onClick={() => move(clip.id, clip.ordinal)}>{t("下移")}</button>
-          <button type="button" disabled={disabled} onClick={() => add(clip.id)}>{t("在后面插入")}</button>
-          <button type="button" disabled={disabled} onClick={() => copy(clip.id)}>{t("复制分镜")}</button>
-          <button type="button" disabled={disabled} onClick={() => remove(clip.id)}>{t("删除")}</button>
+      )}
+      {breakdownNotice && (
+        <div className="comic-generation-note" role="status">
+          <span>{breakdownNotice}</span>
+          {onDismissBreakdownNotice && (
+            <button type="button" onClick={onDismissBreakdownNotice}>{t("知道了")}</button>
+          )}
         </div>
-      </header>
-      {clipIssues.length > 0 && <ClipIssueBanner issues={clipIssues} cast={cast} disabled={locked}
-        onAdapt={adaptedPreview?.changed ? () => edit(clip.id, adaptedPreview.draft) : undefined}
-        addCast={characterId => {
-          const member = cast.find(entry => entry.snapshot.characterId === characterId);
-          if (!member || (activeDraft.cast ?? []).some(a => a.characterId === characterId)) return;
-          const slot = member.snapshot.assets.find(asset => asset.kind === "slot" && asset.key === "front")
-            ?? member.snapshot.assets.find(asset => asset.kind === "slot");
-          edit(clip.id, { ...activeDraft, cast: [...(activeDraft.cast ?? []), { characterId, slotKey: slot?.key ?? null, expressionKey: null }] });
-        }} />}
-      <ClipFields key={clip.id} draft={activeDraft} disabled={locked} cast={cast} profile={comicVideoProfile(series?.videoModel ?? null)}
-        generateDisabled={disabled} styleKey={series?.styleKey} change={draft => edit(clip.id, draft)} />
-    </section>}
+      )}
+      {previewClips && previewClips.length > 0 && (
+        <section className="comic-ai-preview comic-breakdown-preview" aria-label={t("AI 分镜拆分建议")}>
+          <header>
+            <strong>{t("AI 已生成 {0} 个分镜建议（当前已有分镜，请选择应用方式）", [previewClips.length])}</strong>
+          </header>
+          <ol className="comic-breakdown-preview-list">
+            {previewClips.map((item, idx) => {
+              const matchedNames = (item.cast ?? [])
+                .map(c => cast.find(entry => entry.snapshot.characterId === c.characterId)?.snapshot.name)
+                .filter(Boolean);
+              return (
+                <li key={idx}>
+                  <strong>
+                    {t("分镜 {0}", [idx + 1])} · {item.scene || t("未命名分镜")} · {t("{0} 秒", [item.durationMs / 1000])}
+                  </strong>
+                  {matchedNames.length > 0 && (
+                    <small>{t("出镜角色")}：{matchedNames.join(" / ")}</small>
+                  )}
+                  <small>
+                    {item.shots.map(s => s.description).join("；")}
+                  </small>
+                  {item.lines.length > 0 && (
+                    <small>
+                      {item.lines.map(l => (l.speaker ? `${l.speaker}：${l.text}` : l.text)).join(" / ")}
+                    </small>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+          <div className="comic-actions">
+            {onApplyBreakdownPreview && (
+              <>
+                <button type="button" className="primary" disabled={disabled} onClick={() => onApplyBreakdownPreview("replace")}>
+                  {t("替换现有分镜")}
+                </button>
+                <button type="button" disabled={disabled} onClick={() => onApplyBreakdownPreview("append")}>
+                  {t("追加到末尾")}
+                </button>
+              </>
+            )}
+            {onDismissBreakdownPreview && (
+              <button type="button" disabled={disabled} onClick={onDismissBreakdownPreview}>{t("放弃")}</button>
+            )}
+          </div>
+        </section>
+      )}
+      {clips.length === 0 ? (
+        <section className="comic-edit-card comic-storyboard-empty">
+          {hasScript ? (
+            <>
+              <h2>{t("从本集剧本一键生成分镜")}</h2>
+              <p>
+                {t("本集已准备 {0} 字剧本与 {1} 名选角，可直接由 AI 自动拆分为含场景、镜头描述、对白与出镜角色的分镜表，生成后只需微调即可。", [
+                  scriptCharCount,
+                  cast.length,
+                ])}
+              </p>
+              <div className="comic-actions">
+                {onGenerateFromScript && !locked && (
+                  <button
+                    type="button"
+                    className="primary comic-ai-button"
+                    disabled={disabled || breakdownBusy}
+                    onClick={onGenerateFromScript}
+                  >
+                    <SparklesIcon size={15} />
+                    <span>{t("AI 从本集剧本生成分镜")}</span>
+                  </button>
+                )}
+                {!locked && (
+                  <button type="button" disabled={disabled} onClick={() => add()}>＋ {t("手动添加分镜")}</button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>{t("还没有分镜")}</h2>
+              <p>{t("先在「本集剧本」填写或代入剧本内容，即可由 AI 一键生成分镜；也可以手动添加空白分镜。")}</p>
+              <div className="comic-actions">
+                {onGoScript && (
+                  <button type="button" className="primary" onClick={onGoScript}>{t("去填写本集剧本")}</button>
+                )}
+                {!locked && (
+                  <button type="button" disabled={disabled} onClick={() => add()}>＋ {t("添加分镜")}</button>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      ) : (
+        <>
+          {allClipsBlank && hasScript && onGenerateFromScript && !locked && !breakdownBusy && !previewClips && (
+            <div className="comic-storyboard-ai-banner" role="region" aria-label={t("AI 自动填充空白分镜")}>
+              <div className="comic-storyboard-ai-copy">
+                <strong><SparklesIcon size={15} /> {t("检测到本集已有剧本与选角，当前分镜尚未填写")}</strong>
+                <small>{t("可由 AI 直接根据本集剧本拆出全部场景、镜头、台词并自动绑定出镜角色，省去逐格手动输入。")}</small>
+              </div>
+              <button
+                type="button"
+                className="primary comic-ai-button"
+                disabled={disabled}
+                onClick={onGenerateFromScript}
+              >
+                <SparklesIcon size={14} />
+                <span>{t("AI 一键带入剧本生成分镜")}</span>
+              </button>
+            </div>
+          )}
+          {clip && activeDraft && <section className="comic-edit-card">
+            <header>
+              <div>
+                {resolvedDramaTitle && (
+                  <ComicClipOriginBadge
+                    dramaTitle={resolvedDramaTitle}
+                    episodeNo={resolvedEpisodeNo}
+                    episodeTitle={resolvedEpisodeTitle || resolvedDramaTitle}
+                    clipOrdinal={clip.ordinal}
+                    totalClips={clips.length}
+                  />
+                )}
+                <h2>{t("分镜 {0}", [clip.ordinal])}</h2>
+                <div className="comic-cut-badges">
+                  <small className="comic-pill" data-tone={clipProgressLabel(clip).tone}>{t("制作进度")} · {t(clipProgressLabel(clip).stage)}</small>
+                  <small className="comic-pill" data-tone={clip.progress?.adoptedVideoVersion ? "done" : "idle"}>
+                    {t("当前采用版")} · {clip.progress?.adoptedVideoVersion != null ? t("版本 {0}", [clip.progress.adoptedVideoVersion]) : t("未采用")}
+                  </small>
+                </div>
+              </div>
+              <div className="comic-actions">
+                {onEnhanceClip && <button type="button" disabled={disabled} onClick={() => onEnhanceClip(clip.id)}>{t("AI 增强")}</button>}
+                <button type="button" disabled={disabled || clip.ordinal === 1} onClick={() => move(clip.id, clip.ordinal - 2)}>{t("上移")}</button>
+                <button type="button" disabled={disabled || clip.ordinal === clips.length} onClick={() => move(clip.id, clip.ordinal)}>{t("下移")}</button>
+                <button type="button" disabled={disabled} onClick={() => add(clip.id)}>{t("在后面插入")}</button>
+                <button type="button" disabled={disabled} onClick={() => copy(clip.id)}>{t("复制分镜")}</button>
+                <button type="button" disabled={disabled} onClick={() => remove(clip.id)}>{t("删除")}</button>
+              </div>
+            </header>
+            {clipIssues.length > 0 && <ClipIssueBanner issues={clipIssues} cast={cast} disabled={locked}
+              onAdapt={adaptedPreview?.changed ? () => edit(clip.id, adaptedPreview.draft) : undefined}
+              addCast={characterId => {
+                const member = cast.find(entry => entry.snapshot.characterId === characterId);
+                if (!member || (activeDraft.cast ?? []).some(a => a.characterId === characterId)) return;
+                const slot = member.snapshot.assets.find(asset => asset.kind === "slot" && asset.key === "front")
+                  ?? member.snapshot.assets.find(asset => asset.kind === "slot");
+                edit(clip.id, { ...activeDraft, cast: [...(activeDraft.cast ?? []), { characterId, slotKey: slot?.key ?? null, expressionKey: null }] });
+              }} />}
+            <ClipFields key={clip.id} draft={activeDraft} disabled={locked} cast={cast} profile={comicVideoProfile(series?.videoModel ?? null)}
+              generateDisabled={disabled} styleKey={series?.styleKey} change={draft => edit(clip.id, draft)} />
+          </section>}
+        </>
+      )}
+    </div>
   </div>;
+}
+
+function ClipIssuePill({ ordinal, issues, selected }: {
+  ordinal: number;
+  issues: readonly ComicClipCheckIssue[];
+  selected: boolean;
+}) {
+  const { t } = useI18n();
+  const tooltipId = useId();
+  const triggerRef = useRef<HTMLElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number }>({ left: 12, top: 12 });
+
+  const clearClose = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const updatePos = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const maxW = Math.min(340, Math.max(200, vw - 24));
+    const left = Math.max(12, Math.min(rect.left, vw - maxW - 12));
+    const placeAbove = vh - rect.bottom < 220 && rect.top > 220;
+    setPos(placeAbove ? { left, bottom: Math.max(12, vh - rect.top + 8) } : { left, top: Math.max(12, rect.bottom + 8) });
+  }, []);
+  const openPopover = () => {
+    clearClose();
+    updatePos();
+    setOpen(true);
+  };
+  const scheduleClose = () => {
+    clearClose();
+    closeTimerRef.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  useEffect(() => () => clearClose(), []);
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    const closeNow = () => setOpen(false);
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeNow(); };
+    window.addEventListener("scroll", closeNow, true);
+    window.addEventListener("resize", closeNow);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("scroll", closeNow, true);
+      window.removeEventListener("resize", closeNow);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return <>
+    <small
+      ref={triggerRef}
+      className="comic-pill comic-pill-trigger"
+      data-tone="warn"
+      aria-describedby={open ? tooltipId : undefined}
+      onMouseEnter={openPopover}
+      onMouseLeave={scheduleClose}
+    >
+      {t("{0} 项提醒", [issues.length])}
+    </small>
+    {open && typeof document !== "undefined" && createPortal(
+      <div
+        id={tooltipId}
+        role="tooltip"
+        className="comic-issue-popover"
+        style={{
+          left: `${pos.left}px`,
+          ...(pos.top !== undefined ? { top: `${pos.top}px` } : { bottom: `${pos.bottom ?? 12}px` }),
+        }}
+        onMouseEnter={clearClose}
+        onMouseLeave={scheduleClose}
+      >
+        <strong>{t("分镜 {0} · {1} 项提醒", [ordinal, issues.length])}</strong>
+        <ul>
+          {issues.map((issue, idx) => <li key={idx}>{describeComicClipCheckIssue(issue, t)}</li>)}
+        </ul>
+        {!selected && <small className="comic-issue-popover-hint">{t("点击分镜卡查看并处理")}</small>}
+      </div>,
+      document.body,
+    )}
+  </>;
 }
 
 function ClipIssueBanner({ issues, cast, disabled, addCast, onAdapt }: {
@@ -381,7 +647,9 @@ function StoryboardMaterialResult({ task, disabled, bind, close }: {
 }) {
   const { t } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.status(task.id, signal), [task.id]);
-  const { current, failed, refresh } = useGenerationHistory(load);
+  const { current, failed, refresh } = useGenerationHistory(load, 5_000, 0, {
+    shouldPoll: data => data.active || hasActiveComicTakes(data.takes),
+  });
   const take = current?.takes[0];
   const mediaId = take?.state === "ready" ? take.mediaId : null;
   return <div className="comic-track-picker">

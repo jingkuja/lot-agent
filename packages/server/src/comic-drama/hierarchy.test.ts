@@ -653,4 +653,60 @@ describe("PgComicDramaRepository 3-tier hierarchy", () => {
     const synced = await repo.syncEpisodeCastFromDrama(ownerId, ep1.series.id, ep1.series.revision);
     expect(synced.cast.map(c => c.snapshot.name).sort()).toEqual(["沈青", "苏晚"]);
   });
+
+  it("auto-populates episode script from drama master script unless overridden, and fills sequel from master script", async () => {
+    const store = createHierarchyPool();
+    const repo = new PgComicDramaRepository(store.pool);
+
+    const created = await repo.createDrama(ownerId, {
+      title: "雨夜便利店",
+      synopsis: "深夜重逢",
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+      videoModel: null,
+      createFirstEpisode: false,
+    });
+    const masterScript = [
+      "【第 1 集：雨夜里的过期快乐】",
+      "【00:00-00:06 | 写字楼·深夜】",
+      "冷白灯下，丽丽独自敲键盘。",
+      "",
+      "【第 2 集：热咖啡】",
+      "【00:00-00:08 | 便利店收银台】",
+      "小田递出一杯热拿铁。",
+    ].join("\n");
+    await repo.saveDramaScript(ownerId, created.drama.id, 1, masterScript);
+
+    // 1. Omitted initialScript -> auto-populated from Episode 1 section
+    const ep1 = await repo.createEpisode(ownerId, created.drama.id, {
+      title: "雨夜里的过期快乐",
+    });
+    expect(ep1.series.episodeNo).toBe(1);
+    expect(ep1.script?.content).toContain("【第 1 集：雨夜里的过期快乐】");
+    expect(ep1.script?.content).toContain("冷白灯下，丽丽独自敲键盘。");
+    expect(ep1.script?.content).not.toContain("【第 2 集：热咖啡】");
+
+    // 2. derive sequel -> populates Episode 2 title & script from master script
+    const ep2Sequel = await repo.derive(ownerId, ep1.series.id, true, true);
+    expect(ep2Sequel.series.episodeNo).toBe(2);
+    expect(ep2Sequel.series.title).toBe("热咖啡");
+    expect(ep2Sequel.script?.content).toContain("【第 2 集：热咖啡】");
+    expect(ep2Sequel.script?.content).toContain("小田递出一杯热拿铁。");
+
+    // 3. Explicit empty initialScript "" is respected (stays null)
+    const epCleared = await repo.createEpisode(ownerId, created.drama.id, {
+      episodeNo: 2,
+      title: "空白分集",
+      initialScript: "",
+    });
+    expect(epCleared.script).toBeNull();
+
+    // 4. Explicit modified initialScript is saved verbatim
+    const epEdited = await repo.createEpisode(ownerId, created.drama.id, {
+      episodeNo: 2,
+      title: "修改后第二集",
+      initialScript: "手动修改后的第 2 集内容。",
+    });
+    expect(epEdited.script?.content).toBe("手动修改后的第 2 集内容。");
+  });
 });

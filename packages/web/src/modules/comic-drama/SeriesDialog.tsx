@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  analyzeComicModelSwitch, comicVideoModel, comicVideoOptions, selectComicVideoModel, type ComicDramaClip,
-  type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput, type ComicDramaSeries, type ComicDramaSeriesInput,
-  type ComicDramaTreeEntry, type ComicModelSwitchIssue,
+  analyzeComicModelSwitch, COMIC_SCRIPT_MAX_CHARS, comicVideoModel, comicVideoOptions, resolveComicEpisodeMasterScript,
+  selectComicVideoModel, type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput,
+  type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaTreeEntry, type ComicModelSwitchIssue,
+  type ResolvedComicEpisodeScript,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
@@ -20,6 +21,7 @@ export type PresetDramaTarget = {
   latestEpisodeId?: string | null;
   castCount?: number;
   episodes?: readonly ComicDramaEpisodeBrief[];
+  scriptContent?: string;
 };
 
 export type SeriesModelAdaptOptions = { apply: boolean; clampDuration: boolean };
@@ -44,9 +46,19 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
   const [castSource, setCastSource] = useState<"drama" | "none" | string>(
     presetDrama?.castCount ? "drama" : (presetDrama?.latestEpisodeId || "drama"),
   );
-  const [episodeNo, setEpisodeNo] = useState(
-    series?.episodeNo ? String(series.episodeNo) : presetDrama ? String(presetDrama.nextEpisodeNo) : "1",
-  );
+  const initialEpNo = series?.episodeNo ?? presetDrama?.nextEpisodeNo ?? 1;
+  const initialResolved = resolveComicEpisodeMasterScript(presetDrama?.scriptContent ?? "", initialEpNo);
+  const [episodeNo, setEpisodeNo] = useState(String(initialEpNo));
+  const [title, setTitle] = useState(() => {
+    if (series) return series.title;
+    if (initialResolved.matched === "episode" && initialResolved.title) return initialResolved.title;
+    return initialResolved.matched !== "none" ? t("第 {0} 集", [initialEpNo]) : "";
+  });
+  const [initialScript, setInitialScript] = useState(() => (
+    !series && initialResolved.matched !== "none" ? initialResolved.content : ""
+  ));
+  const titleTouched = useRef(false);
+  const scriptTouched = useRef(false);
   const [styleKey, setStyleKey] = useState(series?.styleKey ?? presetDrama?.styleKey ?? "thick_painting");
   const [aspectRatio, setAspectRatio] = useState<ComicDramaSeriesInput["aspectRatio"]>(
     series?.aspectRatio ?? presetDrama?.aspectRatio ?? "9:16",
@@ -114,16 +126,42 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
   const dramaEpisodes = presetDrama?.episodes ?? selectedDrama?.episodes ?? [];
   const dramaCastCount = presetDrama?.castCount ?? selectedDrama?.castCount ?? 0;
   const resolvedDramaTitle = presetDrama?.title ?? selectedDrama?.title ?? series?.seriesGroup ?? "";
+  const masterScript = presetDrama?.scriptContent ?? selectedDrama?.scriptContent ?? "";
   const styleLabel = styles.find(style => style.key === styleKey)?.labels[locale] ?? styleKey;
   const videoLabel = comicVideoModel(videoModel)?.label ?? (videoModel || t("沿用默认视频模型"));
   const parsedEpNo = Math.max(1, Number(episodeNo) || 1);
+  const resolvedMaster = useMemo(
+    () => resolveComicEpisodeMasterScript(masterScript, parsedEpNo),
+    [masterScript, parsedEpNo],
+  );
+  const defaultTitleFor = (resolved: ResolvedComicEpisodeScript, epNo: number) => {
+    if (resolved.matched === "episode" && resolved.title) return resolved.title;
+    return resolved.matched !== "none" ? t("第 {0} 集", [epNo]) : "";
+  };
+
+  useEffect(() => {
+    if (series) return;
+    if (!titleTouched.current) {
+      const nextTitle = resolvedMaster.matched === "episode" && resolvedMaster.title
+        ? resolvedMaster.title
+        : resolvedMaster.matched !== "none"
+          ? t("第 {0} 集", [parsedEpNo])
+          : "";
+      setTitle(prev => (prev === nextTitle ? prev : nextTitle));
+    }
+    if (!scriptTouched.current) {
+      const nextScript = resolvedMaster.matched !== "none" ? resolvedMaster.content : "";
+      setInitialScript(prev => (prev === nextScript ? prev : nextScript));
+    }
+  }, [series, resolvedMaster, parsedEpNo, t]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     const form = new FormData(event.currentTarget);
     const get = (name: string) => String(form.get(name) ?? "").trim();
-    const initialScript = String(form.get("initialScript") ?? "");
+    const submittedTitle = get("title") || title.trim();
+    const submittedScript = String(form.get("initialScript") ?? initialScript);
     const inherit = castSource !== "none";
     const sourceSeriesId = castSource !== "drama" && castSource !== "none" ? castSource : undefined;
     setBusy(true);
@@ -132,7 +170,7 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
         ? { apply: applyAdapt, clampDuration }
         : undefined;
       if (await save({
-        title: get("title"),
+        title: submittedTitle,
         logline: get("logline"),
         ...(selectedDramaId ? { dramaId: selectedDramaId } : {}),
         seriesGroup: resolvedDramaTitle || null,
@@ -143,14 +181,16 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
         ...(!series ? {
           inheritCastAndStyle: inherit,
           ...(sourceSeriesId ? { sourceSeriesId } : {}),
-          ...(initialScript.trim() ? { initialScript } : {}),
+          initialScript: submittedScript,
         } : {}),
       }, adapt)) close();
     } finally { setBusy(false); }
   }
 
+  const wideDialog = !series && (resolvedMaster.matched !== "none" || initialScript.length > 0);
+
   return (
-    <dialog ref={dialog} className="comic-dialog" aria-labelledby="comic-dialog-title"
+    <dialog ref={dialog} className={`comic-dialog${wideDialog ? " comic-dialog--wide" : ""}`} aria-labelledby="comic-dialog-title"
       onCancel={event => { event.preventDefault(); if (!busy) close(); }}>
       <form onSubmit={submit}>
         <h2 id="comic-dialog-title">
@@ -183,7 +223,8 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
                 onChange={event => setEpisodeNo(event.target.value)} />
             </label>
             <label>{t("分集名称")}
-              <input name="title" required maxLength={120} defaultValue={series?.title}
+              <input name="title" required maxLength={120} value={title}
+                onChange={event => { titleTouched.current = true; setTitle(event.target.value); }}
                 placeholder={t("例如：第 {0} 集：雨夜风铃", [parsedEpNo])} autoFocus />
             </label>
           </div>
@@ -194,8 +235,42 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
           {!series && (
             <>
               <label>{t("本集剧本（可选）")}
-                <textarea name="initialScript" maxLength={20000} rows={3}
-                  placeholder={t("可粘贴本集剧本片段，也可创建后再写或让导演助手拆分")} />
+                {masterScript.trim() && (
+                  <div className="comic-dialog-script-hint" role="status">
+                    <span>
+                      {resolvedMaster.matched === "episode"
+                        ? t("已从全剧剧本自动带入第 {0} 集内容，可直接修改", [parsedEpNo])
+                        : resolvedMaster.matched === "whole_fallback"
+                          ? t("未识别到分集标题，已带入全剧剧本，可直接删改保留本集内容")
+                          : t("全剧剧本中未找到第 {0} 集分段，可手动填写或调整集数", [parsedEpNo])}
+                      {resolvedMaster.truncated ? ` · ${t("已截取前 20,000 个字符")}` : ""}
+                    </span>
+                    {resolvedMaster.matched !== "none" && initialScript !== resolvedMaster.content && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          scriptTouched.current = false;
+                          setInitialScript(resolvedMaster.content);
+                          if (!titleTouched.current) {
+                            setTitle(defaultTitleFor(resolvedMaster, parsedEpNo));
+                          }
+                        }}
+                      >
+                        {resolvedMaster.matched === "episode"
+                          ? t("恢复第 {0} 集原文", [parsedEpNo])
+                          : t("恢复全剧剧本")}
+                      </button>
+                    )}
+                  </div>
+                )}
+                <textarea
+                  name="initialScript"
+                  maxLength={COMIC_SCRIPT_MAX_CHARS}
+                  rows={masterScript.trim() ? 8 : 3}
+                  value={initialScript}
+                  onChange={event => { scriptTouched.current = true; setInitialScript(event.target.value); }}
+                  placeholder={t("可粘贴本集剧本片段，也可创建后再写或让导演助手拆分")}
+                />
               </label>
               {dramaEpisodes.length > 0 ? (
                 <label>{t("角色带入方式")}

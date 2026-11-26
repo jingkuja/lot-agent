@@ -59,9 +59,9 @@ export function DirectorRoleChoice({ role, outcome, disabled, submit }: {
   </fieldset>;
 }
 
-export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed, openClip, editClip }: {
+export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed, openClip, editClip, reviewKeyframe }: {
   detail: ComicDramaDetail; quotes: ComicDirectorQuote[]; getSaved: () => Promise<ComicDramaDetail | null>; disabled: boolean;
-  changed: () => void; openClip: (id: string) => void; editClip: (id: string) => void;
+  changed: () => void; openClip: (id: string) => void; editClip: (id: string) => void; reviewKeyframe?: (clipId: string) => void;
 }) {
   const { t } = useI18n();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -147,6 +147,7 @@ export function DirectorGeneration({ detail, quotes, getSaved, disabled, changed
       </div>;
     })}
     {quote && <GenerationQuoteDialog quote={quote} label={labels} close={() => setQuote(undefined)} editClip={editClip}
+      reviewKeyframe={reviewKeyframe}
       confirm={id => comicGenerationApi.confirm({ resource: "series", id: series }, id)}
       submitted={() => { changed(); setSelectedIds([]); if (quote.items[0]) openClip(quote.items[0].clipId); }} />}
   </details>;

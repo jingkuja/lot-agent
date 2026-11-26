@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Selec
 import { comicSystemDictionary, type ComicDictionaryDomain, type ComicDictionaryEntry, type ComicMedia, type ComicMediaLinks, type ComicMediaVersion } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
-import { comicLibraryApi } from "./library-api.js";
+import { comicLibraryApi, getCachedComicChoices, loadComicChoices } from "./library-api.js";
 
 export const comicListWords = (value: string) => [...new Set(value.split(/[,，]/).map(word => word.trim()).filter(Boolean))];
 
@@ -23,19 +23,28 @@ const errors: Record<string, string> = {
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
 };
 export function libraryError(error: unknown) {
+  if (error instanceof ApiClientError && error.status === 429) return "操作太频繁，请稍后再试";
   return error instanceof ApiClientError && error.code ? errors[error.code] ?? "操作失败，请重试" : "操作失败，请重试";
 }
 
 export function useComicChoices(domain: ComicDictionaryDomain, refresh = 0) {
-  const [items, setItems] = useState<{ domain: ComicDictionaryDomain; entries: Awaited<ReturnType<typeof comicLibraryApi.dictionary>> }>();
+  const cached = refresh === 0 ? getCachedComicChoices(domain) : undefined;
+  const [items, setItems] = useState<{ domain: ComicDictionaryDomain; entries: Awaited<ReturnType<typeof comicLibraryApi.dictionary>> } | undefined>(
+    cached ? { domain, entries: cached } : undefined,
+  );
   useEffect(() => {
+    const existing = refresh === 0 ? getCachedComicChoices(domain) : undefined;
+    if (existing) {
+      setItems({ domain, entries: existing });
+      return;
+    }
     const controller = new AbortController();
-    void comicLibraryApi.dictionary(domain, controller.signal).then(entries => {
+    void loadComicChoices(domain, refresh > 0).then(entries => {
       if (!controller.signal.aborted) setItems({ domain, entries });
     }).catch(() => {});
     return () => controller.abort();
   }, [domain, refresh]);
-  return items?.domain === domain ? items.entries : comicSystemDictionary[domain];
+  return items?.domain === domain ? items.entries : (cached ?? comicSystemDictionary[domain]);
 }
 
 type ChoiceProps = SelectHTMLAttributes<HTMLSelectElement> & { existing?: string | null; empty?: string };

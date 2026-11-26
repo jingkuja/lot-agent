@@ -9,7 +9,7 @@ import { comicGenerationApi } from "./generation-api.js";
 import { CharacterFormDialog, useComicDramaOptions } from "./CharacterFormDialog.js";
 import { ComicCharacterVoice } from "./ComicCharacterVoice.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
-import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, hasActiveComicTakes, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import {
   ChoiceSelect, libraryError, LibraryDialog, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices,
 } from "./LibraryParts.js";
@@ -160,7 +160,9 @@ function CharacterAssets({ character, roleName, changed, onArchive }: {
   };
   const generationScope = { resource: "characters", id: character.id } as const;
   const loadTakes = useCallback((signal: AbortSignal) => comicGenerationApi.characterTakes(character.id, signal), [character.id]);
-  const generation = useGenerationHistory(loadTakes);
+  const generation = useGenerationHistory(loadTakes, 5_000, 0, {
+    shouldPoll: data => hasActiveComicTakes(data),
+  });
   const latestGenerated = generation.current?.find(take => take.state === "ready")?.id;
   useEffect(() => {
     if (!latestGenerated) return;

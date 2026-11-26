@@ -5789,4 +5789,147 @@ export const messages: Record<string, { en: string; id: string }> = {
   "本集最新合并成果": { "en": "Latest merged episode deliverable", "id": "Hasil penggabungan episode terbaru" },
   "下一集：第 {0} 集": { "en": "Next: Ep. {0}", "id": "Berikutnya: Ep. {0}" },
   "进入本集剪辑操作台": { "en": "Open episode workbench", "id": "Buka ruang kerja episode" },
+  "已从全剧剧本自动带入第 {0} 集内容，可直接修改": {
+    "en": "Episode {0} content auto-filled from the drama script — edit as needed.",
+    "id": "Konten Episode {0} diisi otomatis dari naskah induk — silakan ubah sesuai kebutuhan.",
+  },
+  "已截取前 20,000 个字符": { "en": "Truncated to the first 20,000 characters", "id": "Dipotong hingga 20.000 karakter pertama" },
+  "恢复第 {0} 集原文": { "en": "Restore Ep. {0} original", "id": "Pulihkan teks asli Ep. {0}" },
+  "未识别到分集标题，已带入全剧剧本，可直接删改保留本集内容": {
+    "en": "No episode headings detected; full drama script filled so you can trim to this episode.",
+    "id": "Judul episode tidak terdeteksi; naskah induk disalin penuh agar Anda dapat memangkasnya untuk episode ini.",
+  },
+  "恢复全剧剧本": { "en": "Restore full script", "id": "Pulihkan naskah induk" },
+  "全剧剧本中未找到第 {0} 集分段，可手动填写或调整集数": {
+    "en": "No Episode {0} section found in the drama script; enter manually or adjust the episode number.",
+    "id": "Bagian Episode {0} tidak ditemukan di naskah induk; isi manual atau ubah nomor episode.",
+  },
+  "已填 {0} 字 · 识别 {1} 集": {
+    "en": "{0} chars · {1} episodes detected",
+    "id": "{0} karakter · {1} episode terdeteksi",
+  },
+  "已从全剧剧本识别 {0} 集分段；创建分集时会自动带入对应单集内容，你只需要微调即可。": {
+    "en": "Detected {0} episode(s) from the drama script; each new episode auto-fills its section for quick editing.",
+    "id": "Terdeteksi {0} episode dari naskah induk; episode baru otomatis terisi bagiannya untuk langsung diedit.",
+  },
+  "已编写全剧剧本，创建第 1 集时会自动带入剧本内容并继承全剧角色与画风。": {
+    "en": "Drama script is ready; creating Episode 1 auto-fills its script and inherits the drama cast and style.",
+    "id": "Naskah induk siap; membuat Episode 1 otomatis mengisi naskah serta mewarisi pemeran dan gaya.",
+  },
+  "剧本待创建分集": { "en": "Pending episodes from script", "id": "Episode belum dibuat dari naskah" },
+  "已从全剧剧本识别 {0} 集待创建分集": {
+    "en": "{0} pending episode(s) detected from drama script",
+    "id": "{0} episode terdeteksi dari naskah induk siap dibuat",
+  },
+  "点击带入单集内容，微调后即可创建": {
+    "en": "Click to pre-fill that episode's script, edit if needed, and create.",
+    "id": "Klik untuk mengisi naskah episode tersebut, ubah seperlunya, lalu buat.",
+  },
+  "待创建": { "en": "Ready to create", "id": "Siap dibuat" },
+  "{0} 字": { "en": "{0} chars", "id": "{0} karakter" },
+  "带入本集内容并创建": { "en": "Pre-fill & create episode", "id": "Isi & buat episode" },
+  "全剧剧本 · 第 {0} 集": { "en": "Drama script · Ep. {0}", "id": "Naskah serial · Ep. {0}" },
+  "带入第 {0} 集剧本到本集": { "en": "Fill Ep. {0} script here", "id": "Isi naskah Ep. {0} ke sini" },
+  "未生成可用分镜，请检查模型账号或剧本内容后重试": {
+    "en": "No usable storyboard clips were generated; check your model account or script and retry.",
+    "id": "Klip papan cerita belum berhasil dibuat; periksa akun model atau naskah lalu coba lagi.",
+  },
+  "AI 已根据本集剧本生成 {0} 个分镜并自动填入，可直接微调。": {
+    "en": "AI generated and filled {0} storyboard clip(s) from this episode's script — fine-tune as needed.",
+    "id": "AI membuat dan mengisi {0} klip papan cerita dari naskah episode ini — silakan sesuaikan.",
+  },
+  "已应用 AI 拆分分镜，可直接调整参数。": {
+    "en": "Applied AI storyboard clips — adjust parameters as needed.",
+    "id": "Klip papan cerita AI diterapkan — silakan sesuaikan parameternya.",
+  },
+  "AI 拆分中…": { "en": "Splitting shots…", "id": "Memecah adegan…" },
+  "AI 生成分镜": { "en": "AI Generate Storyboard", "id": "Buat Papan Cerita AI" },
+  "AI 从剧本生成分镜": { "en": "AI Breakdown from Script", "id": "Pecah Naskah jadi Adegan" },
+  "AI 正在根据本集剧本与选角自动拆分分镜…": {
+    "en": "AI is splitting this episode's script and cast into storyboard clips…",
+    "id": "AI sedang memecah naskah dan pemeran episode ini menjadi klip papan cerita…",
+  },
+  "正在解析场景、镜头景别运镜、人物对白与绑定出镜角色，请稍候。": {
+    "en": "Analyzing scenes, framing & camera motion, dialogue, and cast bindings…",
+    "id": "Menganalisis adegan, komposisi & gerak kamera, dialog, dan pemeran…",
+  },
+  "AI 分镜拆分建议": { "en": "AI Storyboard Proposal", "id": "Saran Papan Cerita AI" },
+  "AI 已生成 {0} 个分镜建议（当前已有分镜，请选择应用方式）": {
+    "en": "AI generated {0} clip proposal(s) (existing clips present — choose how to apply)",
+    "id": "AI membuat {0} saran klip (adegan sudah ada — pilih cara menerapkan)",
+  },
+  "出镜角色": { "en": "On-screen cast", "id": "Pemeran adegan" },
+  "替换现有分镜": { "en": "Replace existing clips", "id": "Ganti klip yang ada" },
+  "从本集剧本一键生成分镜": { "en": "Generate storyboard from episode script", "id": "Buat papan cerita dari naskah episode" },
+  "本集已准备 {0} 字剧本与 {1} 名选角，可直接由 AI 自动拆分为含场景、镜头描述、对白与出镜角色的分镜表，生成后只需微调即可。": {
+    "en": "This episode has {0} script chars and {1} cast member(s). Let AI split it into scenes, shots, dialogue, and cast bindings ready for quick tweaks.",
+    "id": "Episode ini memiliki {0} karakter naskah dan {1} pemeran. AI dapat langsung memecahnya menjadi adegan, bidikan, dialog, dan pemeran.",
+  },
+  "AI 从本集剧本生成分镜": { "en": "AI Generate from Episode Script", "id": "Buat dari Naskah Episode dengan AI" },
+  "手动添加分镜": { "en": "Add clip manually", "id": "Tambah klip manual" },
+  "先在「本集剧本」填写或代入剧本内容，即可由 AI 一键生成分镜；也可以手动添加空白分镜。": {
+    "en": "Write or fill the episode script first to generate storyboard clips with AI, or add a blank clip manually.",
+    "id": "Tulis atau isi naskah episode lebih dulu untuk membuat papan cerita dengan AI, atau tambah klip kosong secara manual.",
+  },
+  "去填写本集剧本": { "en": "Go to Episode Script", "id": "Buka Naskah Episode" },
+  "AI 自动填充空白分镜": { "en": "Auto-fill blank clips with AI", "id": "Isi otomatis klip kosong dengan AI" },
+  "检测到本集已有剧本与选角，当前分镜尚未填写": {
+    "en": "Episode script and cast are ready, while current clips are blank",
+    "id": "Naskah dan pemeran episode siap, sedangkan klip saat ini masih kosong",
+  },
+  "可由 AI 直接根据本集剧本拆出全部场景、镜头、台词并自动绑定出镜角色，省去逐格手动输入。": {
+    "en": "Let AI split the script into scenes, shots, dialogue, and cast bindings so you don't have to fill every field manually.",
+    "id": "Biarkan AI memecah naskah menjadi adegan, bidikan, dialog, dan pemeran secara otomatis tanpa mengisi manual satu per satu.",
+  },
+  "AI 一键带入剧本生成分镜": { "en": "AI Auto-Fill Storyboard from Script", "id": "Isi Papan Cerita dari Naskah dengan AI" },
+  "操作太频繁，请稍后再试": { "en": "Too many requests, please try again shortly", "id": "Terlalu banyak permintaan, silakan coba lagi sebentar lagi" },
+  "分镜 {0} · {1} 项提醒": { "en": "Clip {0} · {1} alert(s)", "id": "Klip {0} · {1} peringatan" },
+  "点击分镜卡查看并处理": { "en": "Click the clip card to inspect and resolve", "id": "Klik kartu klip untuk melihat dan menangani" },
+  "去确认首帧": { "en": "Approve first frame", "id": "Setujui bingkai awal" },
+  "改用直接参考生成": { "en": "Use direct references instead", "id": "Gunakan referensi langsung" },
+  "所选分镜均尚未确认首帧，暂无法预估费用或提交生成。请先确认首帧，或改用「直接参考生成」。": {
+    "en": "Selected clips do not have an approved first frame yet, so cost cannot be estimated or submitted. Approve a first frame first, or use direct references instead.",
+    "id": "Klip terpilih belum memiliki bingkai awal yang disetujui sehingga biaya belum dapat diperkirakan atau dikirim. Setujui bingkai awal dahulu, atau gunakan referensi langsung.",
+  },
+  "当前没有可提交的分镜，请按上方提示处理后重新预览费用。": {
+    "en": "No clips can be submitted right now. Resolve the items above and preview cost again.",
+    "id": "Belum ada klip yang dapat dikirim. Tangani catatan di atas lalu periksa perkiraan biaya lagi.",
+  },
+  "首帧生成中": { "en": "Generating first frame", "id": "Membuat bingkai awal" },
+  "首帧已过期": { "en": "First frame outdated", "id": "Bingkai awal kedaluwarsa" },
+  "未生成首帧": { "en": "No first frame", "id": "Belum ada bingkai awal" },
+  "待采用": { "en": "Ready to adopt", "id": "Siap dipakai" },
+  "当前分镜首帧正在生成中，生成并确认后才可按首帧生成视频": {
+    "en": "This clip's first frame is generating. Wait for it to finish and approve it before generating video from first frame.",
+    "id": "Bingkai awal klip ini sedang dibuat. Tunggu selesai lalu setujui sebelum membuat video dari bingkai awal.",
+  },
+  "当前分镜已有生成好的首帧，请点击「去确认首帧」确认后再生成视频": {
+    "en": "A generated first frame is ready for this clip. Click \"Approve first frame\" before generating video.",
+    "id": "Bingkai awal sudah tersedia untuk klip ini. Klik \"Setujui bingkai awal\" sebelum membuat video.",
+  },
+  "分镜内容已修改，原有首帧已失效，请重新生成或沿用首帧": {
+    "en": "Clip edits invalidated the previous first frame. Regenerate or reuse a previous frame first.",
+    "id": "Perubahan klip membuat bingkai awal sebelumnya tidak berlaku. Buat ulang atau gunakan ulang bingkai sebelumnya.",
+  },
+  "沿用此图作首帧": { "en": "Reuse as first frame", "id": "Gunakan ulang sebagai bingkai awal" },
+  "用此首帧生成视频": { "en": "Generate video from this frame", "id": "Buat video dari bingkai ini" },
+  "当前分镜首帧正在生成中，生成完成并确认首帧后，即可按首帧预估费用并生成视频。": {
+    "en": "This clip's first frame is generating. Once it finishes and is approved, you can estimate cost and generate video from it.",
+    "id": "Bingkai awal klip ini sedang dibuat. Setelah selesai dan disetujui, Anda dapat memperkirakan biaya dan membuat video.",
+  },
+  "当前分镜已有生成好的首帧待确认。请先确认首帧，确认后即可预估费用并生成视频。": {
+    "en": "A generated first frame is waiting for approval. Approve it first to estimate cost and generate video.",
+    "id": "Bingkai awal sudah tersedia dan menunggu persetujuan. Setujui dahulu untuk memperkirakan biaya dan membuat video.",
+  },
+  "分镜内容已修改，原有首帧已失效。请重新生成或沿用首帧后，再按首帧生成视频。": {
+    "en": "Clip content changed and invalidated the previous first frame. Regenerate or reuse a frame before generating video from first frame.",
+    "id": "Isi klip berubah sehingga bingkai awal sebelumnya kedaluwarsa. Buat ulang atau gunakan ulang bingkai sebelum membuat video.",
+  },
+  "当前分镜尚未生成并确认首帧，暂无法按首帧预估费用或提交生成。": {
+    "en": "This clip has no approved first frame yet, so cost cannot be estimated or submitted in first-frame mode.",
+    "id": "Klip ini belum memiliki bingkai awal yang disetujui sehingga biaya belum dapat diperkirakan atau dikirim dalam mode bingkai awal.",
+  },
+  "查看首帧进度": { "en": "View first-frame progress", "id": "Lihat progres bingkai awal" },
+  "去处理首帧": { "en": "Update first frame", "id": "Perbarui bingkai awal" },
+  "去生成首帧": { "en": "Generate first frame", "id": "Buat bingkai awal" },
 };

@@ -1,13 +1,14 @@
 import type { Pool, PoolClient } from "pg";
 import {
   buildComicDramaHierarchy, comicDramaClipSchema, comicDramaIdSchema, comicDramaSchema, comicDramaSeriesSchema,
-  type ComicClipProgress, type ComicCurrencyAmount, type ComicDrama, type ComicDramaCastContent, type ComicDramaClip,
-  type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent, type ComicDramaCreateInput,
-  type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput,
-  type ComicDramaEpisodeSummary, type ComicDramaHierarchyListQuery, type ComicDramaListQuery, type ComicDramaListing,
-  type ComicDramaOption, type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion, type ComicDramaSeries, type ComicDramaSeriesInput,
-  type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate, type ComicDramaTreeEntry, type ComicDramaTreeListing,
-  type ComicDramaUpdateInput, type ComicDramaView, type ComicEpisodeCostSummary, type ComicInvalidMaterialRef, type ComicSeriesCast,
+  resolveComicEpisodeMasterScript, type ComicClipProgress, type ComicCurrencyAmount, type ComicDrama, type ComicDramaCastContent,
+  type ComicDramaClip, type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent,
+  type ComicDramaCreateInput, type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief,
+  type ComicDramaEpisodeCreateInput, type ComicDramaEpisodeSummary, type ComicDramaHierarchyListQuery, type ComicDramaListQuery,
+  type ComicDramaListing, type ComicDramaOption, type ComicDramaReorder, type ComicDramaRepository, type ComicDramaScriptVersion,
+  type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaSeriesStatus, type ComicDramaSeriesUpdate,
+  type ComicDramaTreeEntry, type ComicDramaTreeListing, type ComicDramaUpdateInput, type ComicDramaView,
+  type ComicEpisodeCostSummary, type ComicInvalidMaterialRef, type ComicSeriesCast,
 } from "@lot-agent/core/comic-drama";
 
 import {
@@ -1083,13 +1084,16 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       } else if (inherit) {
         await syncDramaCastToSeries(client, owner, drama.id, series.id);
       }
+      const resolvedScript = input.initialScript !== undefined
+        ? input.initialScript
+        : resolveComicEpisodeMasterScript(drama.scriptContent, episodeNo).content;
       let initialScript: ComicDramaDetail["script"] = null;
-      if (input.initialScript?.trim()) {
+      if (resolvedScript.trim()) {
         await client.query(
           `INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source) VALUES ($1,1,$2,'user')`,
-          [series.id, input.initialScript],
+          [series.id, resolvedScript],
         );
-        initialScript = { version: 1, content: input.initialScript };
+        initialScript = { version: 1, content: resolvedScript };
       }
       await this.ensureDramaEditTask(client, owner, drama.id, series.id);
       await this.touchDrama(client, owner, drama.id);
@@ -1358,13 +1362,24 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     return this.transaction(client => this.deriveOn(client, owner, id, sequel, inheritCastAndStyle));
   }
 
-  async deriveOn(client: PoolClient, owner: string, id: string, sequel: boolean, inheritCastAndStyle = true): Promise<ComicDramaDetail> {
+  async deriveOn(
+    client: PoolClient,
+    owner: string,
+    id: string,
+    sequel: boolean,
+    inheritCastAndStyle = true,
+    populateFromMasterScript = true,
+  ): Promise<ComicDramaDetail> {
     const source = await this.series(client, owner, id, true);
     const drama = await this.dramaRow(client, owner, source.dramaId, true);
     const nextNo = sequel ? await this.nextEpisodeNo(client, owner, drama.id) : (source.episodeNo ?? 1);
     const episodeNo = sequel ? Math.min(Math.max((source.episodeNo ?? 1) + 1, nextNo), 2_147_483_647) : nextNo;
+    const matchedMaster = sequel && populateFromMasterScript
+      ? resolveComicEpisodeMasterScript(drama.scriptContent, episodeNo)
+      : null;
     const suffix = sequel ? ` #${episodeNo}` : " (copy)";
-    const title = (sequel ? drama.title : source.title).slice(0, 120 - suffix.length).replace(/[\uD800-\uDBFF]$/u, "") + suffix;
+    const fallbackTitle = (sequel ? drama.title : source.title).slice(0, 120 - suffix.length).replace(/[\uD800-\uDBFF]$/u, "") + suffix;
+    const title = matchedMaster?.matched === "episode" && matchedMaster.title ? matchedMaster.title : fallbackTitle;
     const inherit = !sequel || inheritCastAndStyle;
     const styleKey = inherit ? source.styleKey :
       (await readComicDictionary(client, owner, "style")).find(style => !style.inactive)?.key ?? "thick_painting";
@@ -1387,6 +1402,11 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         [series.id, id]);
       await client.query(`INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source)
         SELECT $1,1,content,source FROM lot_comic_drama.cd_scripts WHERE series_id=$2 ORDER BY version DESC LIMIT 1`, [series.id, id]);
+    } else if (matchedMaster?.matched === "episode" && matchedMaster.content.trim()) {
+      await client.query(
+        `INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source) VALUES ($1,1,$2,'user')`,
+        [series.id, matchedMaster.content],
+      );
     }
     await this.ensureDramaEditTask(client, owner, drama.id, series.id);
     await this.touchDrama(client, owner, drama.id);

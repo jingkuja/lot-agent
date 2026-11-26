@@ -34,6 +34,7 @@ export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek
     video: true, voice: true, sfx: true, music: true,
   });
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
+  const audioLinkRequestedRef = useRef<Set<string>>(new Set());
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const videoGainRef = useRef<{ element: HTMLVideoElement; gain: GainNode } | null>(null);
@@ -46,8 +47,9 @@ export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek
   ])], [timeline.music, timeline.sfx, timeline.voice]);
 
   useEffect(() => {
-    const missing = audioMediaIds.filter(id => !audioUrls[id]);
+    const missing = audioMediaIds.filter(id => !audioLinkRequestedRef.current.has(id));
     if (!missing.length) return;
+    for (const id of missing) audioLinkRequestedRef.current.add(id);
     const controller = new AbortController();
     void Promise.allSettled(missing.map(async id => {
       const links = await comicLibraryApi.links(id, controller.signal);
@@ -60,8 +62,13 @@ export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek
       }
       if (Object.keys(patch).length) setAudioUrls(prev => ({ ...prev, ...patch }));
     });
-    return () => controller.abort();
-  }, [audioMediaIds, audioUrls]);
+    return () => {
+      controller.abort();
+      if (controller.signal.aborted) {
+        for (const id of missing) audioLinkRequestedRef.current.delete(id);
+      }
+    };
+  }, [audioMediaIds]);
 
   useEffect(() => {
     const pool = audioPoolRef.current;

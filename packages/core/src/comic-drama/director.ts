@@ -57,14 +57,41 @@ export const comicDirectorModelSchema = z.object({
   script: text(COMIC_SCRIPT_MAX_CHARS),
   characters: z.array(z.object({ name: text(120), description: text(600) }).strict()).max(24),
 }).strict();
+const breakdownShot = z.union([
+  text(2000),
+  z.object({
+    description: text(2000),
+    framingKey: optionalText(64).optional(),
+    movementKey: optionalText(64).optional(),
+    durationShare: z.number().int().min(1).max(100).optional(),
+  }).strict(),
+]);
+const breakdownLine = z.object({
+  speaker: optionalText(120).nullable().transform(value => (value ? value : null)),
+  text: text(1000),
+  emotionKey: optionalText(64).nullable().transform(value => (value ? value : null)).optional(),
+  speed: z.number().min(0.5).max(2).optional(),
+}).strict();
 const part = z.object({
-  scene: text(1000), durationMs: z.number().int().min(1000).max(60_000),
-  shots: z.array(text(2000)).min(1).max(3),
-  lines: z.array(z.object({ speaker: text(120).nullable(), text: text(1000) }).strict()).max(30),
+  scene: text(1000),
+  durationMs: z.number().int().min(1000).max(60_000),
+  shots: z.array(breakdownShot).min(1).max(3),
+  lines: z.array(breakdownLine).max(30),
 }).strict();
 export const comicDirectorBreakdownSchema = z.object({
   clips: z.array(part).min(1).max(24), characters: comicDirectorModelSchema.shape.characters,
 }).strict();
+
+export function isComicClipDraftBlank(draft: ComicDramaClipDraft): boolean {
+  return !draft.scene.trim()
+    && draft.shots.every(shot => !shot.description.trim())
+    && draft.lines.length === 0
+    && !(draft.cast?.length)
+    && !draft.sceneRef
+    && !(draft.propRefs?.length)
+    && !(draft.sfxRefs?.length)
+    && !(draft.videoInputs?.references?.length);
+}
 
 export const comicDirectorScriptEnhanceModelSchema = z.object({
   segments: z.array(z.object({

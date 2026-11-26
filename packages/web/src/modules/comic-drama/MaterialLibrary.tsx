@@ -4,7 +4,7 @@ import { useI18n } from "../../i18n/index.js";
 import { comicLibraryApi } from "./library-api.js";
 import { ChoiceSelect, comicListWords, LibraryDialog, libraryError, LibraryPagination, LibrarySearch, MediaPreview, MediaVersions, useComicChoices } from "./LibraryParts.js";
 import { comicGenerationApi } from "./generation-api.js";
-import { ComicTakeStatus, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, hasActiveComicTakes, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
 import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
 
@@ -39,7 +39,9 @@ export function MaterialLibrary() {
   const [error, setError] = useState("");
   const choices = useComicChoices(kind);
   const reload = () => setRefresh(i => i + 1);
-  const generation = useGenerationHistory(comicGenerationApi.materialTakes);
+  const generation = useGenerationHistory(comicGenerationApi.materialTakes, 5_000, 0, {
+    shouldPoll: data => hasActiveComicTakes(data),
+  });
   const readyKey = generation.current?.filter(take => take.state === "ready").map(take => take.id).join(",");
   useEffect(() => { if (readyKey) setRefresh(value => value + 1); }, [readyKey]);
   useEffect(() => {

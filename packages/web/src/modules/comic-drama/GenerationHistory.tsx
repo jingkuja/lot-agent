@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { ComicImageTake } from "@lot-agent/core/comic-drama";
+import type { ComicImageTake, ComicTakeState } from "@lot-agent/core/comic-drama";
+import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
+
+export const hasActiveComicTakes = (takes: readonly { state: ComicTakeState }[]) =>
+  takes.some(take => take.state === "pending" || take.state === "running");
 
 const labels: Record<ComicImageTake["state"], string> = {
   pending: "等待生成", running: "正在生成", ready: "图片已入库",
@@ -22,25 +26,71 @@ export function ComicTakeStatus({ take }: { take: ComicImageTake }) {
   </span>;
 }
 
-export function useGenerationHistory<T>(load: (signal: AbortSignal) => Promise<T>, interval = 5_000, revision = 0) {
+export function useGenerationHistory<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  interval = 5_000,
+  revision = 0,
+  options?: { shouldPoll?: (data: T) => boolean; onData?: (data: T) => void },
+) {
   const [current, setCurrent] = useState<T | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const shouldPollRef = useRef(options?.shouldPoll);
+  shouldPollRef.current = options?.shouldPoll;
+  const onDataRef = useRef(options?.onData);
+  onDataRef.current = options?.onData;
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+    let stopped = false;
+    let pausedByVisibility = false;
+    const schedule = (delay: number) => {
+      if (controller.signal.aborted || stopped) return;
+      timer = setTimeout(() => { void refresh(); }, delay);
+    };
     const refresh = async () => {
+      if (controller.signal.aborted || stopped) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        pausedByVisibility = true;
+        return;
+      }
       try {
         const data = await load(controller.signal);
-        if (!controller.signal.aborted) { setCurrent(data); setFailed(false); }
-      } catch {
-        if (!controller.signal.aborted) setFailed(true);
-      } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, interval);
+        if (controller.signal.aborted) return;
+        failures = 0;
+        setCurrent(data);
+        setFailed(false);
+        onDataRef.current?.(data);
+        if (shouldPollRef.current && !shouldPollRef.current(data)) {
+          stopped = true;
+          return;
+        }
+        schedule(interval);
+      } catch (reason) {
+        if (controller.signal.aborted) return;
+        failures += 1;
+        setFailed(true);
+        const delay = reason instanceof ApiClientError && reason.status === 429
+          ? Math.min(60_000, Math.max(interval, reason.retryAfterMs ?? 15_000))
+          : Math.min(60_000, interval * 2 ** Math.min(failures, 3));
+        schedule(delay);
       }
     };
+    const onVisibility = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      if (!pausedByVisibility || stopped || controller.signal.aborted) return;
+      pausedByVisibility = false;
+      clearTimeout(timer);
+      void refresh();
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     void refresh();
-    return () => { controller.abort(); clearTimeout(timer); };
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [attempt, interval, load, revision]);
   return { current, failed, refresh: () => setAttempt(attempt => attempt + 1) };
 }

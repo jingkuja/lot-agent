@@ -4,9 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   comicSystemDictionary,
-  type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaSeries, type ComicDramaTreeListing, type ComicDramaView,
+  type ComicDirectorProposal, type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaSeries,
+  type ComicDramaTreeListing, type ComicDramaView,
 } from "@lot-agent/core/comic-drama";
-import { api } from "../../api/client.js";
+import { api, ApiClientError } from "../../api/client.js";
 import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
@@ -14,6 +15,7 @@ import { CastPanel } from "./CastPanel.js";
 import { ComicImageGeneration } from "./ComicImageGeneration.js";
 import { DramaDialog } from "./DramaDialog.js";
 import { DramaHub } from "./DramaHub.js";
+import { useGenerationHistory } from "./GenerationHistory.js";
 import { SeriesDialog } from "./SeriesDialog.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { Storyboard } from "./Storyboard.js";
@@ -612,5 +614,587 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
     });
     expect(scrollMock).toHaveBeenCalled();
     expect(focusMock).toHaveBeenCalled();
+  });
+
+  it("auto-fills SeriesDialog and DramaHub Step 4 from generated multi-episode master script", async () => {
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async (domain) => [
+      ...(comicSystemDictionary[domain] ?? []),
+    ] as never);
+    vi.spyOn(comicLibraryApi, "settings").mockResolvedValue({
+      preferences: { defaultVideoModel: "doubao-seedance-2-0", defaultImageModel: null },
+      stylePresets: [],
+    });
+    vi.spyOn(comicDramaApi, "listDramas").mockResolvedValue({ dramas: [], nextCursor: null });
+
+    const dramaId = uuid(101);
+    const masterScript = [
+      "【第 1 集：雨夜里的过期快乐】",
+      "【00:00-00:06 | 写字楼·深夜】",
+      "冷白灯下，丽丽独自敲键盘。",
+      "",
+      "【第 2 集：热咖啡】",
+      "【00:00-00:08 | 便利店收银台】",
+      "小田递出一杯热拿铁。",
+    ].join("\n");
+
+    const onAddEpisode = vi.fn();
+    const hubView: ComicDramaView = {
+      drama: {
+        id: dramaId,
+        title: "雨夜便利店",
+        synopsis: "都市短剧",
+        outline: "全剧共 2 集。",
+        scriptContent: masterScript,
+        styleKey: "thick_painting",
+        aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-0",
+        revision: 2,
+        archivedAt: null,
+      },
+      episodes: [makeEpisodes(dramaId)[0]!],
+      cast: [],
+    };
+
+    const hubHost = await mount(createElement(DramaHub, {
+      view: hubView,
+      busy: false,
+      initialTab: "episodes",
+      onUpdated: vi.fn(),
+      onReload: vi.fn(async () => {}),
+      onEditDrama: vi.fn(),
+      onAddEpisode,
+      onOpenEpisode: vi.fn(),
+      onDeriveEpisode: vi.fn(async () => true),
+      onChangeEpisode: vi.fn(async () => true),
+      onOpenHistory: vi.fn(),
+      onOpenCharacters: vi.fn(),
+    }), "zh");
+
+    expect(hubHost.textContent).toContain("识别 2 集");
+    expect(hubHost.textContent).toContain("已从全剧剧本识别 1 集待创建分集");
+    expect(hubHost.textContent).toContain("热咖啡");
+    expect(hubHost.textContent).toContain("带入本集内容并创建");
+
+    const prefillBtn = Array.from(hubHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("带入本集内容并创建"));
+    act(() => { prefillBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(onAddEpisode).toHaveBeenCalledWith({ episodeNo: 2, scriptContent: masterScript });
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+
+    const save = vi.fn(async () => true);
+    const dlgHost = await mount(createElement(SeriesDialog, {
+      presetDrama: {
+        id: dramaId,
+        title: "雨夜便利店",
+        styleKey: "thick_painting",
+        aspectRatio: "9:16",
+        videoModel: "doubao-seedance-2-0",
+        nextEpisodeNo: 1,
+        castCount: 2,
+        episodes: [],
+        scriptContent: masterScript,
+      },
+      models: [{ id: "doubao-seedance-2-0", name: "Seedance 2.0" }],
+      close: vi.fn(),
+      save,
+      error: null,
+    }), "zh");
+
+    const titleInput = dlgHost.querySelector('input[name="title"]') as HTMLInputElement;
+    const epNoInput = dlgHost.querySelector('input[name="episodeNo"]') as HTMLInputElement;
+    const scriptArea = dlgHost.querySelector('textarea[name="initialScript"]') as HTMLTextAreaElement;
+    expect(titleInput.value).toBe("雨夜里的过期快乐");
+    expect(scriptArea.value).toContain("【第 1 集：雨夜里的过期快乐】");
+    expect(scriptArea.value).not.toContain("【第 2 集：热咖啡】");
+    expect(dlgHost.textContent).toContain("已从全剧剧本自动带入第 1 集内容，可直接修改");
+
+    // Switch episodeNo to 2 while untouched -> auto-switches to Episode 2 title & script
+    const setInputValue = (el: HTMLInputElement | HTMLTextAreaElement, next: string) => {
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      setter?.call(el, next);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    await act(async () => {
+      setInputValue(epNoInput, "2");
+      await Promise.resolve();
+    });
+    expect(titleInput.value).toBe("热咖啡");
+    expect(scriptArea.value).toContain("【第 2 集：热咖啡】");
+    expect(scriptArea.value).not.toContain("【第 1 集：雨夜里的过期快乐】");
+
+    // User modifies script manually -> switching episodeNo back to 1 preserves edit and shows restore button
+    await act(async () => {
+      setInputValue(scriptArea, "用户自定义修改的第 2 集剧本");
+      await Promise.resolve();
+    });
+    expect(dlgHost.textContent).toContain("恢复第 2 集原文");
+
+    await act(async () => {
+      setInputValue(epNoInput, "1");
+      await Promise.resolve();
+    });
+    expect(scriptArea.value).toBe("用户自定义修改的第 2 集剧本");
+
+    // Clearing script submits explicit empty string initialScript: ""
+    await act(async () => {
+      setInputValue(scriptArea, "");
+      await Promise.resolve();
+    });
+    const form = dlgHost.querySelector("form") as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ episodeNo: 1, initialScript: "" }),
+      undefined,
+    );
+
+    // Verify English rendering
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const enHost = await mount(createElement(DramaHub, {
+      view: hubView,
+      busy: false,
+      initialTab: "episodes",
+      onUpdated: vi.fn(),
+      onReload: vi.fn(async () => {}),
+      onEditDrama: vi.fn(),
+      onAddEpisode: vi.fn(),
+      onOpenEpisode: vi.fn(),
+      onDeriveEpisode: vi.fn(async () => true),
+      onChangeEpisode: vi.fn(async () => true),
+      onOpenHistory: vi.fn(),
+      onOpenCharacters: vi.fn(),
+    }), "en");
+    expect(enHost.textContent).toContain("1 pending episode(s) detected from drama script");
+    expect(enHost.textContent).toContain("Pre-fill & create episode");
+  });
+
+  it("renders Storyboard AI generation CTAs for empty clips, blank clips, and inline proposal preview", async () => {
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async (domain) => [
+      ...(comicSystemDictionary[domain] ?? []),
+    ] as never);
+    const dramaId = uuid(1);
+    const series: ComicDramaSeries = {
+      id: uuid(11),
+      dramaId,
+      parentId: null,
+      title: "雨夜里的过期快乐",
+      logline: "",
+      seriesGroup: "雨夜便利店",
+      episodeNo: 1,
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+      videoModel: "doubao-seedance-2-5",
+      revision: 1,
+      archivedAt: null,
+    };
+    const onGenerateFromScript = vi.fn();
+    const emptyHost = await mount(createElement(Storyboard, {
+      dramaTitle: "雨夜便利店",
+      series,
+      clips: [],
+      cast: [],
+      drafts: {},
+      disabled: false,
+      locked: false,
+      selected: null,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+      hasScript: true,
+      scriptCharCount: 240,
+      onGenerateFromScript,
+    }), "zh");
+    expect(emptyHost.textContent).toContain("从本集剧本一键生成分镜");
+    const emptyAiBtn = Array.from(emptyHost.querySelectorAll("button")).find(
+      btn => btn.textContent?.includes("AI 从本集剧本生成分镜"),
+    );
+    act(() => { emptyAiBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(onGenerateFromScript).toHaveBeenCalledTimes(1);
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+
+    const blankClip: ComicDramaClip = {
+      id: uuid(301),
+      revision: 1,
+      selectionRevision: 1,
+      ordinal: 1,
+      draft: { schemaVersion: 1, durationMs: 6000, scene: "", shots: [], lines: [] },
+    };
+    const blankHost = await mount(createElement(Storyboard, {
+      dramaTitle: "雨夜便利店",
+      series,
+      clips: [blankClip],
+      cast: [],
+      drafts: { [blankClip.id]: { draft: blankClip.draft } },
+      disabled: false,
+      locked: false,
+      selected: blankClip.id,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+      hasScript: true,
+      scriptCharCount: 240,
+      onGenerateFromScript,
+    }), "zh");
+    expect(blankHost.textContent).toContain("检测到本集已有剧本与选角，当前分镜尚未填写");
+    const blankAiBtn = Array.from(blankHost.querySelectorAll("button")).find(
+      btn => btn.textContent?.includes("AI 一键带入剧本生成分镜"),
+    );
+    act(() => { blankAiBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(onGenerateFromScript).toHaveBeenCalledTimes(2);
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+
+    const filledClip: ComicDramaClip = {
+      ...blankClip,
+      draft: {
+        schemaVersion: 1,
+        durationMs: 5000,
+        scene: "已有分镜",
+        shots: [{ id: uuid(302), framingKey: "medium", movementKey: "fixed", description: "原镜头", durationShare: 100 }],
+        lines: [],
+      },
+    };
+    const previewProposal: ComicDirectorProposal = {
+      id: uuid(401),
+      conversationId: uuid(402),
+      baseRevision: 1,
+      createdAt: "2026-11-26T00:00:00.000Z",
+      input: { requestId: uuid(403), expectedRevision: 1, mode: "paste", language: "zh", text: "剧本", action: "breakdown" },
+      original: "剧本",
+      status: "ready",
+      appliedRevision: null,
+      proposal: {
+        script: "",
+        roles: [],
+        clips: [{
+          schemaVersion: 1,
+          durationMs: 6000,
+          scene: "写字楼深夜",
+          shots: [{ id: uuid(404), framingKey: "close_up", movementKey: "push", description: "丽丽敲键盘", durationShare: 100 }],
+          lines: [{ id: uuid(405), speaker: "丽丽", text: "方案又被驳回了。", emotionKey: "sad", speed: 1 }],
+        }],
+      },
+    };
+    const onApplyBreakdownPreview = vi.fn();
+    const onDismissBreakdownPreview = vi.fn();
+    const previewHost = await mount(createElement(Storyboard, {
+      dramaTitle: "雨夜便利店",
+      series,
+      clips: [filledClip],
+      cast: [],
+      drafts: { [filledClip.id]: { draft: filledClip.draft } },
+      disabled: false,
+      locked: false,
+      selected: filledClip.id,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+      hasScript: true,
+      breakdownProposal: previewProposal,
+      onGenerateFromScript,
+      onApplyBreakdownPreview,
+      onDismissBreakdownPreview,
+    }), "zh");
+    expect(previewHost.textContent).toContain("写字楼深夜");
+    const replaceBtn = Array.from(previewHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("替换现有分镜"));
+    const dismissBtn = Array.from(previewHost.querySelectorAll("button")).find(btn => btn.textContent?.includes("放弃"));
+    act(() => { replaceBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(onApplyBreakdownPreview).toHaveBeenCalledWith("replace");
+    act(() => { dismissBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(onDismissBreakdownPreview).toHaveBeenCalledTimes(1);
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const enHost = await mount(createElement(Storyboard, {
+      dramaTitle: "Rainy Night Store",
+      series,
+      clips: [],
+      cast: [],
+      drafts: {},
+      disabled: false,
+      locked: false,
+      selected: null,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+      hasScript: true,
+      scriptCharCount: 240,
+      onGenerateFromScript,
+    }), "en");
+    expect(enHost.textContent).toContain("Generate storyboard from episode script");
+    expect(enHost.textContent).toContain("AI Generate from Episode Script");
+  });
+
+  it("shows Storyboard issue popover on hover in zh and en and dismisses on Escape", async () => {
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async (domain) => [
+      ...(comicSystemDictionary[domain] ?? []),
+    ] as never);
+    const dramaId = uuid(1);
+    const series: ComicDramaSeries = {
+      id: uuid(11),
+      dramaId,
+      parentId: null,
+      title: "第一夜",
+      logline: "",
+      seriesGroup: "雨夜便利店",
+      episodeNo: 1,
+      styleKey: "thick_painting",
+      aspectRatio: "9:16",
+      videoModel: "doubao-seedance-2-5",
+      revision: 1,
+      archivedAt: null,
+    };
+    const issueClip: ComicDramaClip = {
+      id: uuid(610),
+      revision: 1,
+      selectionRevision: 1,
+      ordinal: 1,
+      draft: {
+        schemaVersion: 1,
+        durationMs: 4000,
+        scene: "收银台",
+        shots: [{ id: uuid(611), framingKey: "medium", movementKey: "fixed", description: "对峙", durationShare: 100 }],
+        lines: [{ id: uuid(612), speaker: "林夏", text: "你好", emotionKey: null, speed: 1 }],
+      },
+    };
+    const hostZh = await mount(createElement(Storyboard, {
+      dramaTitle: "雨夜便利店",
+      series,
+      clips: [issueClip],
+      cast: [],
+      drafts: { [issueClip.id]: { draft: issueClip.draft } },
+      disabled: false,
+      locked: false,
+      selected: issueClip.id,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+    }), "zh");
+    const triggerZh = hostZh.querySelector(".comic-pill-trigger");
+    expect(triggerZh?.textContent).toBe("1 项提醒");
+    act(() => { triggerZh?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+    const tooltipZh = document.body.querySelector('[role="tooltip"]');
+    expect(tooltipZh?.textContent).toContain("分镜 1 · 1 项提醒");
+    expect(tooltipZh?.textContent).toContain("林夏");
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const hostEn = await mount(createElement(Storyboard, {
+      dramaTitle: "Rainy Night Store",
+      series,
+      clips: [issueClip],
+      cast: [],
+      drafts: { [issueClip.id]: { draft: issueClip.draft } },
+      disabled: false,
+      locked: false,
+      selected: issueClip.id,
+      select: vi.fn(),
+      edit: vi.fn(),
+      add: vi.fn(),
+      copy: vi.fn(),
+      remove: vi.fn(),
+      reorder: vi.fn(),
+    }), "en");
+    const triggerEn = hostEn.querySelector(".comic-pill-trigger");
+    expect(triggerEn?.textContent).toBe("1 alerts");
+    act(() => { triggerEn?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+    const tooltipEn = document.body.querySelector('[role="tooltip"]');
+    expect(tooltipEn?.textContent).toContain("Clip 1 · 1 alert(s)");
+  });
+
+  it("guides users from unconfirmed from_keyframe quotes to keyframe approval or direct references", async () => {
+    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => {});
+    vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(() => {});
+    vi.spyOn(comicGenerationApi, "videos").mockResolvedValue([]);
+    vi.spyOn(comicGenerationApi, "keyframes").mockResolvedValue({
+      takes: [], approvedTakeId: null, approvedMediaId: null, selectionRevision: 1,
+    });
+    const previewSpy = vi.spyOn(comicGenerationApi, "preview")
+      .mockResolvedValueOnce({
+        confirmationId: null,
+        expiresAt: null,
+        items: [],
+        skipped: [{ clipId: uuid(701), reason: "KEYFRAME_NOT_CONFIRMED" }],
+        totalMicros: null,
+        currency: "CNY",
+      })
+      .mockResolvedValueOnce({
+        confirmationId: uuid(799),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        items: [{ clipId: uuid(701), modelId: "doubao-seedance-2-5", unit: "second", quantity: 5, amountMicros: 500_000 }],
+        skipped: [],
+        totalMicros: 500_000,
+        currency: "CNY",
+      });
+
+    const clipNoFrame: ComicDramaClip = {
+      id: uuid(701),
+      revision: 1,
+      selectionRevision: 1,
+      ordinal: 1,
+      draft: {
+        schemaVersion: 1,
+        durationMs: 5000,
+        scene: "暴雨便利店",
+        shots: [{ id: uuid(702), framingKey: "medium", movementKey: "fixed", description: "推进", durationShare: 100 }],
+        lines: [],
+      },
+      progress: {
+        keyframeState: "none", keyframeMediaId: null, keyframeApproved: false, keyframeCandidateAvailable: false,
+        keyframeStale: false, videoState: "none", videoTakeCount: 0, adoptedVideoTakeId: null,
+        adoptedVideoVersion: null, adoptedVideoMediaId: null, adoptedStale: false, castSnapshotStale: false,
+      },
+    };
+    const clipReadyCandidate: ComicDramaClip = {
+      ...clipNoFrame,
+      id: uuid(703),
+      ordinal: 2,
+      draft: { ...clipNoFrame.draft, scene: "门铃响起" },
+      progress: {
+        ...clipNoFrame.progress!,
+        keyframeState: "ready",
+        keyframeCandidateAvailable: true,
+      },
+    };
+    const detail = {
+      series: {
+        id: uuid(11), dramaId: uuid(1), parentId: null, title: "第一集", logline: "", seriesGroup: "雨夜便利店",
+        episodeNo: 1, styleKey: "thick_painting", aspectRatio: "9:16" as const, videoModel: "doubao-seedance-2-5",
+        revision: 1, archivedAt: null,
+      },
+      clips: [clipNoFrame, clipReadyCandidate],
+      script: null,
+      cast: [],
+    };
+    const selectMock = vi.fn();
+    const host = await mount(createElement(ComicImageGeneration, {
+      detail,
+      selected: clipNoFrame.id,
+      select: selectMock,
+      getSaved: async () => detail,
+      disabled: false,
+      initialMode: "from_keyframe",
+      choose: vi.fn(),
+      editClip: vi.fn(),
+    }), "zh");
+
+    expect(host.textContent).toContain("未生成首帧");
+    expect(host.textContent).toContain("待确认首帧");
+    expect(host.textContent).toContain("当前分镜尚未生成并确认首帧，暂无法按首帧预估费用或提交生成。");
+
+    const previewBtn = Array.from(host.querySelectorAll("button")).find(btn => btn.textContent === "预览视频费用");
+    await act(async () => {
+      previewBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const dialog = host.querySelector("dialog");
+    expect(dialog?.textContent).toContain("请先确认当前分镜的首帧");
+    expect(dialog?.textContent).toContain("所选分镜均尚未确认首帧，暂无法预估费用或提交生成");
+    const approveFrameBtn = Array.from(dialog?.querySelectorAll("button") ?? []).find(btn => btn.textContent === "去确认首帧");
+    const switchRefBtn = Array.from(dialog?.querySelectorAll("button") ?? []).find(btn => btn.textContent === "改用直接参考生成");
+    expect(approveFrameBtn).toBeTruthy();
+    expect(switchRefBtn).toBeTruthy();
+
+    await act(async () => {
+      switchRefBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(previewSpy).toHaveBeenCalledTimes(2);
+    expect(previewSpy.mock.calls[1]?.[1]).toMatchObject({ mode: "references" });
+    expect(host.querySelector("dialog")?.textContent).toContain("doubao-seedance-2-5");
+  });
+
+  it("stops idle polling via shouldPoll, backs off on 429 Retry-After, and pauses when hidden", async () => {
+    vi.useFakeTimers();
+    try {
+      let currentData: Array<{ state: "running" | "ready" }> = [{ state: "running" }];
+      const load = vi.fn<() => Promise<Array<{ state: "running" | "ready" }>>>(async () => currentData);
+      function Probe() {
+        const res = useGenerationHistory(load, 5_000, 0, {
+          shouldPoll: rows => rows.some(r => r.state === "running"),
+        });
+        return createElement("span", null, String(res.current?.length ?? 0));
+      }
+      await mount(createElement(Probe), "zh");
+      expect(load).toHaveBeenCalledTimes(1);
+
+      currentData = [{ state: "ready" }];
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(load).toHaveBeenCalledTimes(2);
+
+      // Should NOT poll again once settled
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(load).toHaveBeenCalledTimes(2);
+
+      // Verify 429 Retry-After backoff
+      act(() => root?.unmount());
+      document.body.replaceChildren();
+      const load429 = vi.fn<() => Promise<Array<{ state: "running" | "ready" }>>>()
+        .mockRejectedValueOnce(new ApiClientError("rate limited", 429, undefined, {}, 12_000))
+        .mockResolvedValueOnce([{ state: "ready" }]);
+      function Probe429() {
+        useGenerationHistory(load429, 5_000, 0, {
+          shouldPoll: rows => rows.some(r => r.state === "running"),
+        });
+        return null;
+      }
+      await mount(createElement(Probe429), "zh");
+      expect(load429).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(load429).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(7_000); });
+      expect(load429).toHaveBeenCalledTimes(2);
+
+      // Verify hidden tab pauses polling until visible
+      act(() => root?.unmount());
+      document.body.replaceChildren();
+      let visibility: DocumentVisibilityState = "hidden";
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+      const loadVis = vi.fn(async () => [{ state: "running" as const }]);
+      function ProbeVis() {
+        useGenerationHistory(loadVis, 5_000, 0, { shouldPoll: () => true });
+        return null;
+      }
+      await mount(createElement(ProbeVis), "zh");
+      expect(loadVis).toHaveBeenCalledTimes(0);
+      visibility = "visible";
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await Promise.resolve();
+      });
+      expect(loadVis).toHaveBeenCalledTimes(1);
+      delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

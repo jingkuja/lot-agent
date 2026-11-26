@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComicDramaClip, ComicMediaLinks, ComicTake, ComicVideoReceipt, ComicVideoTake } from "@lot-agent/core/comic-drama";
+import type {
+  ComicDramaClip, ComicGenerationMode, ComicMediaLinks, ComicTake, ComicVideoReceipt, ComicVideoTake,
+} from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { ComicClipOriginBadge } from "./ComicHierarchyBar.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
-import { ComicTakeStatus, useGenerationHistory } from "./GenerationHistory.js";
+import { ComicTakeStatus, hasActiveComicTakes, useGenerationHistory } from "./GenerationHistory.js";
 import { comicLibraryApi } from "./library-api.js";
 import { SaveComicFrame } from "./SaveComicFrame.js";
 
@@ -16,16 +18,34 @@ export type ComicClipOrigin = {
   totalClips: number;
 };
 
-export function ClipVideoVersions({ seriesId, clip, origin, refresh, disabled, quoting, preview, choose, onSeriesChanged }: {
+export function ClipVideoVersions({
+  seriesId, clip, origin, refresh, disabled, quoting, preview, choose, onSeriesChanged,
+  mode, onReviewKeyframe, onSwitchToReferences,
+}: {
   seriesId: string; clip: ComicDramaClip; origin?: ComicClipOrigin; refresh: number; disabled: boolean; quoting: boolean; preview: () => void;
   choose: (id: string) => void; onSeriesChanged?: () => void;
+  mode?: ComicGenerationMode; onReviewKeyframe?: () => void; onSwitchToReferences?: () => void;
 }) {
   const { t } = useI18n();
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.videos(seriesId, clip.id, signal), [seriesId, clip.id]);
-  const history = useGenerationHistory(load, 5_000, refresh);
+  const onSeriesChangedRef = useRef(onSeriesChanged);
+  onSeriesChangedRef.current = onSeriesChanged;
+  const hadActiveRef = useRef(false);
+  useEffect(() => { hadActiveRef.current = false; }, [clip.id]);
+  const history = useGenerationHistory(load, 5_000, refresh, {
+    shouldPoll: hasActiveComicTakes,
+    onData: data => {
+      const hasActive = hasActiveComicTakes(data);
+      if (hadActiveRef.current && !hasActive) onSeriesChangedRef.current?.();
+      hadActiveRef.current = hasActive;
+    },
+  });
   const [previewId, setPreviewId] = useState<string | null>(null);
   const busy = history.current?.some(take => ["pending", "running", "unknown", "recoverable"].includes(take.state));
   const selectionRevision = history.current?.[0]?.clipSelectionRevision ?? clip.selectionRevision ?? 1;
+  const p = clip.progress;
+  const keyframeGenerating = p?.keyframeState === "pending" || p?.keyframeState === "running";
+  const needsKeyframeBanner = mode === "from_keyframe" && !p?.keyframeApproved;
   return <section className="comic-edit-card">
     <header>
       <div>
@@ -42,6 +62,34 @@ export function ClipVideoVersions({ seriesId, clip, origin, refresh, disabled, q
       </div>
       {!disabled && <button type="button" disabled={quoting || busy} onClick={preview}>{t("预览视频费用")}</button>}
     </header>
+    {needsKeyframeBanner && (
+      <div className="comic-issue-banner" role="note">
+        <strong>
+          {t(keyframeGenerating
+            ? "当前分镜首帧正在生成中，生成完成并确认首帧后，即可按首帧预估费用并生成视频。"
+            : p?.keyframeCandidateAvailable
+              ? "当前分镜已有生成好的首帧待确认。请先确认首帧，确认后即可预估费用并生成视频。"
+              : p?.keyframeStale
+                ? "分镜内容已修改，原有首帧已失效。请重新生成或沿用首帧后，再按首帧生成视频。"
+                : "当前分镜尚未生成并确认首帧，暂无法按首帧预估费用或提交生成。")}
+        </strong>
+        {!disabled && (onReviewKeyframe || onSwitchToReferences) && (
+          <div className="comic-actions">
+            {onReviewKeyframe && (
+              <button type="button" className={keyframeGenerating ? undefined : "primary"} onClick={onReviewKeyframe}>
+                {t(keyframeGenerating ? "查看首帧进度"
+                  : p?.keyframeCandidateAvailable ? "去确认首帧"
+                  : p?.keyframeStale ? "去处理首帧"
+                  : "去生成首帧")}
+              </button>
+            )}
+            {onSwitchToReferences && (
+              <button type="button" onClick={onSwitchToReferences}>{t("改用直接参考生成")}</button>
+            )}
+          </div>
+        )}
+      </div>
+    )}
     {history.failed && <button type="button" onClick={history.refresh}>{t("重新读取")}</button>}
     {!history.current ? <p role="status">{t("加载中…")}</p> :
       !history.current.length ? <p className="comic-generation-note">{t("暂无视频版本")}</p> :

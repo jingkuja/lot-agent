@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComicVideoCreditPause } from "@lot-agent/core/comic-drama";
 import { RechargeModal } from "../../components/RechargeModal.js";
@@ -13,10 +13,31 @@ const warningLabels = {
   unavailable: "暂时无法核实视频所需积分或余额，未提交生成。",
 };
 
-export function ComicVideoCreditPauses({ seriesId, label }: { seriesId: string; label: (clipId: string) => string }) {
+export function ComicVideoCreditPauses({ seriesId, label, active = false, revision = 0, onResumed }: {
+  seriesId: string;
+  label: (clipId: string) => string;
+  active?: boolean;
+  revision?: number;
+  onResumed?: () => void;
+}) {
   const load = useCallback((signal: AbortSignal) => comicGenerationApi.creditPauses(seriesId, signal), [seriesId]);
-  const { current, refresh } = useGenerationHistory(load, 4_000);
-  return current?.map(pause => <CreditPause key={pause.takeId} pause={pause} label={label(pause.clipId)} refresh={refresh} />);
+  const [pollSeed, setPollSeed] = useState(0);
+  const prevActiveRef = useRef(active);
+  useEffect(() => {
+    if (active && !prevActiveRef.current) setPollSeed(v => v + 1);
+    prevActiveRef.current = active;
+  }, [active]);
+  const { current, refresh } = useGenerationHistory(load, 4_000, revision + pollSeed, {
+    shouldPoll: data => active || data.some(pause => !pause.canResume),
+  });
+  return current?.map(pause => (
+    <CreditPause
+      key={pause.takeId}
+      pause={pause}
+      label={label(pause.clipId)}
+      refresh={() => { refresh(); onResumed?.(); }}
+    />
+  ));
 }
 
 function CreditPause({ pause, label, refresh }: { pause: ComicVideoCreditPause; label: string; refresh: () => void }) {
@@ -32,9 +53,9 @@ function CreditPause({ pause, label, refresh }: { pause: ComicVideoCreditPause; 
     pending.current = true;
     setBusy(true);
     setError("");
-    try { await comicGenerationApi.resumeCredits(pause.takeId, override); }
-    catch (reason) { setError(comicGenerationError(reason)); }
-    finally { refresh(); setBusy(false); pending.current = false; }
+    try { await comicGenerationApi.resumeCredits(pause.takeId, override); refresh(); }
+    catch (reason) { setError(comicGenerationError(reason)); refresh(); }
+    finally { setBusy(false); pending.current = false; }
   }
   return <section className="comic-edit-card comic-credit-pause" aria-label={t("视频积分检查")}>
     <p role="alert"><strong>{label} · </strong>{t(warningLabels[check.reason])}</p>

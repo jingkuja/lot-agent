@@ -219,6 +219,9 @@ async function main() {
     digitalEmployee: { prefix: "rl:digital-employee", limit: 90, windowMs: 60 * 1000 },
     // Open pages poll while work runs, so reads get their own, larger bucket.
     digitalEmployeeReads: { prefix: "rl:digital-employee-read", limit: 300, windowMs: 60 * 1000 },
+    // Comic-drama studio opens several panels and polls active takes; split reads from mutations.
+    comicDrama: { prefix: "rl:comic-drama", limit: 180, windowMs: 60 * 1000 },
+    comicDramaReads: { prefix: "rl:comic-drama-read", limit: 600, windowMs: 60 * 1000 },
     // Fixed-key operations API, keyed by IP: bounds key guessing and heavy metric queries.
     admin: { prefix: "rl:admin", limit: 30, windowMs: 60 * 1000 },
   } as const;
@@ -256,6 +259,20 @@ async function main() {
       store: rateLimitStore,
       keyFn: (c) => c.get("userId"),
       ...RATE_LIMITS.digitalEmployee,
+      message: "操作太频繁，请稍后再试。",
+    })
+  );
+  const comicDramaRateLimit = splitReadsAndChanges(
+    rateLimit({
+      store: rateLimitStore,
+      keyFn: (c) => c.get("userId"),
+      ...RATE_LIMITS.comicDramaReads,
+      message: "操作太频繁，请稍后再试。",
+    }),
+    rateLimit({
+      store: rateLimitStore,
+      keyFn: (c) => c.get("userId"),
+      ...RATE_LIMITS.comicDrama,
       message: "操作太频繁，请稍后再试。",
     })
   );
@@ -480,9 +497,7 @@ async function main() {
   ephemeralSweepTimer.unref();
   let stopComicSettlementSync: (() => Promise<void>) | undefined;
   if (comicDramaEnabled) {
-    app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
-      store: rateLimitStore, keyFn: c => c.get("userId"), prefix: "rl:comic-drama", limit: 180, windowMs: 60_000,
-    }));
+    app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, comicDramaRateLimit);
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, async (c, next) => {
       if (!rollout.admits(c.get("userId"))) return c.notFound();
       await next();

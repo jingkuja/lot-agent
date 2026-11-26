@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COMIC_DRAMA_OUTLINE_MAX_CHARS, COMIC_DRAMA_SCRIPT_MAX_CHARS, COMIC_SCRIPT_FILE_BYTES, comicVideoModel,
-  type ComicCastChange, type ComicDrama, type ComicDramaEpisodeBrief, type ComicDramaSeriesStatus, type ComicDramaView,
+  parseComicDramaMasterScript, type ComicCastChange, type ComicDrama, type ComicDramaEpisodeBrief,
+  type ComicDramaSeriesStatus, type ComicDramaView,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
@@ -42,7 +43,7 @@ export function DramaHub({
   onUpdated: (next: ComicDramaView) => void;
   onReload: () => Promise<void>;
   onEditDrama: (drama: ComicDrama) => void;
-  onAddEpisode: () => void;
+  onAddEpisode: (options?: { episodeNo?: number; scriptContent?: string }) => void;
   onOpenEpisode: (episodeId: string) => void;
   onOpenEditor?: () => void;
   onEditEpisode?: (episodeId: string) => void;
@@ -247,6 +248,12 @@ export function DramaHub({
   const nextEpisodeNo = Math.max(0, ...episodes.map(ep => ep.episodeNo)) + 1;
   const hasOutline = outlineValue.trim().length > 0;
   const hasScript = scriptValue.trim().length > 0;
+  const parsedScriptEpisodes = useMemo(() => parseComicDramaMasterScript(scriptValue), [scriptValue]);
+  const existingEpisodeNos = useMemo(() => new Set(episodes.map(ep => ep.episodeNo)), [episodes]);
+  const pendingScriptEpisodes = useMemo(
+    () => parsedScriptEpisodes.filter(ep => !existingEpisodeNos.has(ep.episodeNo)),
+    [parsedScriptEpisodes, existingEpisodeNos],
+  );
   const styleLabel = styles.find(item => item.key === drama.styleKey)?.labels[locale] ?? drama.styleKey;
   const videoLabel = comicVideoModel(drama.videoModel)?.label ?? drama.videoModel;
   const dramaSteps = [
@@ -278,7 +285,14 @@ export function DramaHub({
         </div>
         <div className="comic-actions">
           {!locked && (
-            <button type="button" className="primary" onClick={onAddEpisode}>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => onAddEpisode({
+                episodeNo: episodes.length === 0 ? 1 : nextEpisodeNo,
+                scriptContent: scriptValue,
+              })}
+            >
               <NewEpisodeIcon size={15} />
               <span>{episodes.length === 0 ? t("创建第 1 集") : t("新增第 {0} 集", [nextEpisodeNo])}</span>
             </button>
@@ -588,7 +602,13 @@ export function DramaHub({
             </button>
             <button type="button" className="comic-prep-chip" data-ready={hasScript ? "true" : undefined} onClick={() => setTab("script")}>
               <strong>{t("全剧剧本")}</strong>
-              <small>{hasScript ? t("已填 {0} 字", [scriptValue.trim().length]) : t("未填写 · 去编写")}</small>
+              <small>
+                {hasScript
+                  ? (parsedScriptEpisodes.length > 0
+                    ? t("已填 {0} 字 · 识别 {1} 集", [scriptValue.trim().length, parsedScriptEpisodes.length])
+                    : t("已填 {0} 字", [scriptValue.trim().length]))
+                  : t("未填写 · 去编写")}
+              </small>
             </button>
           </div>
 
@@ -596,10 +616,22 @@ export function DramaHub({
             <div className="comic-empty comic-drama-empty-episodes">
               <h2>{t("从第 1 集开始创建分集")}</h2>
               <p>
-                {t("大纲、角色和剧本准备就绪后，创建第 1 集并进入分集工作台编排多分镜；已设定的全剧角色和画风会自动带入。")}
+                {t(parsedScriptEpisodes.length > 0
+                  ? "已从全剧剧本识别 {0} 集分段；创建分集时会自动带入对应单集内容，你只需要微调即可。"
+                  : hasScript
+                    ? "已编写全剧剧本，创建第 1 集时会自动带入剧本内容并继承全剧角色与画风。"
+                    : "大纲、角色和剧本准备就绪后，创建第 1 集并进入分集工作台编排多分镜；已设定的全剧角色和画风会自动带入。",
+                  parsedScriptEpisodes.length > 0 ? [parsedScriptEpisodes.length] : undefined)}
               </p>
               {!locked && (
-                <button type="button" className="primary" onClick={onAddEpisode}>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onAddEpisode({
+                    episodeNo: pendingScriptEpisodes[0]?.episodeNo ?? 1,
+                    scriptContent: scriptValue,
+                  })}
+                >
                   <NewEpisodeIcon size={16} />
                   <span>{t("创建第 1 集")}</span>
                 </button>
@@ -610,7 +642,11 @@ export function DramaHub({
               <div className="comic-section-heading">
                 <h2>{t("分集列表（共 {0} 集）", [episodes.length])}</h2>
                 {!locked && (
-                  <button type="button" className="primary" onClick={onAddEpisode}>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => onAddEpisode({ episodeNo: nextEpisodeNo, scriptContent: scriptValue })}
+                  >
                     ＋ {t("新增第 {0} 集", [nextEpisodeNo])}
                   </button>
                 )}
@@ -661,6 +697,37 @@ export function DramaHub({
                 ))}
               </div>
             </>
+          )}
+
+          {!locked && pendingScriptEpisodes.length > 0 && (
+            <div className="comic-script-episodes-section" aria-label={t("剧本待创建分集")}>
+              <div className="comic-section-heading">
+                <h3>{t("已从全剧剧本识别 {0} 集待创建分集", [pendingScriptEpisodes.length])}</h3>
+                <small>{t("点击带入单集内容，微调后即可创建")}</small>
+              </div>
+              <div className="comic-script-episode-grid">
+                {pendingScriptEpisodes.map(ep => (
+                  <article className="comic-script-episode-card" key={ep.episodeNo}>
+                    <div className="comic-cut-badges">
+                      <small className="comic-pill" data-tone="frame">{t("第 {0} 集", [ep.episodeNo])}</small>
+                      <small className="comic-pill" data-tone="idle">{t("待创建")}</small>
+                      <small>{t("{0} 字", [ep.content.length])}</small>
+                    </div>
+                    <strong>{ep.title || t("第 {0} 集", [ep.episodeNo])}</strong>
+                    <p className="comic-episode-card-logline">{ep.preview}</p>
+                    <div className="comic-actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => onAddEpisode({ episodeNo: ep.episodeNo, scriptContent: scriptValue })}
+                      >
+                        {t("带入本集内容并创建")}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
           )}
         </section>
       )}

@@ -55,9 +55,18 @@ const fields: Record<NonNullable<ComicGenerationIssue["field"]>, string> = {
 };
 const referenceKindLabels = { image: "参考图", first_frame: "首帧", last_frame: "尾帧", audio: "参考音频", video: "参考视频" } as const;
 
-export function GenerationQuoteDialog({ quote, label, close, confirm, submitted, editClip }: {
-  quote: ComicGenerationQuote; label: (id: string) => string; close: () => void; editClip?: (id: string) => void;
-  confirm: (confirmationId: string) => Promise<ComicImageRequest>; submitted: (result: ComicImageRequest) => void;
+export function GenerationQuoteDialog({
+  quote, label, close, confirm, submitted, editClip, reviewKeyframe, onSwitchToReferences, describeSkipped,
+}: {
+  quote: ComicGenerationQuote;
+  label: (id: string) => string;
+  close: () => void;
+  editClip?: (id: string) => void;
+  reviewKeyframe?: (id: string) => void;
+  onSwitchToReferences?: () => void;
+  describeSkipped?: (item: ComicGenerationQuote["skipped"][number]) => string | null;
+  confirm: (confirmationId: string) => Promise<ComicImageRequest>;
+  submitted: (result: ComicImageRequest) => void;
 }) {
   const { t, locale } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -145,25 +154,46 @@ export function GenerationQuoteDialog({ quote, label, close, confirm, submitted,
         </div>
         <strong className="comic-quote-amount">{format(item.amountMicros)}</strong>
       </li>)}
-      {quote.skipped.map(item => <li key={item.clipId}>
-        <div><strong>{label(item.clipId)}</strong><small>
-          {item.issues?.length ? t(reasons[item.reason] ?? "暂不能生成") : item.referenceLimit ? t("最多使用 {0} 张参考图", [item.referenceLimit])
-          : item.durationLimit ? t("视频时长须为 4 至 {0} 整秒", [item.durationLimit]) : t(reasons[item.reason] ?? "暂不能生成")}</small>
-        {item.issues?.map((issue, index) => issue.field || issue.label || issue.mediaId
-          ? <small key={index}>{describe(issue)}</small> : null)}
-        {!!item.invalidReferences?.length && <small>
-          {item.invalidReferences.map(ref => `${ref.name ?? ref.materialId.slice(0, 8)} (${t(
-            ref.reason === "ARCHIVED" ? "已归档" : ref.reason === "OUTDATED_VERSION" ? "已有新版"
-              : ref.reason === "WRONG_KIND" ? "类别不符" : "已缺失",
-          )})`).join(" · ")}
-        </small>}
-        </div>
-        {editClip && !["BUSY", "PRICE_UNAVAILABLE", "ALREADY_COMPLETE"].includes(item.reason)
-          ? <button type="button" disabled={busy} onClick={() => { close(); editClip(item.clipId); }}>{t("编辑分镜")}</button>
-          : <span>{t("跳过")}</span>}
-      </li>)}
+      {quote.skipped.map(item => {
+        const customReason = describeSkipped?.(item);
+        return <li key={item.clipId}>
+          <div><strong>{label(item.clipId)}</strong><small>
+            {customReason ?? (item.issues?.length ? t(reasons[item.reason] ?? "暂不能生成")
+              : item.referenceLimit ? t("最多使用 {0} 张参考图", [item.referenceLimit])
+              : item.durationLimit ? t("视频时长须为 4 至 {0} 整秒", [item.durationLimit])
+              : t(reasons[item.reason] ?? "暂不能生成"))}</small>
+          {item.issues?.map((issue, index) => issue.field || issue.label || issue.mediaId
+            ? <small key={index}>{describe(issue)}</small> : null)}
+          {!!item.invalidReferences?.length && <small>
+            {item.invalidReferences.map(ref => `${ref.name ?? ref.materialId.slice(0, 8)} (${t(
+              ref.reason === "ARCHIVED" ? "已归档" : ref.reason === "OUTDATED_VERSION" ? "已有新版"
+                : ref.reason === "WRONG_KIND" ? "类别不符" : "已缺失",
+            )})`).join(" · ")}
+          </small>}
+          </div>
+          {item.reason === "KEYFRAME_NOT_CONFIRMED" && reviewKeyframe ? (
+            <button type="button" className={quote.items.length === 0 ? "primary" : undefined} disabled={busy}
+              onClick={() => { close(); reviewKeyframe(item.clipId); }}>{t("去确认首帧")}</button>
+          ) : editClip && !["BUSY", "PRICE_UNAVAILABLE", "ALREADY_COMPLETE"].includes(item.reason) ? (
+            <button type="button" disabled={busy} onClick={() => { close(); editClip(item.clipId); }}>{t("编辑分镜")}</button>
+          ) : <span>{t("跳过")}</span>}
+        </li>;
+      })}
     </ul>
     <div className="comic-quote-total"><strong>{t("预估合计")}</strong><strong>{format(quote.totalMicros)}</strong></div>
+    {quote.items.length === 0 && quote.skipped.length > 0 && (() => {
+      const allMissingKeyframe = quote.skipped.every(item => item.reason === "KEYFRAME_NOT_CONFIRMED");
+      return <div className="comic-quote-empty-guide" role="note">
+        <small>{t(allMissingKeyframe
+          ? "所选分镜均尚未确认首帧，暂无法预估费用或提交生成。请先确认首帧，或改用「直接参考生成」。"
+          : "当前没有可提交的分镜，请按上方提示处理后重新预览费用。")}</small>
+        {allMissingKeyframe && onSwitchToReferences && (
+          <button type="button" disabled={busy} onClick={() => { close(); onSwitchToReferences(); }}>
+            {t("改用直接参考生成")}
+          </button>
+        )}
+      </div>;
+    })()}
     {quote.videoTokenEstimate && quote.items.some(item => !item.videoEstimateDeviation) && <p className="comic-generation-note">
       {t("视频 Token 预估会受实际时长、画幅和通道计量规则影响。误差范围待通道实测。")}
     </p>}

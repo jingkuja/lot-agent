@@ -48,8 +48,13 @@ export function ComicRenderPanel({
   const reload = () => setRefresh(value => value + 1);
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pausedByVisibility = false;
     const poll = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        pausedByVisibility = true;
+        return;
+      }
       try {
         const result = await comicEditApi.renders(edit, cursor, controller.signal);
         if (controller.signal.aborted) return;
@@ -59,11 +64,29 @@ export function ComicRenderPanel({
         const hasActive = filtered.some(active);
         if (prevActiveRef.current && !hasActive) onRenderUpdatedRef.current?.();
         prevActiveRef.current = hasActive;
-        if (hasActive) timer = setTimeout(poll, 1800);
-      } catch { if (!controller.signal.aborted) setLoadError(true); }
+        if (hasActive) timer = setTimeout(() => void poll(), 1800);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (err instanceof ApiClientError && err.status === 429) {
+          timer = setTimeout(() => void poll(), Math.min(60_000, Math.max(1800, err.retryAfterMs ?? 10_000)));
+          return;
+        }
+        setLoadError(true);
+      }
     };
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible" && pausedByVisibility) {
+        pausedByVisibility = false;
+        void poll();
+      }
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     void poll();
-    return () => { clearTimeout(timer); controller.abort(); };
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [edit, cursor, refresh]);
 
   const action = async (key: string, run: () => Promise<void>) => {

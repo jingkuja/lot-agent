@@ -75,7 +75,7 @@ export function ComicEditWorkspace({
   const [dialogueOverrides, setDialogueOverrides] = useState<Record<string, ComicEditAutoDialogueOverride>>({});
   const [replaceNativeIds, setReplaceNativeIds] = useState<string[]>([]);
   const autoOpenedRef = useRef(false);
-  const initialUsedRef = useRef(Boolean(initialData));
+  const initialIdRef = useRef<string | null>(initialData?.id === id ? id : null);
   const onProjectChangeRef = useRef(onProjectChange);
   onProjectChangeRef.current = onProjectChange;
   const [position, setPosition] = useState(0);
@@ -110,10 +110,8 @@ export function ComicEditWorkspace({
     return () => window.removeEventListener("beforeunload", guard);
   }, [dirty]);
   useEffect(() => {
-    if (attempt === 0 && initialUsedRef.current && initialData?.id === id) {
-      initialUsedRef.current = false;
-      return;
-    }
+    if (attempt === 0 && initialIdRef.current === id) return;
+    initialIdRef.current = null;
     const controller = new AbortController();
     setHistory({ past: [], future: [] });
     setAudioNames({});
@@ -121,7 +119,7 @@ export function ComicEditWorkspace({
       if (!controller.signal.aborted) { receive(data); setError(""); }
     }).catch(err => { if (!controller.signal.aborted) setError(editError(err)); });
     return () => controller.abort();
-  }, [id, attempt, initialData, receive]);
+  }, [id, attempt, receive]);
 
   const reload = () => {
     if (pending.current || (dirty && !window.confirm(t("放弃未保存的工程修改？")))) return;
@@ -168,7 +166,7 @@ export function ComicEditWorkspace({
     })();
     savePromiseRef.current = promise;
     return promise;
-  }, [id]);
+  }, [id, receive]);
   const save = useCallback(() => {
     if (!project || !draft || !dirty || !draft.title.trim()) return;
     void performSave(draft.title, draft.timeline, project.revision);

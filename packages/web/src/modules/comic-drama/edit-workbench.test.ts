@@ -9,6 +9,7 @@ import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicDramaEditWorkspace } from "./ComicDramaEditWorkspace.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
 import { comicEditApi } from "./edit-api.js";
+import { comicGenerationApi } from "./generation-api.js";
 
 const uuid = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
@@ -340,5 +341,70 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(openEpisodeEditor).toHaveBeenCalledWith(dramaId, ep2Id);
+  });
+
+  it("does not loop comicEditApi.get under React.StrictMode when entering or reloading an episode workbench", async () => {
+    const dramaId = uuid(1);
+    const ep1Id = uuid(2);
+    const editId = uuid(21);
+    const baseEdit = {
+      id: editId, seriesId: ep1Id, dramaId, dramaTitle: "雨夜便利店", episodeNo: 1, episodeTitle: "雨夜里的过期快乐",
+      taskKind: "drama" as const, dramaEditTaskId: uuid(10), dramaArchivedAt: null,
+      episodeClipCount: 4, episodeAdoptedCount: 0,
+      title: "第 1 集", revision: 1, updatedAt: "2026-11-26T08:00:00.000Z",
+      timeline: { schemaVersion: 1 as const, aspectRatio: "9:16" as const, video: [], voice: [], sfx: [], music: [], subtitles: [] },
+      sources: [], audioSources: [],
+    };
+    const episodeRow = {
+      seriesId: ep1Id, episodeNo: 1, title: "雨夜里的过期快乐", logline: "", aspectRatio: "9:16" as const, archivedAt: null,
+      clipCount: 4, adoptedClipCount: 0, editId, editRevision: 1,
+      timelineClipCount: 0, timelineDurationMs: 0, unaddedAdoptedCount: 0, outdatedAdoptedCount: 0,
+      renderCount: 0, hasReadyRender: false, updatedAt: "2026-11-26T08:00:00.000Z",
+    };
+    const taskView: ComicDramaEditTaskView = {
+      task: {
+        id: uuid(10), dramaId, dramaTitle: "雨夜便利店", synopsis: "", styleKey: "thick_painting",
+        aspectRatio: "9:16", archivedAt: null, lastSeriesId: ep1Id, updatedAt: "2026-11-26T08:00:00.000Z",
+      },
+      episodes: [episodeRow],
+      activeSeriesId: ep1Id,
+      edit: { ...baseEdit, dramaEpisodes: [episodeRow] },
+    };
+    vi.spyOn(comicEditApi, "openDramaTask").mockResolvedValue(taskView);
+    vi.spyOn(comicEditApi, "renders").mockResolvedValue({ entries: [], nextCursor: null });
+    vi.spyOn(comicGenerationApi, "videoHistory").mockResolvedValue({ entries: [], nextCursor: null });
+    const getSpy = vi.spyOn(comicEditApi, "get").mockImplementation(async () => ({
+      ...baseEdit,
+      revision: 2,
+      dramaEpisodes: [episodeRow],
+    }));
+
+    const host = await mount(createElement(React.StrictMode, null, createElement(ComicDramaEditWorkspace, {
+      dramaId,
+      seriesId: ep1Id,
+      exit: vi.fn(),
+      openDramaHub: vi.fn(),
+      openEpisodeProduction: vi.fn(),
+      openDramaTaskSelect: vi.fn(),
+      openEpisodeEditor: vi.fn(),
+      openVideo: vi.fn(),
+      setGuard: vi.fn(),
+    })), "zh");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain("操作台 - 第 1 集（雨夜里的过期快乐）");
+    expect(getSpy).toHaveBeenCalledTimes(0);
+
+    const reloadBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "重新读取工程");
+    expect(reloadBtn).toBeTruthy();
+    await act(async () => {
+      (reloadBtn as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getSpy).toHaveBeenCalledTimes(1);
   });
 });

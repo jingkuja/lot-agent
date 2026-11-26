@@ -6,6 +6,54 @@ import type {
 import { request } from "../../api/client.js";
 
 const root = "/comic-drama";
+const COMIC_CHOICES_TTL_MS = 60_000;
+const choicesCache = new Map<ComicDictionaryDomain, { expiresAt: number; entries: ComicDictionaryEntry[] }>();
+const choicesInFlight = new Map<ComicDictionaryDomain, Promise<ComicDictionaryEntry[]>>();
+
+if (typeof window !== "undefined") {
+  window.addEventListener("lot:unauthorized", () => {
+    choicesCache.clear();
+    choicesInFlight.clear();
+  });
+}
+
+export function getCachedComicChoices(domain: ComicDictionaryDomain): ComicDictionaryEntry[] | undefined {
+  const hit = choicesCache.get(domain);
+  if (!hit) return undefined;
+  if (hit.expiresAt <= Date.now()) {
+    choicesCache.delete(domain);
+    return undefined;
+  }
+  return hit.entries;
+}
+
+export function invalidateComicChoicesCache(domain?: ComicDictionaryDomain): void {
+  if (domain) {
+    choicesCache.delete(domain);
+    choicesInFlight.delete(domain);
+  } else {
+    choicesCache.clear();
+    choicesInFlight.clear();
+  }
+}
+
+export function loadComicChoices(domain: ComicDictionaryDomain, force = false): Promise<ComicDictionaryEntry[]> {
+  if (!force) {
+    const cached = getCachedComicChoices(domain);
+    if (cached) return Promise.resolve(cached);
+    const pending = choicesInFlight.get(domain);
+    if (pending) return pending;
+  }
+  const req = comicLibraryApi.dictionary(domain).then(entries => {
+    choicesCache.set(domain, { expiresAt: Date.now() + COMIC_CHOICES_TTL_MS, entries });
+    return entries;
+  }).finally(() => {
+    if (choicesInFlight.get(domain) === req) choicesInFlight.delete(domain);
+  });
+  choicesInFlight.set(domain, req);
+  return req;
+}
+
 const get = <T>(path: string, signal?: AbortSignal) => request<T>(root + path, { signal });
 const write = <T>(path: string, method: string, data?: unknown) =>
   request<T>(root + path, { method, body: data === undefined ? undefined : JSON.stringify(data) });
@@ -45,11 +93,21 @@ export const comicLibraryApi = {
   deleteMaterial: (id: string) => write<{ ok: true }>(`/materials/${id}`, "DELETE"),
   links: (id: string, signal?: AbortSignal) => get<ComicMediaLinks>(`/media/${id}/links`, signal),
   dictionary: (domain: ComicDictionaryDomain, signal?: AbortSignal) => get<ComicDictionaryEntry[]>(`/dictionary/${domain}`, signal),
-  addEntry: (domain: ComicDictionaryDomain, key: string, labels: ComicLabels) =>
-    write<ComicDictionaryEntry[]>(`/dictionary/${domain}`, "POST", { key, labels }),
-  editEntry: (domain: ComicDictionaryDomain, key: string, data: ComicDictionaryUpdate) =>
-    write<ComicDictionaryEntry[]>(`/dictionary/${domain}/${key}`, "PATCH", data),
-  sort: (domain: ComicDictionaryDomain, keys: string[]) => write<ComicDictionaryEntry[]>(`/dictionary/${domain}/order`, "PUT", { keys }),
+  addEntry: async (domain: ComicDictionaryDomain, key: string, labels: ComicLabels) => {
+    const result = await write<ComicDictionaryEntry[]>(`/dictionary/${domain}`, "POST", { key, labels });
+    invalidateComicChoicesCache(domain);
+    return result;
+  },
+  editEntry: async (domain: ComicDictionaryDomain, key: string, data: ComicDictionaryUpdate) => {
+    const result = await write<ComicDictionaryEntry[]>(`/dictionary/${domain}/${key}`, "PATCH", data);
+    invalidateComicChoicesCache(domain);
+    return result;
+  },
+  sort: async (domain: ComicDictionaryDomain, keys: string[]) => {
+    const result = await write<ComicDictionaryEntry[]>(`/dictionary/${domain}/order`, "PUT", { keys });
+    invalidateComicChoicesCache(domain);
+    return result;
+  },
   settings: (signal?: AbortSignal) => get<ComicUserSettings>("/settings", signal),
   updateSettings: (preferences: ComicUserPreferences) => write<ComicUserPreferences>("/settings", "PUT", preferences),
   bindStyleReference: (styleKey: string, mediaId: string) =>

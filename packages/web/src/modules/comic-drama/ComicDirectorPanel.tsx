@@ -15,7 +15,8 @@ import { comicGenerationApi } from "./generation-api.js";
 import { GenerationQuoteDialog } from "./GenerationQuoteDialog.js";
 
 export function ComicDirectorPanel({
-  detail, locked, getSaved, apply, applyRole, openClip, editClip, onSeriesChanged, selectedClipId, enhanceIntent, onEnhanceIntentHandled,
+  detail, locked, getSaved, apply, applyRole, openClip, editClip, reviewKeyframe, onSeriesChanged, selectedClipId, enhanceIntent,
+  onEnhanceIntentHandled, refreshToken = 0,
 }: {
   detail: ComicDramaDetail; locked: boolean; getSaved: () => Promise<ComicDramaDetail | null>;
   apply: (
@@ -25,10 +26,12 @@ export function ComicDirectorPanel({
   applyRole: (proposal: ComicDirectorProposal, index: number, input: DirectorRoleChoiceInput) => Promise<ComicDirectorRoleOutcome | undefined>;
   openClip: (id: string) => void;
   editClip: (id: string) => void;
+  reviewKeyframe?: (clipId: string) => void;
   onSeriesChanged?: () => void;
   selectedClipId?: string | null;
   enhanceIntent?: DirectorEnhanceIntent | null;
   onEnhanceIntentHandled?: () => void;
+  refreshToken?: number;
 }) {
   const { t, locale } = useI18n();
   const [panelTab, setPanelTab] = useState<"chat" | "proposals">("chat");
@@ -58,18 +61,43 @@ export function ComicDirectorPanel({
   }, [enhanceIntent]);
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pausedByVisibility = false;
     const poll = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        pausedByVisibility = true;
+        return;
+      }
       try {
         const result = await comicDirectorApi.state(seriesId, controller.signal);
         if (controller.signal.aborted) return;
         setState(result); setLoadingFailed(false);
-        if (result.proposals.some(proposal => proposal.status === "writing")) timer = setTimeout(poll, 2400);
-      } catch { if (!controller.signal.aborted) setLoadingFailed(true); }
+        if (result.proposals.some(proposal => proposal.status === "writing")) {
+          timer = setTimeout(() => void poll(), 2400);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (err instanceof ApiClientError && err.status === 429) {
+          timer = setTimeout(() => void poll(), Math.min(60_000, Math.max(2400, err.retryAfterMs ?? 10_000)));
+          return;
+        }
+        setLoadingFailed(true);
+      }
     };
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible" && pausedByVisibility) {
+        pausedByVisibility = false;
+        void poll();
+      }
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     void poll();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [seriesId, refresh]);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [seriesId, refresh, refreshToken]);
 
   const action = async (kind: NonNullable<typeof working>, run: (signal: AbortSignal) => Promise<void>) => {
     if (pending.current) return;
@@ -333,7 +361,7 @@ export function ComicDirectorPanel({
             const target = detail.clips.find(item => item.id === clipId);
             return target ? `${t("分镜 {0}", [target.ordinal])}${target.draft.scene ? " · " + target.draft.scene : ""}` : t("分镜");
           }}
-          close={() => setChatQuote(null)} editClip={editClip}
+          close={() => setChatQuote(null)} editClip={editClip} reviewKeyframe={reviewKeyframe}
           confirm={id => comicGenerationApi.confirm({ resource: "series", id: seriesId }, id)}
           submitted={() => {
             const firstClip = chatQuote.items[0]?.clipId;
@@ -354,7 +382,7 @@ export function ComicDirectorPanel({
           </fieldset>
         </form>
         <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked}
-          changed={reload} openClip={openClip} editClip={editClip} />
+          changed={reload} openClip={openClip} editClip={editClip} reviewKeyframe={reviewKeyframe} />
       </div>
     ) : <>
       <label className="comic-director-task-select">{t("导演任务")}<select aria-label={t("导演任务")} value={operation}
@@ -411,7 +439,7 @@ export function ComicDirectorPanel({
         )
       )}
       <DirectorGeneration detail={detail} quotes={state?.quotes ?? []} getSaved={getSaved} disabled={busy || locked}
-          changed={reload} openClip={openClip} editClip={editClip} />
+          changed={reload} openClip={openClip} editClip={editClip} reviewKeyframe={reviewKeyframe} />
     </>}
   </section>;
 }

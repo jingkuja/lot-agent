@@ -997,4 +997,65 @@ describe("comic director AI enhancement (script & storyboard clips)", () => {
     expect(outcome.proposal?.id).toBe(createdProposal.id);
     expect(previewGeneration).not.toHaveBeenCalled();
   });
+
+  it("breakdown passes episode cast, dictionaries, and shotMaxSeconds and normalizes clips with bound cast", async () => {
+    const { repo } = makeEnhanceHarness();
+    let capturedPayload: { series?: { shotMaxSeconds: number }; cast?: Array<{ name: string }> } = {};
+    const llm: LLMProvider = {
+      async *chat(messages) {
+        capturedPayload = JSON.parse(String(messages.at(-1)!.content)) as typeof capturedPayload;
+        yield {
+          type: "tool_call",
+          toolCall: {
+            id: "call_bd",
+            name: "breakdown_script",
+            arguments: {
+              clips: [{
+                scene: "写字楼深夜",
+                durationMs: 2500,
+                shots: [
+                  { framingKey: "close_up", movementKey: "push", description: "小夏盯着屏幕", durationShare: 40 },
+                  { framingKey: "invalid_key", movementKey: "invalid_move", description: "电脑弹出驳回提示", durationShare: 60 },
+                ],
+                lines: [
+                  { speaker: "小夏", text: "又被驳回了。", emotionKey: "sad", speed: 1 },
+                  { speaker: null, text: "广播响起。", emotionKey: "unknown_emotion" },
+                ],
+              }],
+              characters: [{ name: "林夏", description: "冷静少女" }],
+            },
+          },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+      },
+    };
+    const director = new ComicDirector(repo, {
+      agentId: "comic-director", ownerKeyOnly: true, disableUserMemory: true,
+      conversationMetadata: () => ({}), assertConversation: () => {}, validateChatMedia: async () => null,
+      beginTurn: async () => ({ allowedToolNames: [], blockedToolNames: [], dynamicParts: [] }),
+      resolveModel: async () => ({ llm, usedModelId: "test-llm", modelIds: ["test-llm"] }),
+    });
+    const proposal = await director.write(ownerId, seriesId, {
+      requestId: "ffffffff-1111-4111-8111-111111111111",
+      expectedRevision: 1,
+      mode: "paste",
+      language: "zh",
+      text: "【00:00-00:06 | 写字楼·深夜】小夏独自加班。",
+      action: "breakdown",
+    }, new AbortController().signal);
+
+    expect(proposal.status).toBe("ready");
+    expect(capturedPayload.series?.shotMaxSeconds).toBe(30);
+    expect(capturedPayload.cast?.map(c => c.name)).toEqual(["林夏"]);
+    const clip = proposal.proposal?.clips?.[0];
+    expect(clip?.durationMs).toBe(4000);
+    expect(clip?.shots.map(s => [s.framingKey, s.movementKey, s.durationShare])).toEqual([
+      ["close_up", "push", 40],
+      ["medium", "fixed", 60],
+    ]);
+    expect(clip?.lines[0]?.speaker).toBe("林夏");
+    expect(clip?.lines[0]?.emotionKey).toBe("sad");
+    expect(clip?.lines[1]?.emotionKey).toBeNull();
+    expect(clip?.cast?.map(c => c.characterId)).toEqual([charA]);
+  });
 });

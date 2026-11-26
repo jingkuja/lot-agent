@@ -506,5 +506,6 @@ export * from "./models.js";
 export * from "./timeline.js";
 export * from "./edit.js";
 export * from "./director.js";
+export * from "./master-script.js";
 export * from "./checks.js";
 export * from "./compatibility.js";

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  adaptComicClipDraftForModel, checkComicClipIssues, COMIC_DRAMA_ROOT,
+  adaptComicClipDraftForModel, checkComicClipIssues, COMIC_DRAMA_ROOT, isComicClipDraftBlank,
+  resolveComicEpisodeMasterScript,
   type ComicCurrencyAmount, type ComicDirectorApplyInput, type ComicDirectorDecision, type ComicDirectorProposal,
   type ComicDirectorRoleOutcome, type ComicDrama, type ComicDramaContent, type ComicDramaCreateInput,
   type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaEpisodeSummary,
@@ -43,7 +44,7 @@ import {
   CharactersIcon, ClapperboardIcon, EpisodesIcon, ExportBoxIcon, MaterialsIcon, NewEpisodeIcon,
   ScriptIcon, SettingsIcon, SparklesIcon, StoryboardIcon, TimelineEditIcon, VideoReelIcon,
 } from "./ComicStudioIcons.js";
-import { comicDirectorApi } from "./director-api.js";
+import { comicDirectorApi, comicDirectorError } from "./director-api.js";
 import { useComicDramaDraft } from "./useComicDramaDraft.js";
 import "./comic-drama.css";
 
@@ -109,6 +110,8 @@ export function ComicDramaWorkspace({
   const [sidebarSummary, setSidebarSummary] = useState<ComicDramaEpisodeSummary | null>(null);
   const [sidebarDrama, setSidebarDrama] = useState<ComicDramaCurrentState | null>(null);
   const [dramaView, setDramaView] = useState<ComicDramaView | null>(null);
+  const dramaViewRef = useRef<ComicDramaView | null>(null);
+  dramaViewRef.current = dramaView;
   const [dramaTabHint, setDramaTabHint] = useState<DramaHubTab | undefined>(undefined);
   const dramaFlushRef = useRef<(() => Promise<boolean>) | null>(null);
   const setDramaFlush = useCallback((fn: (() => Promise<boolean>) | null) => { dramaFlushRef.current = fn; }, []);
@@ -127,7 +130,7 @@ export function ComicDramaWorkspace({
   const [modalError, setModalError] = useState<string | null>(null);
   const [stage, setStage] = useState<"剧本" | "选角" | "分镜" | "生成">("分镜");
   const [openVideos, setOpenVideos] = useState(false);
-  const [quickAction, setQuickAction] = useState<{ mode: ComicGenerationMode; token: number } | null>(null);
+  const [quickAction, setQuickAction] = useState<{ mode: ComicGenerationMode; token: number; autoPreview?: boolean } | null>(null);
   const editStoryboardClip = (clipId: string) => { setSelected(clipId); setStage("分镜"); };
   const [selected, setSelected] = useState<string | null>(null);
   const [latest, setLatest] = useState<ComicDramaDetail | null>(null);
@@ -136,6 +139,13 @@ export function ComicDramaWorkspace({
   const [enhanceIntent, setEnhanceIntent] = useState<DirectorEnhanceIntent | null>(null);
   const [scriptSelection, setScriptSelection] = useState<{ start: number; end: number } | null>(null);
   const clearEnhanceIntent = useCallback(() => setEnhanceIntent(null), []);
+  const [breakdownBusy, setBreakdownBusy] = useState(false);
+  const [breakdownError, setBreakdownError] = useState<string | null>(null);
+  const [breakdownNotice, setBreakdownNotice] = useState<string | null>(null);
+  const [breakdownProposal, setBreakdownProposal] = useState<ComicDirectorProposal | null>(null);
+  const [directorRefreshToken, setDirectorRefreshToken] = useState(0);
+  const [creditPauseRefresh, setCreditPauseRefresh] = useState(0);
+  const breakdownAbortRef = useRef<AbortController | null>(null);
   const [pendingAutoDialogueEditId, setPendingAutoDialogueEditId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -179,11 +189,13 @@ export function ComicDramaWorkspace({
     void comicDramaApi.currentSummary(controller.signal).then(res => {
       if (!controller.signal.aborted) setSidebarSummary(res.summary);
     }).catch(() => {});
-    void comicDramaApi.currentDrama(controller.signal).then(res => {
-      if (!controller.signal.aborted) setSidebarDrama(res);
-    }).catch(() => {});
+    if (!(workspace && !directDramaId && !directId)) {
+      void comicDramaApi.currentDrama(controller.signal).then(res => {
+        if (!controller.signal.aborted) setSidebarDrama(res);
+      }).catch(() => {});
+    }
     return () => controller.abort();
-  }, [active, pathname, retry, historyRefresh]);
+  }, [active, retry, historyRefresh, workspace, directDramaId, directId]);
 
   useEffect(() => {
     if (detail?.summary && !detail.series.archivedAt) {
@@ -193,7 +205,15 @@ export function ComicDramaWorkspace({
 
   useEffect(() => {
     setScriptSelection(null);
+    breakdownAbortRef.current?.abort();
+    breakdownAbortRef.current = null;
+    setBreakdownBusy(false);
+    setBreakdownError(null);
+    setBreakdownNotice(null);
+    setBreakdownProposal(null);
   }, [series?.id]);
+
+  useEffect(() => () => breakdownAbortRef.current?.abort(), []);
 
   const flushAll = useCallback(async () => {
     if (!await flush()) return false;
@@ -287,6 +307,7 @@ export function ComicDramaWorkspace({
     }
   };
   const handleError = (error: unknown) => {
+    if (error instanceof ApiClientError && error.status === 429) return t("操作太频繁，请稍后再试");
     if (error instanceof ApiClientError && error.code === "MODEL_UNAVAILABLE") return t("视频模型不可用，请重新选择");
     if (error instanceof ApiClientError && error.code === "DIRECTOR_PROPOSAL_STALE") return t("剧集已更新，请基于最新修订生成提案");
     if (error instanceof ApiClientError && error.status === 409) return t("剧集已更新，请读取最新版本");
@@ -310,6 +331,9 @@ export function ComicDramaWorkspace({
     warnGeneratingIfSwitching(result.series.id);
     setDramaView(null);
     load(result);
+    if (result.clips.length === 0 && result.script?.content?.trim()) {
+      setStage("剧本");
+    }
     if (result.summary && !result.series.archivedAt) setSidebarSummary(result.summary);
     loadedPath.current = seriesPath(result.series.id);
     navigate(loadedPath.current);
@@ -327,6 +351,10 @@ export function ComicDramaWorkspace({
       if (fresh.summary && !fresh.series.archivedAt) setSidebarSummary(fresh.summary);
     } catch { /* ignore */ }
   }, [getDetail, load]);
+  const notifySeriesChanged = useCallback(() => {
+    setCreditPauseRefresh(v => v + 1);
+    void reloadCurrent();
+  }, [reloadCurrent]);
   const reloadDramaView = useCallback(async () => {
     const id = dramaView?.drama.id;
     if (!id) return;
@@ -347,7 +375,13 @@ export function ComicDramaWorkspace({
     });
   const showDialog = (next: "edit" | "addEpisode", preset?: PresetDramaTarget) => void leave(() => {
     setModalError(null);
-    setPresetDrama(preset);
+    const latestDrama = dramaViewRef.current?.drama;
+    const resolvedPreset = preset && latestDrama && preset.id === latestDrama.id && preset.scriptContent === undefined
+      ? { ...preset, scriptContent: latestDrama.scriptContent }
+      : preset && latestDrama && preset.id === latestDrama.id && latestDrama.scriptContent !== preset.scriptContent
+        ? { ...preset, scriptContent: latestDrama.scriptContent }
+        : preset;
+    setPresetDrama(resolvedPreset);
     setDialog(next);
   });
   const showDramaDialog = (mode: "create" | "edit", drama?: ComicDrama) => void leave(() => {
@@ -390,7 +424,7 @@ export function ComicDramaWorkspace({
         videoModel: fields.videoModel,
         sourceSeriesId: fields.sourceSeriesId,
         inheritCastAndStyle: fields.inheritCastAndStyle,
-        ...(fields.initialScript ? { initialScript: fields.initialScript } : {}),
+        ...(fields.initialScript !== undefined ? { initialScript: fields.initialScript } : {}),
       });
       setHistoryRefresh(v => v + 1);
       saved(created);
@@ -456,7 +490,11 @@ export function ComicDramaWorkspace({
   const issueClip = latest?.clips.find(clip => clip.id === editor.issue?.target);
   const issueIsScript = editor.issue?.target === "script";
   const openVideo = (id: string, clipId: string) => void leave(() => {
-    setSelected(clipId); setOpenVideos(true); setStage("生成"); navigate(seriesPath(id));
+    setSelected(clipId);
+    setOpenVideos(true);
+    setStage("生成");
+    setQuickAction({ mode: "from_keyframe", token: Date.now(), autoPreview: false });
+    navigate(seriesPath(id));
   });
   const choose = (id: string) => void leave(() => navigate(editorSourcePrefix + id));
   const openEdit = (id: string) => navigate(editorPath + "/" + id);
@@ -476,6 +514,7 @@ export function ComicDramaWorkspace({
         latestEpisodeId: fresh.episodes.at(-1)?.id ?? null,
         castCount: fresh.cast.length,
         episodes: fresh.episodes,
+        scriptContent: fresh.drama.scriptContent,
       });
       setDialog("addEpisode");
     } catch {
@@ -507,8 +546,100 @@ export function ComicDramaWorkspace({
       }
       if (result.sequelId) saved(await comicDramaApi.get(result.sequelId));
       else load(await comicDramaApi.get(current.series.id));
+      if (breakdownProposal?.id === proposal.id) setBreakdownProposal(null);
     });
     return result;
+  };
+  const cancelBreakdown = () => {
+    breakdownAbortRef.current?.abort();
+    breakdownAbortRef.current = null;
+    setBreakdownBusy(false);
+  };
+  const generateStoryboardFromScript = async () => {
+    if (locked || breakdownBusy) return;
+    const savedDetail = await flush() ? getDetail() : null;
+    if (!savedDetail) return;
+    const scriptSource = savedDetail.script?.content?.trim() ?? "";
+    if (!scriptSource) {
+      setBreakdownError(t("当前剧集暂无剧本内容，请先编写或生成剧本"));
+      return;
+    }
+    breakdownAbortRef.current?.abort();
+    const controller = new AbortController();
+    breakdownAbortRef.current = controller;
+    setStage("分镜");
+    setBreakdownBusy(true);
+    setBreakdownError(null);
+    setBreakdownNotice(null);
+    setBreakdownProposal(null);
+    const language = locale === "en" || locale === "id" ? locale : "zh";
+    try {
+      const proposal = await comicDirectorApi.propose(savedDetail.series.id, {
+        requestId: crypto.randomUUID(),
+        expectedRevision: savedDetail.series.revision,
+        mode: "paste",
+        language,
+        text: scriptSource,
+        action: "breakdown",
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      setDirectorRefreshToken(v => v + 1);
+      if (proposal.status !== "ready" || !proposal.proposal?.clips?.length) {
+        setBreakdownError(t("未生成可用分镜，请检查模型账号或剧本内容后重试"));
+        return;
+      }
+      const latestDetail = getDetail() ?? savedDetail;
+      const allBlank = latestDetail.clips.length === 0
+        || latestDetail.clips.every(clip => isComicClipDraftBlank(clip.draft));
+      if (allBlank) {
+        const decision = latestDetail.clips.length > 0 ? "replace" : "append";
+        await comicDirectorApi.apply(savedDetail.series.id, proposal.id, proposal.baseRevision, decision);
+        if (controller.signal.aborted) return;
+        const fresh = await comicDramaApi.get(savedDetail.series.id);
+        if (controller.signal.aborted) return;
+        load(fresh);
+        if (fresh.summary && !fresh.series.archivedAt) setSidebarSummary(fresh.summary);
+        setSelected(fresh.clips[0]?.id ?? null);
+        setBreakdownNotice(t("AI 已根据本集剧本生成 {0} 个分镜并自动填入，可直接微调。", [fresh.clips.length]));
+        setDirectorRefreshToken(v => v + 1);
+        setHistoryRefresh(v => v + 1);
+      } else {
+        setBreakdownProposal(proposal);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setBreakdownError(t(comicDirectorError(error)));
+      if (error instanceof ApiClientError && (error.status === 409 || error.code === "DIRECTOR_PROPOSAL_STALE")) {
+        void reloadCurrent();
+      }
+    } finally {
+      if (breakdownAbortRef.current === controller) breakdownAbortRef.current = null;
+      if (!controller.signal.aborted) setBreakdownBusy(false);
+    }
+  };
+  const applyBreakdownPreview = async (decision: "append" | "replace") => {
+    if (!breakdownProposal) return;
+    const applied = await applyProposal(breakdownProposal, decision);
+    if (applied) {
+      setBreakdownProposal(null);
+      setDirectorRefreshToken(v => v + 1);
+      setHistoryRefresh(v => v + 1);
+      const fresh = getDetail();
+      if (fresh?.clips.length) {
+        setSelected(decision === "replace" ? fresh.clips[0]!.id : fresh.clips.at(-1)!.id);
+      }
+      setBreakdownNotice(t("已应用 AI 拆分分镜，可直接调整参数。"));
+    }
+  };
+  const dismissBreakdownPreview = async () => {
+    if (!breakdownProposal || !series) return;
+    try {
+      await comicDirectorApi.dismiss(series.id, breakdownProposal.id);
+      setBreakdownProposal(null);
+      setDirectorRefreshToken(v => v + 1);
+    } catch (error) {
+      setBreakdownError(t(comicDirectorError(error)));
+    }
   };
   const applyDirectorRole = async (proposal: ComicDirectorProposal, index: number, input: DirectorRoleChoiceInput) => {
     let outcome: ComicDirectorRoleOutcome | undefined;
@@ -552,6 +683,7 @@ export function ComicDramaWorkspace({
     latestEpisodeId: dramaView.episodes.at(-1)?.id ?? null,
     castCount: dramaView.cast.length,
     episodes: dramaView.episodes,
+    scriptContent: dramaView.drama.scriptContent,
   } : series ? {
     id: series.dramaId,
     title: dramaTitle,
@@ -562,6 +694,7 @@ export function ComicDramaWorkspace({
     latestEpisodeId: siblingEpisodes.at(-1)?.id ?? series.id,
     castCount: detail?.dramaCastCount ?? 0,
     episodes: siblingEpisodes,
+    scriptContent: detail?.drama?.scriptContent,
   } : undefined;
   const presetFromTree = (drama: ComicDramaTreeEntry): PresetDramaTarget => ({
     id: drama.id,
@@ -573,6 +706,7 @@ export function ComicDramaWorkspace({
     latestEpisodeId: drama.episodes.at(-1)?.id ?? null,
     castCount: drama.castCount ?? 0,
     episodes: drama.episodes,
+    scriptContent: drama.scriptContent,
   });
   const handleChangeEpisode = async (entry: ComicDramaEpisodeBrief, action: "archive" | "remove") => {
     if (action === "remove" && !window.confirm(t(entry.clipCount > 0 ? "删除此剧集？已导出的正片不会删除。" : "删除此剧集？"))) return false;
@@ -821,6 +955,7 @@ export function ComicDramaWorkspace({
             busy={busy}
             initialTab={dramaTabHint}
             onUpdated={next => {
+              dramaViewRef.current = next;
               setDramaView(next);
               if (!next.drama.archivedAt) {
                 setSidebarDrama({
@@ -831,7 +966,14 @@ export function ComicDramaWorkspace({
             }}
             onReload={reloadDramaView}
             onEditDrama={drama => showDramaDialog("edit", drama)}
-            onAddEpisode={() => { if (activeDramaPreset) showDialog("addEpisode", activeDramaPreset); }}
+            onAddEpisode={options => {
+              if (!activeDramaPreset) return;
+              showDialog("addEpisode", {
+                ...activeDramaPreset,
+                ...(options?.episodeNo !== undefined ? { nextEpisodeNo: options.episodeNo } : {}),
+                ...(options?.scriptContent !== undefined ? { scriptContent: options.scriptContent } : {}),
+              });
+            }}
             onOpenEpisode={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
             onOpenEditor={() => openDramaEditor(dramaView.drama.id)}
             onEditEpisode={epId => openDramaEditor(dramaView.drama.id, epId)}
@@ -967,10 +1109,18 @@ export function ComicDramaWorkspace({
             </div>
           </header>
 
-          <ComicVideoCreditPauses key={series.id} seriesId={series.id} label={id => {
-            const clip = detail.clips.find(clip => clip.id === id);
-            return clip ? t("分镜 {0}", [clip.ordinal]) : t("视频");
-          }} />
+          <ComicVideoCreditPauses
+            key={series.id}
+            seriesId={series.id}
+            active={(episodeSummary?.generatingCount ?? 0) > 0
+              || detail.clips.some(c => ["pending", "running"].includes(c.progress?.latestVideoState ?? c.progress?.videoState ?? "none"))}
+            revision={creditPauseRefresh}
+            onResumed={notifySeriesChanged}
+            label={id => {
+              const clip = detail.clips.find(clip => clip.id === id);
+              return clip ? t("分镜 {0}", [clip.ordinal]) : t("视频");
+            }}
+          />
           {budgetSeriesId === series.id && <ComicEpisodeBudgetDialog detail={detail} close={() => setBudgetSeriesId(null)} />}
 
           <nav className="comic-steps comic-stage-dock" aria-label={t("制作步骤")}>
@@ -1021,6 +1171,15 @@ export function ComicDramaWorkspace({
             <div className="comic-workbench-main">
               {stage === "剧本" ? (() => {
                 const scriptText = editor.script?.content ?? detail.script?.content ?? "";
+                const matchedMaster = detail.drama?.scriptContent?.trim()
+                  ? resolveComicEpisodeMasterScript(detail.drama.scriptContent, episodeNo)
+                  : null;
+                const refScriptText = matchedMaster?.matched === "episode"
+                  ? matchedMaster.content
+                  : (detail.drama?.scriptContent ?? "");
+                const copyEpisodeLabel = matchedMaster?.matched === "episode"
+                  ? t("带入第 {0} 集剧本到本集", [episodeNo])
+                  : t("带入全剧剧本到本集");
                 const hasSelection = !!scriptSelection
                   && scriptSelection.end > scriptSelection.start
                   && scriptSelection.end <= scriptText.length
@@ -1039,14 +1198,18 @@ export function ComicDramaWorkspace({
                           )}
                           {detail.drama?.scriptContent?.trim() && (
                             <div>
-                              <strong>{t("全剧剧本")}</strong>
-                              <pre>{detail.drama.scriptContent.slice(0, 4000)}{detail.drama.scriptContent.length > 4000 ? "…" : ""}</pre>
+                              <strong>
+                                {matchedMaster?.matched === "episode"
+                                  ? t("全剧剧本 · 第 {0} 集", [episodeNo])
+                                  : t("全剧剧本")}
+                              </strong>
+                              <pre>{refScriptText.slice(0, 4000)}{refScriptText.length > 4000 ? "…" : ""}</pre>
                             </div>
                           )}
                           <div className="comic-actions">
-                            {!locked && !scriptText.trim() && detail.drama?.scriptContent?.trim() && (
-                              <button type="button" onClick={() => editScript(detail.drama!.scriptContent.slice(0, 20_000))}>
-                                {t("带入全剧剧本到本集")}
+                            {!locked && !scriptText.trim() && matchedMaster && matchedMaster.matched !== "none" && (
+                              <button type="button" onClick={() => editScript(matchedMaster.content)}>
+                                {copyEpisodeLabel}
                               </button>
                             )}
                             <button type="button" onClick={() => openDramaHub(series.dramaId, "script")}>
@@ -1065,6 +1228,11 @@ export function ComicDramaWorkspace({
                       }} /></label>
                     <div className="comic-actions">
                       {detail.script && <small>{t("版本 {0}", [detail.script.version])}</small>}
+                      {!locked && !scriptText.trim() && matchedMaster && matchedMaster.matched !== "none" && (
+                        <button type="button" onClick={() => editScript(matchedMaster.content)}>
+                          {copyEpisodeLabel}
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={locked || !scriptText.trim()}
@@ -1090,6 +1258,17 @@ export function ComicDramaWorkspace({
                       >
                         {t(hasSelection ? "AI 增强选中原文" : "AI 增强段落")}
                       </button>
+                      {!locked && (
+                        <button
+                          type="button"
+                          className="primary comic-ai-button"
+                          disabled={locked || breakdownBusy || !scriptText.trim()}
+                          onClick={() => void generateStoryboardFromScript()}
+                        >
+                          <SparklesIcon size={14} />
+                          <span>{t(breakdownBusy ? "AI 拆分中…" : "AI 生成分镜")}</span>
+                        </button>
+                      )}
                     </div>
                     <ScriptVersionViewer seriesId={series.id} currentVersion={detail.script?.version ?? 0} />
                   </section>
@@ -1103,11 +1282,24 @@ export function ComicDramaWorkspace({
               ) : stage === "生成" ? (
                 <ComicImageGeneration key={series.id} detail={detail} selected={selected} select={setSelected}
                   choose={choose} editClip={editStoryboardClip} initialMode={openVideos ? "from_keyframe" : "keyframe"} quickAction={quickAction}
-                  onQuickActionHandled={() => setQuickAction(null)} onSeriesChanged={() => void reloadCurrent()}
+                  onQuickActionHandled={() => setQuickAction(null)} onSeriesChanged={notifySeriesChanged}
                   disabled={locked || !!editor.issue} getSaved={async () => await flush() ? getDetail() : null} />
               ) : (
                 <Storyboard dramaTitle={dramaTitle} series={series} clips={detail.clips} cast={detail.cast} drafts={editor.clips}
-                  locked={locked} disabled={locked || !!editor.issue} selected={selected} select={setSelected} edit={editClip}
+                  locked={locked} disabled={locked || !!editor.issue || breakdownBusy} selected={selected} select={setSelected} edit={editClip}
+                  hasScript={!!(editor.script?.content ?? detail.script?.content ?? "").trim()}
+                  scriptCharCount={(editor.script?.content ?? detail.script?.content ?? "").trim().length}
+                  breakdownBusy={breakdownBusy}
+                  breakdownError={breakdownError}
+                  breakdownNotice={breakdownNotice}
+                  breakdownProposal={breakdownProposal}
+                  onGenerateFromScript={() => void generateStoryboardFromScript()}
+                  onCancelBreakdown={cancelBreakdown}
+                  onDismissBreakdownError={() => setBreakdownError(null)}
+                  onDismissBreakdownNotice={() => setBreakdownNotice(null)}
+                  onApplyBreakdownPreview={decision => void applyBreakdownPreview(decision)}
+                  onDismissBreakdownPreview={() => void dismissBreakdownPreview()}
+                  onGoScript={() => setStage("剧本")}
                   add={afterClipId => changeContent(
                     (sid, revision) => comicDramaApi.addClip(sid, revision, afterClipId ? { afterClipId } : undefined),
                     result => setSelected(afterClipId
@@ -1143,14 +1335,26 @@ export function ComicDramaWorkspace({
                     detail={detail}
                     clip={activeClip}
                     goStoryboard={editStoryboardClip}
-                    goGenerate={(clipId, videoMode) => { setSelected(clipId); setOpenVideos(videoMode); setStage("生成"); }}
+                    goGenerate={(clipId, videoMode) => {
+                      setSelected(clipId);
+                      setOpenVideos(videoMode);
+                      setStage("生成");
+                      setQuickAction({ mode: videoMode ? "from_keyframe" : "keyframe", token: Date.now(), autoPreview: false });
+                    }}
                   />
                 ) : (
                   <ComicDirectorPanel key={series.id} detail={detail} locked={locked || !!editor.issue}
                     getSaved={async () => await flush() ? getDetail() : null} apply={applyProposal} applyRole={applyDirectorRole}
-                    openClip={id => openVideo(series.id, id)} editClip={editStoryboardClip} onSeriesChanged={() => void reloadCurrent()}
+                    openClip={id => openVideo(series.id, id)} editClip={editStoryboardClip}
+                    reviewKeyframe={clipId => {
+                      setSelected(clipId);
+                      setOpenVideos(false);
+                      setStage("生成");
+                      setQuickAction({ mode: "keyframe", token: Date.now(), autoPreview: false });
+                    }}
+                    onSeriesChanged={notifySeriesChanged}
                     selectedClipId={activeClip?.id ?? null} enhanceIntent={enhanceIntent}
-                    onEnhanceIntentHandled={clearEnhanceIntent} />
+                    onEnhanceIntentHandled={clearEnhanceIntent} refreshToken={directorRefreshToken} />
                 )}
               </aside>
             )}

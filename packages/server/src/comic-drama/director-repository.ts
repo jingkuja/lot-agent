@@ -62,6 +62,16 @@ export type DirectorEnhanceContext =
     }>;
   };
 
+export type DirectorBreakdownContext = {
+  seriesMeta: DirectorEnhanceSeriesMeta;
+  cast: ComicSeriesCast[];
+  dictionaries: {
+    framing: ComicDictionaryEntry[];
+    movement: ComicDictionaryEntry[];
+    emotion: ComicDictionaryEntry[];
+  };
+};
+
 export type DirectorEnhanceResult =
   | {
     kind: "script";
@@ -256,6 +266,44 @@ export class PgComicDirector {
       WHERE owner_id=$1 AND series_id=$2 AND id=$3 ${lock ? "FOR UPDATE" : ""}`, [owner, series, id]);
     if (!row) libraryMissing();
     return view(row);
+  }
+
+  private async buildBreakdownContext(
+    db: ComicQuery,
+    owner: string,
+    series: string,
+    episode: {
+      title: string; logline: string; seriesGroup?: string | null; episodeNo?: number | null;
+      styleKey: string; aspectRatio: string; videoModel: string | null;
+    },
+    language: ComicDirectorInput["language"],
+  ): Promise<DirectorBreakdownContext> {
+    const [cast, styles, framing, movement, emotion] = await Promise.all([
+      readSeriesCast(db, series),
+      readComicDictionary(db, owner, "style"),
+      readComicDictionary(db, owner, "framing"),
+      readComicDictionary(db, owner, "movement"),
+      readComicDictionary(db, owner, "emotion"),
+    ]);
+    const styleLabel = styles.find(entry => entry.key === episode.styleKey)?.labels[language] ?? episode.styleKey;
+    return {
+      seriesMeta: {
+        dramaTitle: episode.seriesGroup ?? episode.title,
+        episodeNo: episode.episodeNo ?? 1,
+        title: episode.title,
+        logline: episode.logline,
+        styleKey: episode.styleKey,
+        styleLabel,
+        aspectRatio: episode.aspectRatio,
+        videoModel: episode.videoModel,
+      },
+      cast,
+      dictionaries: {
+        framing: framing.filter(entry => !entry.inactive),
+        movement: movement.filter(entry => !entry.inactive),
+        emotion: emotion.filter(entry => !entry.inactive),
+      },
+    };
   }
 
   private async buildEnhanceContext(
@@ -460,7 +508,14 @@ export class PgComicDirector {
           same.input.language !== input.language || (same.input.action ?? "script") !== (input.action ?? "script") || !sameEnhance) {
           throw new ComicLibraryError("DIRECTOR_REQUEST_CONFLICT", 409);
         }
-        return { proposal: view(same), episode, created: false, previousScenes: [] as string[], enhanceContext: undefined };
+        return {
+          proposal: view(same),
+          episode,
+          created: false,
+          previousScenes: [] as string[],
+          enhanceContext: undefined,
+          breakdownContext: undefined,
+        };
       }
       if (episode.revision !== input.expectedRevision) throw new ComicDramaError("REVISION_CONFLICT", episode.revision);
       accepting?.();
@@ -475,6 +530,9 @@ export class PgComicDirector {
       const enhanceContext = input.action === "enhance" && input.enhance
         ? await this.buildEnhanceContext(db, owner, series, episode, fullScript, input)
         : undefined;
+      const breakdownContext = input.action === "breakdown"
+        ? await this.buildBreakdownContext(db, owner, series, episode, input.language)
+        : undefined;
       const { rows: [row] } = await db.query<ProposalRow>(`INSERT INTO ${cd}.cd_director_proposals
         (owner_id,series_id,conversation_id,request_id,base_revision,input,original,status)
         VALUES($1,$2,$3,$4,$5,$6,$7,'writing') RETURNING ${columns}`,
@@ -484,7 +542,14 @@ export class PgComicDirector {
         [conversation, userMsg, { comicDirectorProposalId: row.id, mode: input.mode }]);
       const { rows: previous } = input.action === "breakdown" ? await db.query<{ scene: string }>(`SELECT draft->>'scene' AS scene
         FROM ${cd}.cd_clips WHERE series_id=$1 ORDER BY ordinal`, [series]) : { rows: [] };
-      return { proposal: view(row), episode, created: true, previousScenes: previous.map(item => item.scene), enhanceContext };
+      return {
+        proposal: view(row),
+        episode,
+        created: true,
+        previousScenes: previous.map(item => item.scene),
+        enhanceContext,
+        breakdownContext,
+      };
     });
   }
 
@@ -518,16 +583,56 @@ export class PgComicDirector {
           aliases: entry.snapshot.aliases,
           snapshot: entry.snapshot,
         }));
-        const clips = "clips" in result ? result.clips.map(clip => {
-          const matchedCast = mergeMatchedClipCast([], castCandidates, clip.lines, [clip.scene, ...clip.shots]);
-          return comicDramaClipDraftSchema.parse({
-            schemaVersion: 1, scene: clip.scene, durationMs: clip.durationMs,
-            shots: clip.shots.map((description, i) => ({ id: randomUUID(), framingKey: "medium", movementKey: "fixed", description,
-              durationShare: Math.floor(100 / clip.shots.length) + (i < 100 % clip.shots.length ? 1 : 0) })),
-            lines: clip.lines.map(line => ({ id: randomUUID(), ...line, speed: 1, emotionKey: null })),
-            ...(matchedCast.length ? { cast: matchedCast } : {}),
+        let clips: ComicDramaClipDraft[] | undefined;
+        if ("clips" in result) {
+          const [episode, rawFraming, rawMovement, rawEmotion] = await Promise.all([
+            this.episode(owner, series, db),
+            readComicDictionary(db, owner, "framing"),
+            readComicDictionary(db, owner, "movement"),
+            readComicDictionary(db, owner, "emotion"),
+          ]);
+          const activeFraming = rawFraming.filter(entry => !entry.inactive);
+          const activeMovement = rawMovement.filter(entry => !entry.inactive);
+          const activeEmotion = rawEmotion.filter(entry => !entry.inactive);
+          const framingKeys = new Set(activeFraming.map(entry => entry.key));
+          const movementKeys = new Set(activeMovement.map(entry => entry.key));
+          const emotionKeys = new Set(activeEmotion.map(entry => entry.key));
+          const defaultFraming = framingKeys.has("medium") ? "medium" : (activeFraming[0]?.key ?? "medium");
+          const defaultMovement = movementKeys.has("fixed") ? "fixed" : (activeMovement[0]?.key ?? "fixed");
+          const videoProfile = comicVideoProfile(episode.videoModel);
+          clips = result.clips.map(clip => {
+            const durationMs = videoProfile
+              ? Math.min(videoProfile.shotMaxSeconds * 1000, Math.max(4000, Math.round(clip.durationMs / 1000) * 1000))
+              : Math.min(60_000, Math.max(1000, Math.round(clip.durationMs)));
+            const rawShots = clip.shots.map(shot => (typeof shot === "string" ? { description: shot } : shot));
+            const shares = normalizeShotDurationShares(rawShots.map(shot => shot.durationShare ?? 1));
+            const shots = rawShots.map((shot, i) => ({
+              id: randomUUID(),
+              framingKey: shot.framingKey && framingKeys.has(shot.framingKey) ? shot.framingKey : defaultFraming,
+              movementKey: shot.movementKey && movementKeys.has(shot.movementKey) ? shot.movementKey : defaultMovement,
+              description: shot.description.trim().slice(0, 2000),
+              durationShare: shares[i]!,
+            }));
+            const lines = clip.lines.slice(0, 30).map(line => {
+              const rawSpeaker = line.speaker?.trim() || null;
+              const matched = rawSpeaker ? matchComicCharacters(rawSpeaker, castCandidates) : [];
+              const speaker = matched.length === 1 ? matched[0]!.name : rawSpeaker?.slice(0, 120) ?? null;
+              const emotionKey = line.emotionKey && emotionKeys.has(line.emotionKey) ? line.emotionKey : null;
+              const speed = typeof line.speed === "number" && line.speed >= 0.5 && line.speed <= 2 ? line.speed : 1;
+              return { id: randomUUID(), speaker, text: line.text.trim().slice(0, 1000), emotionKey, speed };
+            });
+            const scene = clip.scene.trim().slice(0, 1000);
+            const matchedCast = mergeMatchedClipCast([], castCandidates, lines, [scene, ...shots.map(s => s.description)]);
+            return comicDramaClipDraftSchema.parse({
+              schemaVersion: 1,
+              scene,
+              durationMs,
+              shots,
+              lines,
+              ...(matchedCast.length ? { cast: matchedCast } : {}),
+            });
           });
-        }) : undefined;
+        }
         proposal = {
           script: "script" in result ? result.script : "",
           ...(clips ? { clips, previousScenes } : {}),
@@ -684,7 +789,7 @@ export class PgComicDirector {
       if (expected !== undefined) {
         if (expected !== row.baseRevision || episode.revision !== expected) throw new ComicLibraryError("DIRECTOR_PROPOSAL_STALE", 409);
         if (row.input.action === "sequel" && decision === "sequel") {
-          const next = await this.episodes.deriveOn(db, owner, series, true);
+          const next = await this.episodes.deriveOn(db, owner, series, true, true, false);
           sequelId = next.series.id;
           await this.episodes.writeScript(db, owner, sequelId, next.series.revision, row.proposal.script, "assistant");
           revision = expected;
