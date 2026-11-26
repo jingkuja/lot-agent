@@ -181,14 +181,14 @@ it("numbers portrait, background and scene references in submission order with K
   expect(prompt).not.toContain(id);
 });
 
-it("submits product images after the portrait and names them with Grok's zero-based tags", () => {
+it("submits product images after the portrait and names them with Seedance's one-based tags", () => {
   const draft = MarketingDraftSchema.parse({ assets: { scene: id, product: [id, id], portrait: id },
     storyboard: [{ script: "这款保温杯一整天都热乎。", visual: "人物手持保温杯", action: "拧开杯盖", camera: "中景推近" }] });
   expect(marketingImageReferences(draft).map(image => image.role)).toEqual(["portrait", "product", "product", "scene"]);
   const prompt = marketingSegmentPrompt(draft, { index: 0, script: draft.storyboard[0].script, durationSec: 8 }, 2);
-  expect(prompt).toContain("Use <IMAGE_0> for the presenter's identity only.");
-  expect(prompt).toContain("Use <IMAGE_1>, <IMAGE_2> for one product's exact look (angles/details)");
-  expect(prompt).toContain("Use <IMAGE_3> for relevant scene composition, objects and details;");
+  expect(prompt).toContain("Use @Image1 for the presenter's identity only.");
+  expect(prompt).toContain("Use @Image2, @Image3 for one product's exact look (angles/details)");
+  expect(prompt).toContain("Use @Image4 for relevant scene composition, objects and details;");
   expect(prompt).toContain("never redesign it or substitute a generic or different product");
   expect(prompt).toContain("take precedence over an incompatible backgroundDescription");
   // Product alone is not a setting reference: the text background still applies.

@@ -53,6 +53,7 @@ function createHierarchyPool() {
   const scripts: Array<{ seriesId: string; version: number; content: string; source: string }> = [];
   const currentSeries = new Map<string, string | null>();
   const currentDrama = new Map<string, string | null>();
+  const editTasks = new Map<string, { id: string; ownerId: string; dramaId: string; lastSeriesId: string | null }>();
   const projectDrama = (d: StoredDrama) => ({
     id: d.id,
     title: d.title,
@@ -420,12 +421,24 @@ function createHierarchyPool() {
     if (sql.includes("FROM lot_comic_drama.cd_clips c")) return { rows: [], rowCount: 0 };
     if (sql.includes("SELECT count(DISTINCT t.target_id)::int AS generating")) return { rows: [{ generating: 0 }], rowCount: 1 };
     if (sql.includes("FROM lot_comic_drama.cd_takes t")) return { rows: [], rowCount: 0 };
+    if (sql.startsWith("INSERT INTO lot_comic_drama.cd_edit_tasks")) {
+      const owner = String(params[0]);
+      const dramaId = String(params[1]);
+      const lastSeriesId = (params[2] as string | null) ?? null;
+      const existing = editTasks.get(dramaId);
+      if (existing) {
+        existing.lastSeriesId ??= lastSeriesId;
+      } else {
+        editTasks.set(dramaId, { id: makeUuid(seq++), ownerId: owner, dramaId, lastSeriesId });
+      }
+      return { rows: [], rowCount: 1 };
+    }
     throw new Error(`Unexpected SQL in hierarchy mock: ${sql}`);
   });
 
   const client: PoolClient = { query, release: vi.fn() } as unknown as PoolClient;
   const pool: Pool = { connect: vi.fn(async () => client), query } as unknown as Pool;
-  return { pool, dramas, episodes, clips, castRows, dramaCastRows, scripts, currentSeries, currentDrama };
+  return { pool, dramas, episodes, clips, castRows, dramaCastRows, scripts, currentSeries, currentDrama, editTasks };
 }
 
 describe("PgComicDramaRepository 3-tier hierarchy", () => {
@@ -446,6 +459,11 @@ describe("PgComicDramaRepository 3-tier hierarchy", () => {
     expect(created.detail?.series.dramaId).toBe(created.drama.id);
     expect(created.detail?.series.episodeNo).toBe(1);
     expect(created.detail?.hierarchy?.drama.episodeCount).toBe(1);
+    expect(store.editTasks.get(created.drama.id)).toMatchObject({
+      ownerId,
+      dramaId: created.drama.id,
+      lastSeriesId: created.detail?.series.id,
+    });
 
     const ep2 = await repo.createEpisode(ownerId, created.drama.id, {
       title: "第二夜：热咖啡",
@@ -540,6 +558,11 @@ describe("PgComicDramaRepository 3-tier hierarchy", () => {
     expect(created.detail).toBeNull();
     expect(store.currentDrama.get(ownerId)).toBe(created.drama.id);
     expect(store.currentSeries.get(ownerId)).toBeNull();
+    expect(store.editTasks.get(created.drama.id)).toMatchObject({
+      ownerId,
+      dramaId: created.drama.id,
+      lastSeriesId: null,
+    });
 
     const curBefore = await repo.currentDrama(ownerId);
     expect(curBefore.dramaId).toBe(created.drama.id);
@@ -588,6 +611,7 @@ describe("PgComicDramaRepository 3-tier hierarchy", () => {
     expect(ep1.cast.map(c => c.snapshot.name)).toEqual(["沈青"]);
     expect(ep1.dramaCastCount).toBe(1);
     expect(store.currentSeries.get(ownerId)).toBe(ep1.series.id);
+    expect(store.editTasks.get(created.drama.id)?.lastSeriesId).toBe(ep1.series.id);
 
     // Add a second drama-level character and sync it into Episode 1
     const charB = makeUuid(502);

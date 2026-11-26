@@ -1,3 +1,4 @@
+import { enqueueVolcGroup, startVolcAssetSync } from "./volc-assets/sync.js";
 import { createHash } from "node:crypto";
 import { BullmqJobQueue } from "./jobs/bullmq-queue.js";
 import { createAnalysisAudioRoutes } from "./marketing-analysis/audio-url.js";
@@ -126,6 +127,7 @@ async function main() {
 
   const service = new AgentService(serviceConfig);
   await service.init();
+  const stopVolcAssetSync = startVolcAssetSync(service.db, process.env.OPENAI_BASE_URL || "https://tokenhub.todoucloud.com/v1", service.managedKeysEnabled);
   const posterLibrary = new PosterLibrary();
   const stopPosterRefresh = startPosterLibraryRefresh(posterLibrary);
   const feishu = isFeishuEnabled() ? new FeishuService(new PgFeishuRepository(service.db.pool), new SecretBox(process.env.SECRET_MASTER_KEY)) : null;
@@ -285,7 +287,7 @@ async function main() {
   app.on("POST", "/api/auth/wechat-phone-bind", loginRateLimit);
   app.on("POST", "/api/auth/wechat-phone-bind/confirm", loginRateLimit);
   app.on("PATCH", "/api/auth/profile", loginRateLimit);
-  app.route("/api/auth", createAuthRoutes(service));
+  app.route("/api/auth", createAuthRoutes(service, (owner) => enqueueVolcGroup(service.db.pool, owner)));
   const rollout = comicRollout();
   const comicDramaEnabled = rollout.enabled;
   const comicSettings = new PgComicSettings(service.db.pool);
@@ -454,10 +456,24 @@ async function main() {
   const comicEdits = new PgComicEdits(service.db.pool);
   const comicRenders = new PgComicRenders(service.db.pool, comicEdits);
   app.route(COMIC_MEDIA_PATH.slice(0, -1), comicMedia.publicRoutes(service.sessions, (id, key) => comicRenders.hasFile(id, key)));
+  const comicRenderQueue = service.jobQueue instanceof BullmqJobQueue ? service.jobQueue : undefined;
+  const COMIC_EPHEMERAL_PREVIEW_MAX_AGE_MS = 15 * 60_000;
+  const purgeEphemeralPreviews = () => comicRenders.purgeExpiredEphemeral(
+    COMIC_EPHEMERAL_PREVIEW_MAX_AGE_MS,
+    key => comicMedia.removeRenderFile(key),
+    renderId => comicRenderQueue?.stopCancelled(renderId) ?? Promise.resolve(),
+  );
   const stopComicTempCleanup = startComicTempCleanup({
     mediaRoot: comicMedia.rootDir,
-    purgeDeletedRenders: () => comicRenders.purgeDeletedFiles(key => comicMedia.removeRenderFile(key)),
+    purgeDeletedRenders: async () => {
+      await purgeEphemeralPreviews();
+      await comicRenders.purgeDeletedFiles(key => comicMedia.removeRenderFile(key));
+    },
   });
+  const ephemeralSweepTimer = setInterval(() => {
+    void purgeEphemeralPreviews().catch(() => {});
+  }, 5 * 60_000);
+  ephemeralSweepTimer.unref();
   let stopComicSettlementSync: (() => Promise<void>) | undefined;
   if (comicDramaEnabled) {
     app.use(`${COMIC_DRAMA_API_ROOT}/*`, authMw, rateLimit({
@@ -684,10 +700,12 @@ async function main() {
   const shutdown = async () => {
     console.log("\nShutting down...");
     stopPosterRefresh();
+    clearInterval(ephemeralSweepTimer);
     stopComicTempCleanup();
     await stopComicSettlementSync?.();
     await stopVirtualPayments();
     await feishuChannel?.stop();
+    await stopVolcAssetSync();
     await service.shutdown();
     process.exit(0);
   };

@@ -41,8 +41,10 @@ export function createComicRenderRoutes(repo: PgComicRenders, media: ComicMediaL
     return c.json(await repo.status(c.get("userId"), id(c.req.param("id"))));
   });
   app.delete("/renders/:id", async c => {
-    const file = await repo.remove(c.get("userId"), id(c.req.param("id")));
-    if (file) await repo.purgeDeletedFile(file, key => media.removeRenderFile(key));
+    const renderId = id(c.req.param("id"));
+    const removed = await repo.remove(c.get("userId"), renderId);
+    if (removed?.cancelled) await queue?.stopCancelled(renderId).catch(() => {});
+    if (removed?.key) await repo.purgeDeletedFile({ id: removed.id, key: removed.key }, key => media.removeRenderFile(key));
     return c.json({ ok: true });
   });
   app.get("/renders", async c => {

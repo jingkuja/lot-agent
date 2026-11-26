@@ -10,6 +10,6 @@ export const marketingVideoDefinition: AgentDefinition = {
   systemPrompt: "Marketing videos are made in the marketing video studio, not in chat. Ask the user to open the studio. Match the user's language.",
   // Generation is submitted through the authenticated media job API, not LLM tools.
   toolNames: [],
-  // The server may select another profile with MARKETING_VIDEO_MODEL.
+  // The 1080p workflow selects its model by quality when reserving the video.
   defaultModelId: DEFAULT_MARKETING_VIDEO_MODEL,
 };

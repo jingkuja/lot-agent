@@ -2178,28 +2178,20 @@ div.comic-version-list article {
 }
 
 .comic-track-ruler {
-  margin-inline-start: var(--track-label-width);
-  padding-inline: 8px;
-  margin-bottom: 4px;
+  margin: 0;
 }
 
 .comic-track-ruler label {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
 }
 
 .comic-track-ruler input {
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
-}
-
-.comic-track-ruler div {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .comic-tracks-viewport {
@@ -2565,9 +2557,126 @@ div.comic-version-list article {
   font-variant-numeric: tabular-nums;
 }
 
+.comic-track-notice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.comic-track-notice-bar button {
+  min-height: 30px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+}
+
+.comic-temp-preview-dialog {
+  width: min(640px, calc(100% - 24px));
+  display: grid;
+  gap: 14px;
+}
+
+.comic-temp-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.comic-temp-preview-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.comic-temp-close-icon {
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.comic-temp-preview-stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-height: min(64vh, 540px);
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--text) 8%, var(--bg-hover));
+}
+
+.comic-temp-preview-stage video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: min(64vh, 540px);
+  object-fit: contain;
+}
+
+.comic-temp-preview-loading {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+
+.comic-temp-preview-loading p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.comic-temp-progress-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--overlay-sink);
+  border: 1px solid var(--border);
+}
+
+.comic-temp-progress-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: 999px;
+  background: var(--accent-grad);
+  animation: comic-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes comic-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.comic-temp-preview-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.comic-temp-preview-error {
+  display: grid;
+  gap: 10px;
+}
+
 @media (max-width: 640px) {
   .comic-multitrack {
     --track-label-width: min(6.8rem, 34%);
+  }
+  .comic-track-ruler label {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
   }
 }
 
@@ -4501,4 +4610,267 @@ ul.comic-version-list pre {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* ── Editing Workbench: Drama Tasks (Episode Unit) & Free Tasks ── */
+.comic-edit-workbench {
+  display: grid;
+  gap: 20px;
+}
+
+.comic-workbench-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.comic-workbench-section {
+  display: grid;
+  gap: 12px;
+}
+
+.comic-workbench-count {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.comic-drama-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 14px;
+}
+
+.comic-drama-edit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.comic-drama-edit-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.comic-drama-edit-card[data-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 6%, var(--bg-card)),
+    var(--bg-card) 48%
+  );
+}
+
+.comic-drama-edit-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.comic-drama-edit-head .comic-media-well {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  border-radius: 11px;
+}
+
+.comic-drama-edit-meta {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+
+.comic-drama-edit-meta h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16.5px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.comic-drama-edit-last {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.comic-drama-edit-episodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.comic-page button.comic-ep-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.comic-page button.comic-ep-chip small {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.comic-page button.comic-ep-chip[data-state="exported"] {
+  border-color: color-mix(in srgb, var(--cd-jade) 40%, var(--border));
+  background: color-mix(in srgb, var(--cd-jade) 10%, var(--bg-card));
+}
+
+.comic-page button.comic-ep-chip[data-state="edited"] {
+  border-color: color-mix(in srgb, var(--cd-azure) 40%, var(--border));
+  background: color-mix(in srgb, var(--cd-azure) 9%, var(--bg-card));
+}
+
+.comic-page button.comic-ep-chip[data-state="ready"] {
+  border-color: color-mix(in srgb, var(--cd-gold) 44%, var(--border));
+  background: color-mix(in srgb, var(--cd-gold) 10%, var(--bg-card));
+}
+
+.comic-page button.comic-ep-chip[data-active="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.comic-drama-edit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.comic-drama-edit-foot > small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Drama Edit Task Banner & Episode Unit Switcher ── */
+.comic-drama-edit-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.comic-drama-task-banner {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 7%, var(--bg-card)),
+    color-mix(in srgb, var(--cd-azure) 5%, var(--bg-card))
+  );
+  box-shadow: var(--shadow-sm);
+}
+
+.comic-drama-task-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.comic-drama-task-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.comic-drama-task-title strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.comic-episode-unit-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.comic-page button.comic-episode-unit-btn {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 152px;
+  max-width: 240px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  text-align: start;
+}
+
+.comic-page button.comic-episode-unit-btn[aria-current="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  box-shadow: var(--shadow-sm), inset 0 -2px 0 var(--accent);
+}
+
+.comic-episode-unit-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.comic-episode-unit-title strong {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+.comic-episode-unit-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.comic-episode-unit-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.comic-sync-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  font-size: 13px;
 }

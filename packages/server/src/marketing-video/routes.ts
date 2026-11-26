@@ -41,7 +41,7 @@ export function marketingKeyArtist(service: AgentService, dataRoot: string) {
 
 export function createMarketingVideoRoutes(service: AgentService, dataRoot: string, store = new PgMarketingProjectStore(service.db.pool), operations = new PgMarketingTextOperations(service.db.pool),
   narrator = new MarketingNarrator(service.db.pool, dataRoot), keyArtist = marketingKeyArtist(service, dataRoot)) {
-  // New clips use the configured model, or Seedance 2.5 for 1080p and reference videos (`marketingDraftProfile`);
+  // New clips use Seedance 2.0 for 720p and Seedance 2.5 for 1080p (`marketingDraftProfile`);
   // recovery uses each job's recorded model.
   const activeProfile = activeMarketingVideoProfile();
   const analysisStorage = new AnalysisStorage(resolve(dataRoot, "marketing-analysis"));

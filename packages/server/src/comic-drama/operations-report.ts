@@ -137,7 +137,7 @@ export const COMIC_RENDER_STATS_SQL = `SELECT count(*)::int AS total,
   count(*) FILTER (WHERE r.frozen->>'outputFps'='30')::int AS fps_30_count
   FROM lot_comic_drama.cd_renders r
   LEFT JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text AND t.type='comic-drama.render'
-  WHERE r.created_at>=${cutoff}`;
+  WHERE r.created_at>=${cutoff} AND r.ephemeral=FALSE`;
 
 export const COMIC_BILLING_VARIANCE_SQL = `SELECT coalesce(t.input->>'modelId','unknown') AS model,
   coalesce(t.settled_currency, r.frozen->'price'->>'currency', 'CNY') AS currency,

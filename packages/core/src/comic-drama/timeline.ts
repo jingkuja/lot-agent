@@ -146,11 +146,13 @@ export const comicRenderRequestSchema = z.object({
   expectedRevision: z.number().int().min(1).max(2_147_483_647),
   requestId: id.transform(value => value.toLowerCase()),
   fpsMode: z.enum(comicRenderFpsModes).optional(),
+  ephemeral: z.boolean().optional(),
 }).strict();
 export const comicFrozenRenderSchema = z.object({
   schemaVersion: z.literal(1), editId: id, editRevision: z.number().int().positive(), timeline: comicTimelineSchema,
   fpsMode: z.enum(comicRenderFpsModes).optional(),
   outputFps: z.union([z.literal(24), z.literal(30)]).optional(),
+  ephemeral: z.boolean().optional(),
 }).strict();
 export type ComicFrozenRenderInput = z.infer<typeof comicFrozenRenderSchema>;
 export type ComicRenderRequest = z.infer<typeof comicRenderRequestSchema>;
@@ -160,6 +162,7 @@ export type ComicRender = {
   title: string | null; createdAt: string; recoverable: boolean;
   outputFps?: ComicRenderFps | null;
   fpsMode?: ComicRenderFpsMode | null;
+  ephemeral?: boolean;
 };
 export type ComicRenderHistory = { entries: ComicRender[]; nextCursor: string | null };
 export type ComicRenderDownload = { url: string; filename: string };

@@ -33,6 +33,7 @@ export async function runComicRender(
         }
       }
       const film = await composeComicRender(frozen.timeline, { videos, audio }, signal, {
+        preview: frozen.ephemeral === true,
         fpsMode: frozen.fpsMode ?? "auto",
         onHeartbeat: heartbeat,
         mediaRoot: media.rootDir,

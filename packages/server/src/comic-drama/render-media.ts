@@ -44,6 +44,7 @@ export type PremixPass = {
 export type ComicRenderComposeOptions = {
   forcePremix?: boolean;
   forcePretranscode?: boolean;
+  preview?: boolean;
   fpsMode?: ComicRenderFpsMode;
   onHeartbeat?: () => void;
   mediaRoot?: string;
@@ -354,7 +355,9 @@ export async function composeComicRender(timeline: ComicTimeline, inputs: {
   const targetIssue = comicRenderIssue(timeline, targetFps);
   if (targetIssue) throw new ComicRenderFailure(targetIssue);
 
-  const bounds = { "9:16": [1080, 1920], "16:9": [1920, 1080], "1:1": [1080, 1080] } as const;
+  const bounds = options.preview
+    ? ({ "9:16": [540, 960], "16:9": [960, 540], "1:1": [720, 720] } as const)
+    : ({ "9:16": [1080, 1920], "16:9": [1920, 1080], "1:1": [1080, 1080] } as const);
   const [width, height] = bounds[timeline.aspectRatio];
   const layout = layoutComicTimeline(timeline);
   const frameSec = (frame: number) => (frame / targetFps).toFixed(6);
@@ -484,7 +487,8 @@ export async function composeComicRender(timeline: ComicTimeline, inputs: {
     const file = join(folder, "film.mp4");
     await mediaProcess(ffmpeg(), [
       ...args, "-filter_complex", graph.join(";"), "-map", "[video]", "-map", "[audio]", "-t", duration,
-      "-r", String(targetFps), "-c:v", "libx264", "-preset", "veryfast", "-threads", "2", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M",
+      "-r", String(targetFps), "-c:v", "libx264", "-preset", options.preview ? "ultrafast" : "veryfast", "-threads", "2",
+      "-crf", options.preview ? "25" : "20", "-maxrate", options.preview ? "4M" : "8M", "-bufsize", options.preview ? "8M" : "16M",
       "-c:a", "aac", "-b:a", "160k", "-ar", String(rate), "-movflags", "+faststart", "film.mp4",
     ], { cwd: folder, signal, timeoutMs: 900_000 });
     const info = await inspectMedia(file, signal);

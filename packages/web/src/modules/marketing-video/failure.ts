@@ -33,8 +33,18 @@ const failures: Record<MarketingFailureCode, VideoFailure> = {
   },
   REAL_PERSON_REJECTED: {
     reason: "所传素材有真人，未能通过服务商安全机制。",
-    next: "可以尝试 720p 出片：复制为新草稿，将画质改为 720p 后重新制作。",
-    actions: ["resume", "copy"], copyStep: "production",
+    next: "请复制为新草稿，更换参考素材后重新制作。",
+    actions: ["copy"], copyStep: "materials",
+  },
+  MATERIAL_SYNC_PENDING: {
+    reason: "素材仍在同步到火山素材库。",
+    next: "请稍后点击继续生成。已完成的片段不会重做。",
+    actions: ["resume"],
+  },
+  MATERIAL_SYNC_FAILED: {
+    reason: "火山素材库处理失败。",
+    next: "请复制为新草稿，更换参考素材后重新制作。",
+    actions: ["copy"], copyStep: "materials",
   },
   MODEL_AUTH_REQUIRED: {
     reason: "视频模型账号未授权，或尚未配置可用的模型密钥。",

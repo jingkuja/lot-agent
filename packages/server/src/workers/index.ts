@@ -1,3 +1,4 @@
+import { resolveVolcReference } from "../volc-assets/references.js";
 import { KnowledgeFacts } from "../knowledge/profile/repository.js";
 import { FactAwareMemory } from "../knowledge/profile/memory.js";
 import "../load-env.js";
@@ -8,7 +9,7 @@ import { DB } from "../db/database.js";
 import { createRedisConnection } from "../jobs/redis.js";
 import { BullmqJobQueue } from "../jobs/bullmq-queue.js";
 import { calcCost } from "@lot-agent/core";
-import { LocalStorage, fetchPublicBinary } from "@lot-agent/core";
+import { LocalStorage, fetchPublicBinary, isSeedanceModel } from "@lot-agent/core";
 import type { ModelConfig } from "@lot-agent/core";
 import {
   PgMemoryAdapter,
@@ -261,7 +262,9 @@ async function main() {
         imageCallFingerprint(job.input, model, JSON.stringify([base.baseUrl, apiKey || base.apiKey, internationalModelsEnabled()]))) : provider,
       hasImageReceipts: durable ? async () => !!await receipts.get(0) : undefined,
       hasImageReceipt: durable ? async (slot) => !!await receipts.get(slot) : undefined,
-      resolveReferenceUrl: (url) => resolveMaterialReference(db, job.userId, url),
+      resolveReferenceUrl: (url) => mediaType === "video" && apiKey && isSeedanceModel(model)
+        ? resolveVolcReference(db, job.userId, url, signal)
+        : resolveMaterialReference(db, job.userId, url),
       resolveImageReferenceUrl: (url) => resolveImageReferenceUrl(db, job.userId, url),
       prepareKlingVoices: realVideo
         ? async (input) => {

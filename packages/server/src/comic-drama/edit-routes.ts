@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
-  comicDramaIdSchema, comicEditAppendSourceSchema, comicEditAutoDialoguePreviewSchema, comicEditAutoDialogueSchema,
-  comicEditCreateSchema, comicEditDeleteSchema, comicEditListSchema, comicEditReplaceSchema, comicEditUpdateSchema,
-  comicSpeechReleaseSchema, comicSpeechRequestSchema, comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, comicVoiceBindSchema,
+  comicDramaEditOpenSchema, comicDramaEditSyncSchema, comicDramaIdSchema, comicEditAppendSourceSchema,
+  comicEditAutoDialoguePreviewSchema, comicEditAutoDialogueSchema, comicEditCreateSchema, comicEditDeleteSchema,
+  comicEditListSchema, comicEditReplaceSchema, comicEditUpdateSchema, comicSpeechReleaseSchema, comicSpeechRequestSchema,
+  comicVoiceAuditionReleaseSchema, comicVoiceAuditionSchema, comicVoiceBindSchema,
 } from "@lot-agent/core/comic-drama";
 import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing } from "./library-db.js";
@@ -22,6 +23,24 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
     const parsed = comicDramaIdSchema.safeParse(value);
     return parsed.success ? parsed.data : libraryMissing();
   };
+  app.get("/dramas/:dramaId/edit", async c => {
+    c.header("Cache-Control", "private, no-store");
+    const rawSeries = c.req.query("seriesId");
+    const parsedSeries = rawSeries ? comicDramaIdSchema.safeParse(rawSeries) : null;
+    if (parsedSeries && !parsedSeries.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.getDramaTask(c.get("userId"), id(c.req.param("dramaId")), parsedSeries?.data));
+  });
+  app.post("/dramas/:dramaId/edit/open", limit, async c => {
+    const raw = await c.req.text();
+    let parsedBody: unknown = {};
+    if (raw) {
+      try { parsedBody = JSON.parse(raw); }
+      catch { return c.json({ code: "INVALID_INPUT" }, 400); }
+    }
+    const input = comicDramaEditOpenSchema.safeParse(parsedBody);
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.openDramaTask(c.get("userId"), id(c.req.param("dramaId")), input.data.seriesId));
+  });
   app.get("/edits", async c => {
     c.header("Cache-Control", "private, no-store");
     const query = comicEditListSchema.safeParse(c.req.query());
@@ -57,6 +76,11 @@ export function createComicEditRoutes(repo: PgComicEdits, speech: ComicEditSpeec
     const input = comicEditAppendSourceSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
     return c.json(await repo.appendSource(c.get("userId"), id(c.req.param("id")), input.data));
+  });
+  app.post("/edits/:id/sync-episode", limit, async c => {
+    const input = comicDramaEditSyncSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ code: "INVALID_INPUT" }, 400);
+    return c.json(await repo.syncEpisodeSources(c.get("userId"), id(c.req.param("id")), input.data.expectedRevision));
   });
   app.post("/edits/:id/auto-dialogue/preview", limit, async c => {
     const input = comicEditAutoDialoguePreviewSchema.safeParse(await c.req.json().catch(() => null));

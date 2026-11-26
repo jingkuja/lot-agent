@@ -1,4 +1,5 @@
 import { isVideoFaceSwapModel, ProviderError } from "@lot-agent/core";
+import { SEEDANCE_2_MARKETING_PROFILE } from "@lot-agent/core/marketing-video";
 import { GenerationError } from "./errors.js";
 import { createHash } from "node:crypto";
 import { ImageResultUnknown } from "./image-receipts.js";
@@ -11,7 +12,7 @@ import { inspectPosterBackground, renderPoster } from "./poster-render.js";
 import { parsePosterLayout, type PosterLayout } from "@lot-agent/core/poster";
 import { parsePosterReference, posterImageUrl, POSTER_UNAVAILABLE } from "./poster-library.js";
 import type { PrepareKlingVoicesInput } from "./kling-voices.js";
-import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia, GenerationCallOptions } from "@lot-agent/core";
+import type { CreateResult, MediaType, PollResult, ReferenceInput, ReferenceMedia, GenerationCallOptions, VideoGenerationRequest } from "@lot-agent/core";
 
 /**
  * Media-neutral view of a generation provider. Both `ImageGenerationProvider`
@@ -33,6 +34,7 @@ export interface JobGenerationProvider {
     generate_audio?: boolean;
     input_reference?: ReferenceInput;
     reference_video?: ReferenceInput;
+    seedanceReference?: VideoGenerationRequest["seedanceReference"];
     reference_audio?: ReferenceInput;
     first_frame?: string;
     last_frame?: string;
@@ -494,8 +496,13 @@ export async function runGenerationJob(deps: RunJobDeps, job: JobLike, mediaType
         publicMedia = media ? await Promise.all(media.filter(item => item.type !== "reference_audio").map(async item => ({ ...item, url: await publicReference(deps, item.url) as string }))) : undefined;
       }
       await assertNotCancelled();
+      const seedanceReference: VideoGenerationRequest["seedanceReference"] =
+        input.marketingInputVersion && deps.modelId === SEEDANCE_2_MARKETING_PROFILE.modelId && publicVideoReference
+          ? { operation: "reference", followsSource: false, explicitTaskType: false }
+          : undefined;
       const createRequest = {
         prompt,
+        ...(seedanceReference ? { seedanceReference } : {}),
         size: input.size as string | undefined,
         ...(mediaType === "video" && typeof input.resolution === "string" ? { resolution: input.resolution } : {}),
         n: input.n as number | undefined,

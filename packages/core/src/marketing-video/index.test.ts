@@ -162,7 +162,7 @@ it("applies Kling's three-image reference video rule", () => {
 
 it("uses a Grok reference video alone and caps references at 720p", () => {
   const id = "11111111-1111-4111-8111-111111111111";
-  expect(DEFAULT_MARKETING_VIDEO_MODEL).toBe("grok-imagine-video-1.5");
+  expect(DEFAULT_MARKETING_VIDEO_MODEL).toBe("doubao-seedance-2-0");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id } }), grok)).toBe("");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ assets: { video: id, portrait: id } }), grok)).toContain("不会参与生成");
   expect(marketingReferenceError(MarketingDraftSchema.parse({ quality: "1080p", assets: { scene: id } }), grok)).toContain("720p");
@@ -295,13 +295,13 @@ it("resolves model profiles for new and frozen jobs", () => {
   expect(marketingJobProfile({ modelId: "doubao-seedance-2-5" })).toBe(SEEDANCE_MARKETING_PROFILE);
 });
 
-it("makes 1080p and reference-video drafts with Seedance 2.5, which allows 15-second shots and 1080p references", () => {
+it("uses the 1080p model by quality even when the draft has a reference video", () => {
   const video = "11111111-1111-4111-8111-111111111111";
   const draft = (value: object) => MarketingDraftSchema.parse(value);
   expect(marketingDraftProfile(draft({}), kling)).toBe(kling);
   expect(marketingDraftProfile(draft({ quality: "1080p" }), grok)).toBe(SEEDANCE_MARKETING_PROFILE);
   const withVideo = draft({ assets: { video } });
-  expect(marketingDraftProfile(withVideo, grok)).toBe(SEEDANCE_MARKETING_PROFILE);
+  expect(marketingDraftProfile(withVideo, grok)).toBe(grok);
   expect(marketingShotMaxSeconds(withVideo, SEEDANCE_MARKETING_PROFILE)).toBe(15);
   const hd = draft({ quality: "1080p", assets: { portrait: video } });
   expect(marketingReferenceError(hd, grok)).toContain("720p");

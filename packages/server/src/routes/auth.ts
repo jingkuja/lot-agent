@@ -63,6 +63,7 @@ function passwordResetPageUrl(c: { req: { header(name: string): string | undefin
 async function upsertManagedSession(
   service: AgentService,
   result: ManagedUserResult,
+  createSession: (owner: string) => Promise<string>,
   wechat?: { openid: string; unionid?: string; reassign?: boolean }
 ) {
   const user = await service.db.upsertManagedUser({
@@ -83,12 +84,18 @@ async function upsertManagedSession(
       logger.warn("local wechat cache bind skipped", { bind, userId: user.id });
     }
   }
-  const token = await service.sessions.createSession(user.id);
+  const token = await createSession(user.id);
   return { token, user: toPublicUser(user) };
 }
 
-export function createAuthRoutes(service: AgentService): Hono {
+export function createAuthRoutes(service: AgentService, enqueueAssetGroup?: (owner: string) => Promise<void>): Hono {
   const app = new Hono();
+
+  const createSession = async (owner: string) => {
+    const token = await service.sessions.createSession(owner);
+    await enqueueAssetGroup?.(owner).catch(() => logger.warn("Volc asset group could not be queued", { owner }));
+    return token;
+  };
 
   const resolveSessionUser = async (authorization?: string) => {
     if (!authorization?.startsWith("Bearer ")) return null;
@@ -155,7 +162,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             username: result.name,
             apiKeys: result.apiKeys,
           });
-      const token = await service.sessions.createSession(user.id);
+      const token = await createSession(user.id);
       return c.json({ token, user: toPublicUser(user) });
     } catch (err) {
       // Client sees one generic message; the cause is logged for operators.
@@ -297,7 +304,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         apiKey: result.managedKey.apiKey,
         credentialVersion: result.managedKey.credentialVersion,
       });
-      const token = await service.sessions.createSession(user.id);
+      const token = await createSession(user.id);
       return c.json({ token, user: toPublicUser(user) });
     } catch (err) {
       logger.warn("phone login failed", { route: "phone-login", err });
@@ -416,7 +423,7 @@ export function createAuthRoutes(service: AgentService): Hono {
         apiKey: result.managedKey.apiKey,
         credentialVersion: result.managedKey.credentialVersion,
       });
-      const token = await service.sessions.createSession(user.id);
+      const token = await createSession(user.id);
       return c.json({ token, user: toPublicUser(user) });
     } catch (err) {
       logger.warn("registration failed", { route: "register", err });
@@ -460,7 +467,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             username: result.name,
             apiKeys: result.apiKeys,
           });
-      const sessionToken = await service.sessions.createSession(user.id);
+      const sessionToken = await createSession(user.id);
       return c.json({ token: sessionToken, user: toPublicUser(user) });
     } catch (err) {
       // Same opacity as /login — client sees one message; cause is logged.
@@ -487,7 +494,7 @@ export function createAuthRoutes(service: AgentService): Hono {
     try {
       const wechat = await exchangeWechatCode(code);
       const result = await service.tokenhub.authenticateWechatMiniUser(wechat.openid, wechat.unionid);
-      const session = await upsertManagedSession(service, result, wechat);
+      const session = await upsertManagedSession(service, result, createSession, wechat);
       return c.json(session);
     } catch (err) {
       logger.warn("wechat-login failed", { route: "wechat-login", err });
@@ -591,7 +598,7 @@ export function createAuthRoutes(service: AgentService): Hono {
             reassign: true,
           }
         : undefined;
-      const session = await upsertManagedSession(service, result, wechat);
+      const session = await upsertManagedSession(service, result, createSession, wechat);
       if (pending.fromLocalUserId !== session.user.id) {
         await service.db.reassignUserOwnedData(pending.fromLocalUserId, session.user.id);
         await service.db.deleteLocalUser(pending.fromLocalUserId);

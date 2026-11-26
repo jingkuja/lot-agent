@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, resolveMarketingSegments, SEEDANCE_MARKETING_PROFILE,
+import { GROK_MARKETING_PROFILE, KLING_MARKETING_PROFILE, MarketingDraftSchema, resolveMarketingSegments, SEEDANCE_2_MARKETING_PROFILE,
   storyboardScript } from "@lot-agent/core/marketing-video";
 import { stableRequestId, withDraftField } from "./draft-editor.js";
 
@@ -31,10 +31,9 @@ describe("draft field edits", () => {
     const withVideo = withDraftField(draft, "assets", { video: "11111111-1111-4111-8111-111111111111" }, KLING_MARKETING_PROFILE);
     expect(withVideo.storyboardAudio).toBe(true);
     expect(withVideo.storyboard).toHaveLength(2);
-    // A reference video goes to Seedance 2.5, which keeps 15-second shots whatever model is configured.
-    const grok = withDraftField(draft, "assets", { video: "11111111-1111-4111-8111-111111111111" }, GROK_MARKETING_PROFILE);
-    expect(grok.storyboard.map(s => s.durationSec)).toEqual([15, 15]);
-    expect(() => resolveMarketingSegments(grok, SEEDANCE_MARKETING_PROFILE)).not.toThrow();
+    const seedance = withDraftField(draft, "assets", { video: "11111111-1111-4111-8111-111111111111" }, SEEDANCE_2_MARKETING_PROFILE);
+    expect(seedance.storyboard.map(s => s.durationSec)).toEqual([15, 15]);
+    expect(() => resolveMarketingSegments(seedance, SEEDANCE_2_MARKETING_PROFILE)).not.toThrow();
     expect(withDraftField(withVideo, "assets", {}, KLING_MARKETING_PROFILE).storyboardAudio).toBe(true);
   });
 });

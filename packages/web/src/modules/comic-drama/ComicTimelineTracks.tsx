@@ -75,14 +75,14 @@ function tryRelease(target: HTMLElement, pointerId: number) {
 
 export function ComicTimelineTracks({
   timeline, videoSources, audioSources, audioNames = {}, selectedVideo, positionMs, seek, selectVideo, update, disabled,
-  canUndo = false, canRedo = false, onUndo, onRedo, onInteractingChange,
+  canUndo = false, canRedo = false, onUndo, onRedo, onInteractingChange, onPreviewTemp,
 }: {
   timeline: ComicTimeline; videoSources: ComicEditSource[]; audioSources: ComicEditAudioSource[];
   audioNames?: Readonly<Record<string, string>>; selectedVideo?: string;
   positionMs: number; seek: (ms: number) => void; selectVideo: (id: string) => void;
   update: (timeline: ComicTimeline) => void; disabled: boolean;
   canUndo?: boolean; canRedo?: boolean; onUndo?: () => void; onRedo?: () => void;
-  onInteractingChange?: (interacting: boolean) => void;
+  onInteractingChange?: (interacting: boolean) => void; onPreviewTemp?: () => void;
 }) {
   const { t } = useI18n();
   const [selection, setSelection] = useState<Selection>();
@@ -428,6 +428,11 @@ export function ComicTimelineTracks({
             }}>{t("适应")}</button>
           )}
         </div>
+        {onPreviewTemp && (
+          <button type="button" className="primary" disabled={!layout.durationMs} onClick={onPreviewTemp}>
+            {t("试看临时成片")}
+          </button>
+        )}
       </div>
     </header>
     {!!layout.durationMs && (
@@ -438,7 +443,6 @@ export function ComicTimelineTracks({
     <div className="comic-track-ruler">
       <label>{t("定位播放位置")}<input type="range" min={0} max={total} step={1} value={playhead} disabled={!layout.durationMs}
         onChange={event => seek(Number(event.target.value))} /></label>
-      <div aria-hidden="true">{Array.from({ length: 5 }, (_, index) => <span key={index}>{t("{0} 秒", [Math.round(total * index / 40) / 100])}</span>)}</div>
     </div>
     <div ref={viewportRef} className="comic-tracks-viewport">
       <div className="comic-tracks-inner" style={zoom > 1 ? { width: `${zoom * 100}%` } : undefined}>
@@ -642,7 +646,14 @@ export function ComicTimelineTracks({
       </div>
     )}
 
-    {trackNotice && <p className="comic-generation-note" role="status">{trackNotice}</p>}
+    {trackNotice && (
+      <div className="comic-track-notice-bar" role="status">
+        <span>{trackNotice}</span>
+        {onPreviewTemp && !!layout.durationMs && (
+          <button type="button" onClick={onPreviewTemp}>{t("试看临时成片")}</button>
+        )}
+      </div>
+    )}
     {!!overflow.size && (
       <div className="comic-error comic-overflow-banner" role="alert">
         <span>{t("有配音、音乐、音效或字幕超出可用时间，请调整后导出")}</span>

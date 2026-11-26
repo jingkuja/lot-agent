@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { MarketingCaption, MarketingCaptionTiming } from "./captions.js";
-import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, SEEDANCE_MARKETING_PROFILE, type MarketingVideoProfile } from "./models.js";
+import { KLING_MARKETING_PROFILE, MARKETING_MAX_SECTION_IMAGES, marketingVideoProfile, SEEDANCE_MARKETING_PROFILE,
+  type MarketingVideoProfile } from "./models.js";
 
 export * from "./models.js";
 
@@ -167,10 +168,9 @@ export const marketingNativeSpeech = (draft: Pick<MarketingDraft, "narration" | 
  * twin narration. Rules always come from the profile of the recorded `modelId`. */
 export const MARKETING_INPUT_VERSION = 4;
 
-/** Clip model of a new video: 1080p, or a reference video at any quality, goes to Seedance 2.5; the rest to the
- * `configured` model (`MARKETING_VIDEO_MODEL`). */
-export function marketingDraftProfile(draft: Pick<MarketingDraft, "quality" | "assets">, configured: MarketingVideoProfile): MarketingVideoProfile {
-  return draft.quality === "1080p" || draft.assets.video ? SEEDANCE_MARKETING_PROFILE : configured;
+/** Clip model of a new video. The server advertises its 720p model through capabilities. */
+export function marketingDraftProfile(draft: Pick<MarketingDraft, "quality">, standard: MarketingVideoProfile): MarketingVideoProfile {
+  return draft.quality === "1080p" ? SEEDANCE_MARKETING_PROFILE : standard;
 }
 /** Profile of a frozen job; inputs without a model id were submitted to Kling. */
 export function marketingJobProfile(input: { modelId?: unknown }): MarketingVideoProfile {
@@ -285,6 +285,7 @@ export const MARKETING_FAILURE_CODES = [
   "CONNECT_FAILED", "REAL_PERSON_REJECTED", "MODEL_AUTH_REQUIRED", "CONFIG_MISSING", "MODEL_QUOTA", "MODEL_RATE_LIMIT",
   "JOB_BUSY", "DOWNLOAD_INCOMPLETE", "GENERATION_FAILED", "TIMED_OUT", "STATUS_UNCONFIRMED", "QUALITY_CHECK_FAILED",
   "NOT_RECOVERABLE", "COMPOSITION_FAILED", "SUBMISSION_UNKNOWN", "NARRATION_INVALID", "GATEWAY_FAILED",
+  "MATERIAL_SYNC_PENDING", "MATERIAL_SYNC_FAILED",
 ] as const;
 export type MarketingFailureCode = typeof MARKETING_FAILURE_CODES[number];
 export function isMarketingFailureCode(value: unknown): value is MarketingFailureCode {

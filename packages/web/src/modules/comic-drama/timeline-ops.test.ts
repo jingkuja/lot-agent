@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
-import { comicTimelineOverflow, comicTimelineSchema, layoutComicTimeline, type ComicTimeline } from "@lot-agent/core/comic-drama";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  comicTimelineOverflow, comicTimelineSchema, layoutComicTimeline, type ComicEdit, type ComicRender, type ComicTimeline,
+} from "@lot-agent/core/comic-drama";
+import { ComicTempPreviewDialog } from "./ComicTempPreviewDialog.js";
 import { ComicTimelineTracks } from "./ComicTimelineTracks.js";
+import { comicEditApi } from "./edit-api.js";
 import {
   computeRulerTicks, fixAllTimelineOverflows, fixOverlayOverflow, getOverlayItemTitle,
   getTrackShiftBounds, moveOverlayItem, resizeOverlayItem, resolveAnchorForMove,
@@ -304,6 +308,158 @@ describe("ComicTimelineTracks UI usability & compatibility", () => {
       expect(inspector.querySelector('input[name="offset"]')).toBeTruthy();
       expect(inspector.querySelector('input[name="duration"]')).toBeTruthy();
       expect(Array.from(inspector.querySelectorAll("button")).some(b => b.textContent === "应用轨道设置")).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+
+  it("triggers onPreviewTemp from timeline toolbar", () => {
+    const timeline = makeTimeline();
+    const onPreviewTemp = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      act(() => {
+        root.render(createElement(ComicTimelineTracks, {
+          timeline,
+          videoSources: [],
+          audioSources: [],
+          positionMs: 0,
+          seek: () => {},
+          selectVideo: () => {},
+          update: () => {},
+          disabled: false,
+          onPreviewTemp,
+        }));
+      });
+      const previewBtn = Array.from(container.querySelectorAll("button"))
+        .find(btn => btn.textContent === "试看临时成片");
+      expect(previewBtn).toBeTruthy();
+      act(() => { previewBtn!.click(); });
+      expect(onPreviewTemp).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+});
+
+describe("ComicTempPreviewDialog ephemeral preview lifecycle", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const makeEdit = (timeline: ComicTimeline): ComicEdit => ({
+    id: uuid(500),
+    seriesId: uuid(501),
+    title: "试看工程",
+    revision: 4,
+    updatedAt: new Date().toISOString(),
+    timeline,
+    sources: [],
+    audioSources: [],
+  });
+
+  it("auto-saves, renders ephemeral preview, and deletes immediately on close", async () => {
+    const timeline = makeTimeline();
+    const edit = makeEdit(timeline);
+    const renderId = uuid(600);
+    const ensureSaved = vi.fn(async () => edit);
+    const close = vi.fn();
+
+    const startSpy = vi.spyOn(comicEditApi, "startRender").mockResolvedValue({
+      id: renderId, editId: edit.id, editRevision: edit.revision, durationMs: 10_000,
+      status: "pending", error: null, mediaId: null, title: edit.title,
+      createdAt: new Date().toISOString(), recoverable: false, ephemeral: true,
+    } satisfies ComicRender);
+    const pollSpy = vi.spyOn(comicEditApi, "render").mockResolvedValue({
+      id: renderId, editId: edit.id, editRevision: edit.revision, durationMs: 10_000,
+      status: "ready", error: null, mediaId: uuid(601), title: edit.title,
+      createdAt: new Date().toISOString(), recoverable: false, ephemeral: true,
+    } satisfies ComicRender);
+    const downloadSpy = vi.spyOn(comicEditApi, "downloadRender").mockResolvedValue({
+      url: "/api/public/comic-drama-media/preview.mp4?render=" + renderId + "&inline=1",
+      filename: `comic-${renderId}.mp4`,
+    });
+    const removeSpy = vi.spyOn(comicEditApi, "removeRender").mockResolvedValue({ ok: true });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(ComicTempPreviewDialog, {
+          aspectRatio: "9:16",
+          ensureSaved,
+          close,
+        }));
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 700)); });
+
+      expect(ensureSaved).toHaveBeenCalledTimes(1);
+      expect(startSpy).toHaveBeenCalledWith(edit.id, expect.objectContaining({
+        expectedRevision: edit.revision,
+        ephemeral: true,
+      }));
+      expect(pollSpy).toHaveBeenCalled();
+      expect(downloadSpy).toHaveBeenCalledWith(renderId, true);
+
+      const video = container.querySelector("video");
+      expect(video?.getAttribute("src")).toContain("preview.mp4");
+
+      const closeDeleteBtn = Array.from(container.querySelectorAll("button"))
+        .find(btn => btn.textContent === "关闭并删除");
+      expect(closeDeleteBtn).toBeTruthy();
+      act(() => { closeDeleteBtn!.click(); });
+
+      expect(removeSpy).toHaveBeenCalledWith(renderId, false);
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+
+  it("cancels and deletes active ephemeral render if user closes dialog while rendering", async () => {
+    const timeline = makeTimeline();
+    const edit = makeEdit(timeline);
+    const renderId = uuid(602);
+    const ensureSaved = vi.fn(async () => edit);
+    const close = vi.fn();
+
+    vi.spyOn(comicEditApi, "startRender").mockResolvedValue({
+      id: renderId, editId: edit.id, editRevision: edit.revision, durationMs: 10_000,
+      status: "running", error: null, mediaId: null, title: edit.title,
+      createdAt: new Date().toISOString(), recoverable: false, ephemeral: true,
+    } satisfies ComicRender);
+    vi.spyOn(comicEditApi, "render").mockResolvedValue({
+      id: renderId, editId: edit.id, editRevision: edit.revision, durationMs: 10_000,
+      status: "running", error: null, mediaId: null, title: edit.title,
+      createdAt: new Date().toISOString(), recoverable: false, ephemeral: true,
+    } satisfies ComicRender);
+    const removeSpy = vi.spyOn(comicEditApi, "removeRender").mockResolvedValue({ ok: true });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(ComicTempPreviewDialog, {
+          aspectRatio: "9:16",
+          ensureSaved,
+          close,
+        }));
+      });
+
+      const cancelBtn = Array.from(container.querySelectorAll("button"))
+        .find(btn => btn.textContent === "取消");
+      expect(cancelBtn).toBeTruthy();
+      act(() => { cancelBtn!.click(); });
+
+      expect(removeSpy).toHaveBeenCalledWith(renderId, false);
+      expect(close).toHaveBeenCalledTimes(1);
     } finally {
       act(() => root.unmount());
       container.remove();

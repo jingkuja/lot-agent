@@ -284,22 +284,6 @@ describe("marketing project HTTP boundaries", () => {
     const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ error: expect.stringContaining("过长") });
   });
-  it("rejects an oversized shot prompt before any quota, task or provider call", async () => {
-    // Kling's 3072-character cap; Grok's 5000 fits every field at its limit without many images.
-    process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
-    try {
-      const f = fixture();
-      const shots = [1, 2].map(() => ({ durationSec: 15, script: "欢迎来喝咖啡。", visual: "画面".repeat(300), action: "动作".repeat(200), camera: "镜头".repeat(200) }));
-      f.project.draft = MarketingDraftSchema.parse({ storyboard: shots, script: storyboardScript(shots), background: "背景".repeat(300) });
-      const response = await f.call(`/${id}/generate`, { version: 1, retry: false });
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ error: "生成提示词过长，请精简分镜画面、动作、镜头或统一人物、产品与场景设定。" });
-      expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
-      expect(f.store.reserve).not.toHaveBeenCalled();
-      expect(f.service.marketingText).not.toHaveBeenCalled();
-      expect(f.service.jobQueue.deliverPersisted).not.toHaveBeenCalled();
-    } finally { delete process.env.MARKETING_VIDEO_MODEL; }
-  });
   it("bounds JSON request bodies", async () => {
     const f = fixture();
     expect((await f.call(`/${id}`, { draft: "x".repeat(140000) }, "PUT")).status).toBe(413);
@@ -319,7 +303,7 @@ describe("marketing storyboard editing", () => {
     expect((await f.call(`/${id}/storyboard`, { version: 1, locale: "zh", instruction: "调整节奏" })).status).toBe(200);
     expect(f.store.save).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ durationSec: 60, storyboard: shots }));
     Object.assign(f.project.draft, { storyboard: shots, script: storyboardScript(shots) });
-    f.service.modelCatalog.pricing = { "grok-imagine-video-1.5": { inputPrice: 0, outputPrice: 0, unitPrice: 1 } };
+    f.service.modelCatalog.pricing = { "doubao-seedance-2-0": { inputPrice: 0, outputPrice: 0, unitPrice: 1 } };
     expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
     expect(f.service.usageMeter.checkQuota).toHaveBeenCalledWith("owner", total);
     for (const timings of [[14, 13, 13, 13, 13], [14, 14, 14, 14, 14]]) {
@@ -484,9 +468,9 @@ it("restores all image metadata and submits references in category order", async
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: ids.map(assetId => `/static/${assetId}.png`) }), false);
   const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2);
-  expect(prompt).toContain("Use <IMAGE_0>, <IMAGE_1>, <IMAGE_2> for the presenter's identity only;");
-  expect(prompt).toContain("Use <IMAGE_3>, <IMAGE_4> for one product's exact look");
-  expect(prompt).toContain("Use <IMAGE_5>, <IMAGE_6> for the setting and spatial layout; <IMAGE_7> for relevant scene composition, objects and details;");
+  expect(prompt).toContain("Use @Image1, @Image2, @Image3 for the presenter's identity only;");
+  expect(prompt).toContain("Use @Image4, @Image5 for one product's exact look");
+  expect(prompt).toContain("Use @Image6, @Image7 for the setting and spatial layout; @Image8 for relevant scene composition, objects and details;");
 });
 
 it("submits the key-art still after the chosen images and freezes it for shot redos", async () => {
@@ -498,8 +482,8 @@ it("submits the key-art still after the chosen images and freezes it for shot re
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
   expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ input_reference: [`/static/${portrait}.png`, `/static/uploads/${still}.png`], key_art: still }), false);
   const prompt = marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2, undefined, undefined, undefined, true);
-  expect(prompt).toContain("Use <IMAGE_0> for the presenter's identity only.");
-  expect(prompt).toContain("<IMAGE_1> is the key-art still shared by every shot");
+  expect(prompt).toContain("Use @Image1 for the presenter's identity only.");
+  expect(prompt).toContain("@Image2 is the key-art still shared by every shot");
   expect(prompt).toContain("portraits decide the face");
   expect(marketingSegmentPrompt(f.project.draft, { index: 0, script: "欢迎品尝。", durationSec: 15 }, 2)).not.toContain("key-art");
 });
@@ -529,7 +513,7 @@ it("validates reference video metadata and sends it with audio disabled", async 
   const videoId = randomUUID();
   f.project.draft.assets = { video: videoId, voice: randomUUID() };
   f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: args[0] === videoId ? "video/mp4" : "audio/wav", size_bytes: 100, url: `/static/${args[0]}` }));
-  // Reference videos go to Seedance 2.5; Kling's 3–15.5 s / 700 px limits do not apply.
+  // 720p reference videos use Seedance 2.0.
   const info = {
     format: "mov", video: true, audio: false, duration: 20, width: 640, height: 360, fps: 30, rotation: 0, transfer: undefined,
     videoCodec: "h264", audioCodec: undefined, sampleRate: NaN, channels: NaN, mov: false,
@@ -539,7 +523,7 @@ it("validates reference video metadata and sends it with audio disabled", async 
   expect(f.store.reserve).not.toHaveBeenCalled();
   vi.mocked(inspectMedia).mockResolvedValueOnce(info);
   expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "doubao-seedance-2-5", reference_video: [`/static/${videoId}`],
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ marketingInputVersion: 4, modelId: "doubao-seedance-2-0", reference_video: [`/static/${videoId}`],
     generate_audio: false, reference_audio: undefined, local_subtitles: true }), false);
 });
 it("burns the captions of a model-voiced video locally, so it needs a host that can burn them", async () => {
@@ -558,16 +542,15 @@ it("burns the captions of a model-voiced video locally, so it needs a host that 
   } finally { vi.mocked(mediaCapabilities).mockResolvedValue({ composition: true, subtitles: true }); }
 });
 
-it("submits new clips with the configured model profile", async () => {
-  process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
-  try {
-    const f = fixture();
-    expect(await (await f.call("/capabilities", undefined, "GET")).json()).toMatchObject({ model: { modelId: "kling-video-v3-omni", imagesWithReferenceVideo: 3 } });
-    f.project.draft.assets = { portrait: id };
-    f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner", mime: "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
-    expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
-    expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1, expect.objectContaining({ modelId: "kling-video-v3-omni", input_reference: [`/static/${id}`] }), false);
-  } finally { delete process.env.MARKETING_VIDEO_MODEL; }
+it("submits new 720p clips with the Seedance 2.0 profile", async () => {
+  const f = fixture();
+  expect(await (await f.call("/capabilities", undefined, "GET")).json()).toMatchObject({ model: { modelId: "doubao-seedance-2-0" } });
+  f.project.draft.assets = { portrait: id };
+  f.service.db.getAsset.mockImplementation(async (...args: unknown[]) => ({ user_id: "owner",
+    mime: "image/png", size_bytes: 100, url: `/static/${args[0]}` }));
+  expect((await f.call(`/${id}/generate`, { version: 1, retry: false })).status).toBe(202);
+  expect(f.store.reserve).toHaveBeenCalledWith("owner", id, 1,
+    expect.objectContaining({ modelId: "doubao-seedance-2-0", input_reference: [`/static/${id}`] }), false);
 });
 
 it("rejects a reference video with images before billing, and makes 1080p references with Seedance 2.5", async () => {
@@ -818,21 +801,7 @@ describe("server reference image contract", () => {
     f.service.db.getAsset.mockImplementation(async () => ({ user_id: "owner", mime, size_bytes: 100, url: `/static/${id}`, original_name: "face.png" }) as never);
     return f;
   }
-  it("checks the file signature and size against the Kling contract before reserving", async () => {
-    process.env.MARKETING_VIDEO_MODEL = "kling-video-v3-omni";
-    try {
-      for (const info of [{ mime: "image/webp" as const, width: 800, height: 800 }, { mime: "image/png" as const, width: 200, height: 800 }, { mime: "image/png" as const, width: 2000, height: 600 }, null]) {
-        const f = withImage();
-        vi.mocked(readImageInfo).mockResolvedValueOnce(info);
-        const response = await generate(f);
-        expect(response.status).toBe(400);
-        expect((await response.json() as { error: string }).error).toMatch(/^(当前视频模型的参考图|参考图)/);
-        expect(f.store.reserve).not.toHaveBeenCalled(); expect(f.service.usageMeter.checkQuota).not.toHaveBeenCalled();
-      }
-      expect((await generate(withImage())).status).toBe(202);
-    } finally { delete process.env.MARKETING_VIDEO_MODEL; }
-  });
-  it("accepts a real WebP for Grok but rejects an undecodable file", async () => {
+  it("accepts a real WebP for Seedance but rejects an undecodable file", async () => {
     vi.mocked(readImageInfo).mockResolvedValueOnce({ mime: "image/webp", width: 64, height: 64 });
     expect((await generate(withImage("image/webp"))).status).toBe(202);
     vi.mocked(readImageInfo).mockResolvedValueOnce(null);

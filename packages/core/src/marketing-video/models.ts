@@ -3,8 +3,7 @@
  * through the shared `/videos` request; a profile only describes the model's
  * limits so drafts, storyboards and recovery stay model-agnostic.
  *
- * To switch models, set `MARKETING_VIDEO_MODEL` on the server to another
- * profile id. Frozen jobs keep the profile of the `modelId` they recorded, so
+ * Frozen jobs keep the profile of the `modelId` they recorded, so
  * never remove a profile that existing jobs may still reference.
  */
 export interface MarketingVideoProfile {
@@ -82,7 +81,7 @@ export const GROK_MARKETING_PROFILE: MarketingVideoProfile = {
   referenceImage: { formats: ["image/jpeg", "image/png", "image/webp"], maxBytes: 20 * 1024 * 1024 },
 };
 
-// Seedance 2.5 makes 1080p clips and clips with a reference video (`marketingDraftProfile`). Image limits and the
+// Seedance 2.5 makes 1080p clips. Image limits and the
 // image contract are Grok's, so switching quality never invalidates chosen images; a reference video is still used
 // without images. With a reference video Seedance only accepts `duration: -1` / `ratio: "adaptive"` (tested), so
 // the clip is as long as its reference: each clip gets the reference trimmed to its shot. No reference video limits
@@ -100,8 +99,22 @@ export const SEEDANCE_MARKETING_PROFILE: MarketingVideoProfile = {
   referenceImage: GROK_MARKETING_PROFILE.referenceImage,
 };
 
-export const MARKETING_VIDEO_PROFILES: readonly MarketingVideoProfile[] = [KLING_MARKETING_PROFILE, GROK_MARKETING_PROFILE, SEEDANCE_MARKETING_PROFILE];
-export const DEFAULT_MARKETING_VIDEO_MODEL = GROK_MARKETING_PROFILE.modelId;
+export const SEEDANCE_2_MARKETING_PROFILE: MarketingVideoProfile = {
+  modelId: "doubao-seedance-2-0",
+  shotMaxSeconds: 15,
+  referenceVideoShotMaxSeconds: 15,
+  referenceImages: { ...GROK_MARKETING_PROFILE.referenceImages, total: 9 },
+  imagesWithReferenceVideo: 0,
+  imagePromptTag: SEEDANCE_MARKETING_PROFILE.imagePromptTag,
+  videoPromptTag: SEEDANCE_MARKETING_PROFILE.videoPromptTag,
+  promptMaxChars: 5000,
+  referenceImage: GROK_MARKETING_PROFILE.referenceImage,
+};
+
+export const MARKETING_VIDEO_PROFILES: readonly MarketingVideoProfile[] = [
+  KLING_MARKETING_PROFILE, GROK_MARKETING_PROFILE, SEEDANCE_MARKETING_PROFILE, SEEDANCE_2_MARKETING_PROFILE,
+];
+export const DEFAULT_MARKETING_VIDEO_MODEL = SEEDANCE_2_MARKETING_PROFILE.modelId;
 /** Largest image section of any profile; drafts store at most this many per slot. */
 export const MARKETING_MAX_SECTION_IMAGES = Math.max(...MARKETING_VIDEO_PROFILES.flatMap(profile => [profile.referenceImages.portrait, profile.referenceImages.product, profile.referenceImages.setting]));
 

@@ -8,6 +8,7 @@ import { ApiClientError } from "../../api/client.js";
 import { useI18n } from "../../i18n/index.js";
 import { ComicTrimmedPreview } from "./ComicTrimmedPreview.js";
 import { ComicTimelineTracks } from "./ComicTimelineTracks.js";
+import { ComicTempPreviewDialog } from "./ComicTempPreviewDialog.js";
 import { ComicRenderPanel } from "./ComicRenderPanel.js";
 import { ComicDialogueAudio } from "./ComicDialogueAudio.js";
 import { ComicVideoHistory } from "./ComicVideoHistory.js";
@@ -15,18 +16,38 @@ import { comicEditApi, editError } from "./edit-api.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicLibraryApi } from "./library-api.js";
 import { LibraryDialog } from "./LibraryParts.js";
+import { fixAllTimelineOverflows } from "./timeline-ops.js";
 
 type Video = ComicTimeline["video"][number];
 type Editable = Pick<ComicEdit, "title" | "timeline">;
 const seconds = (ms: number) => String(ms / 1000);
 
-export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDialogue, onAutoDialogueOpened }: {
-  id: string; exit: () => void; openVideo: (seriesId: string, clipId: string) => void; setGuard: (guard: (() => boolean) | null) => void;
-  autoOpenDialogue?: boolean; onAutoDialogueOpened?: () => void;
+export function ComicEditWorkspace({
+  id,
+  initialData,
+  embeddedInDramaTask = false,
+  exit,
+  openVideo,
+  setGuard,
+  autoOpenDialogue,
+  onAutoDialogueOpened,
+  onProjectChange,
+  onSwitchEpisode,
+}: {
+  id: string;
+  initialData?: ComicEdit | null;
+  embeddedInDramaTask?: boolean;
+  exit: () => void;
+  openVideo: (seriesId: string, clipId: string) => void;
+  setGuard: (guard: (() => boolean) | null) => void;
+  autoOpenDialogue?: boolean;
+  onAutoDialogueOpened?: () => void;
+  onProjectChange?: (project: ComicEdit) => void;
+  onSwitchEpisode?: (dramaId: string, seriesId: string) => void;
 }) {
   const { t } = useI18n();
-  const [project, setProject] = useState<ComicEdit | null>(null);
-  const [draft, setDraft] = useState<Editable | null>(null);
+  const [project, setProject] = useState<ComicEdit | null>(initialData ?? null);
+  const [draft, setDraft] = useState<Editable | null>(initialData ? { title: initialData.title, timeline: initialData.timeline } : null);
   const [extra, setExtra] = useState<ComicEditSource[]>([]);
   const [extraAudio, setExtraAudio] = useState<Array<{ id: string; durationMs: number }>>([]);
   const [selected, setSelected] = useState("");
@@ -46,21 +67,30 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   const [dialogueOverrides, setDialogueOverrides] = useState<Record<string, ComicEditAutoDialogueOverride>>({});
   const [replaceNativeIds, setReplaceNativeIds] = useState<string[]>([]);
   const autoOpenedRef = useRef(false);
+  const initialUsedRef = useRef(Boolean(initialData));
+  const onProjectChangeRef = useRef(onProjectChange);
+  onProjectChangeRef.current = onProjectChange;
   const [position, setPosition] = useState(0);
   const [seek, setSeek] = useState({ ms: 0 });
   const [interacting, setInteracting] = useState(false);
+  const [tempPreviewOpen, setTempPreviewOpen] = useState(false);
   const [audioNames, setAudioNames] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<{ past: ComicTimeline[]; future: ComicTimeline[] }>({ past: [], future: [] });
   const draggingIndex = useRef<number | null>(null);
   const pending = useRef(false);
-  const dirty = !!project && !!draft && (draft.title !== project.title || draft.timeline !== project.timeline);
-  const receive = (data: ComicEdit) => {
+  const savePromiseRef = useRef<Promise<ComicEdit | null> | null>(null);
+  const readOnly = Boolean(project?.dramaArchivedAt);
+  const dirty = !!project && !!draft && !readOnly && (draft.title !== project.title || draft.timeline !== project.timeline);
+  const latestRef = useRef({ project, draft, dirty });
+  latestRef.current = { project, draft, dirty };
+  const receive = useCallback((data: ComicEdit) => {
     setProject(data);
     setDraft({ title: data.title, timeline: data.timeline });
     setExtra([]);
     setExtraAudio([]);
     setSavePaused(false);
-  };
+    onProjectChangeRef.current?.(data);
+  }, []);
   useEffect(() => {
     setGuard(() => !pending.current && (!dirty || window.confirm(t("放弃未保存的工程修改？"))));
     return () => setGuard(null);
@@ -72,14 +102,18 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     return () => window.removeEventListener("beforeunload", guard);
   }, [dirty]);
   useEffect(() => {
+    if (attempt === 0 && initialUsedRef.current && initialData?.id === id) {
+      initialUsedRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     setHistory({ past: [], future: [] });
     setAudioNames({});
     void comicEditApi.get(id, controller.signal).then(data => {
       if (!controller.signal.aborted) { receive(data); setError(""); }
-    }).catch(error => { if (!controller.signal.aborted) setError(editError(error)); });
+    }).catch(err => { if (!controller.signal.aborted) setError(editError(err)); });
     return () => controller.abort();
-  }, [id, attempt]);
+  }, [id, attempt, initialData, receive]);
 
   const reload = () => {
     if (pending.current || (dirty && !window.confirm(t("放弃未保存的工程修改？")))) return;
@@ -94,34 +128,76 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     catch (error) { setError(editError(error)); }
     finally { pending.current = false; setSaving(false); }
   }, []);
+  const performSave = useCallback(async (
+    targetTitle: string,
+    targetTimeline: ComicTimeline,
+    expectedRevision: number,
+  ): Promise<ComicEdit | null> => {
+    if (!targetTitle.trim()) return null;
+    if (savePromiseRef.current) await savePromiseRef.current;
+    if (pending.current) return null;
+    pending.current = true;
+    setSaving(true);
+    setError("");
+    const promise = (async () => {
+      try {
+        const saved = await comicEditApi.update(id, {
+          title: targetTitle,
+          timeline: targetTimeline,
+          expectedRevision,
+        });
+        receive(saved);
+        return saved;
+      } catch (reason) {
+        setSavePaused(true);
+        setError(editError(reason));
+        return null;
+      } finally {
+        pending.current = false;
+        setSaving(false);
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = promise;
+    return promise;
+  }, [id]);
   const save = useCallback(() => {
     if (!project || !draft || !dirty || !draft.title.trim()) return;
-    void run(async () => {
-      try {
-        receive(await comicEditApi.update(id, { title: draft.title, timeline: draft.timeline, expectedRevision: project.revision }));
-      } catch (error) {
-        setSavePaused(true);
-        throw error;
-      }
-    });
-  }, [draft, dirty, id, project, run]);
+    void performSave(draft.title, draft.timeline, project.revision);
+  }, [draft, dirty, performSave, project]);
   useEffect(() => {
-    if (!dirty || saving || savePaused || picking || replacement || interacting) return;
+    if (!dirty || saving || savePaused || picking || replacement || interacting || tempPreviewOpen) return;
     const timer = setTimeout(save, 850);
     return () => clearTimeout(timer);
-  }, [dirty, interacting, picking, replacement, save, savePaused, saving]);
-  const apply = (value: ComicTimeline) => {
+  }, [dirty, interacting, picking, replacement, save, savePaused, saving, tempPreviewOpen]);
+  const apply = useCallback((value: ComicTimeline) => {
     const valid = comicTimelineSchema.safeParse(value);
     if (!valid.success) { setError("请检查时间线中的裁切和素材"); return; }
     setError("");
-    if (draft && valid.data !== draft.timeline) {
+    const curDraft = latestRef.current.draft;
+    if (curDraft && valid.data !== curDraft.timeline) {
       setHistory(prev => ({
-        past: [...prev.past.slice(-49), draft.timeline],
+        past: [...prev.past.slice(-49), curDraft.timeline],
         future: [],
       }));
     }
     setDraft(previous => previous && { ...previous, timeline: valid.data });
-  };
+  }, []);
+  const ensureSaved = useCallback(async (): Promise<ComicEdit | null> => {
+    if (savePromiseRef.current) await savePromiseRef.current;
+    const latest = latestRef.current;
+    if (!latest.project || !latest.draft) return null;
+    if (!latest.dirty) return latest.project;
+    return performSave(latest.draft.title, latest.draft.timeline, latest.project.revision);
+  }, [performSave]);
+  const fixOverflowAndSave = useCallback(async (): Promise<ComicEdit | null> => {
+    if (savePromiseRef.current) await savePromiseRef.current;
+    const latest = latestRef.current;
+    if (!latest.project || !latest.draft) return null;
+    const fixed = fixAllTimelineOverflows(latest.draft.timeline);
+    apply(fixed);
+    return performSave(latest.draft.title, fixed, latest.project.revision);
+  }, [apply, performSave]);
   const undo = useCallback(() => {
     if (saving || !draft || !history.past.length) return;
     const previous = history.past[history.past.length - 1]!;
@@ -144,7 +220,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   }, [draft, history.future, saving]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (saving || picking || replacement || dialogueModalOpen) return;
+      if (saving || picking || replacement || dialogueModalOpen || tempPreviewOpen) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
@@ -159,7 +235,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [dialogueModalOpen, history.future.length, history.past.length, picking, redo, replacement, saving, undo]);
+  }, [dialogueModalOpen, history.future.length, history.past.length, picking, redo, replacement, saving, tempPreviewOpen, undo]);
   const choose = (takeId: string) => void run(async () => {
     const take = await comicGenerationApi.videoTake(takeId);
     if (!draft || !take.mediaId || take.durationMs <= 0) return;
@@ -288,6 +364,18 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     }
   };
 
+  const syncEpisodeTakes = () => void run(async () => {
+    const saved = await ensureSaved();
+    if (!saved) return;
+    const prevCount = saved.timeline.video.length;
+    const synced = await comicEditApi.syncEpisode(saved.id, saved.revision);
+    receive(synced);
+    const addedCount = Math.max(0, synced.timeline.video.length - prevCount);
+    setNotice(addedCount > 0
+      ? t("已同步 {0} 个本集采用成片到时间线", [addedCount])
+      : t("时间线已是本集最新采用片源"));
+  });
+
   if (!project || !draft) return error ? <div className="comic-error" role="alert">
     {t(error)} <button type="button" onClick={reload}>{t("重新读取")}</button>
   </div> : <p role="status">{t("加载中…")}</p>;
@@ -325,27 +413,90 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     apply(next);
   };
 
+  const editorLocked = saving || readOnly;
+  const unaddedAdopted = project.unaddedAdoptedTakes ?? [];
+
   return <>
+    {!embeddedInDramaTask && project.taskKind === "drama" && project.dramaId && (project.dramaEpisodes?.length ?? 0) > 0 && (
+      <section className="comic-drama-task-banner" aria-label={t("剧集剪辑任务")}>
+        <div className="comic-drama-task-top">
+          <div className="comic-drama-task-title">
+            <div className="comic-cut-badges">
+              <span className="comic-hierarchy-level">{t("剧集剪辑任务")}</span>
+              <small className="comic-pill" data-tone="frame">{t("作业单位：分集")}</small>
+            </div>
+            <strong>《{project.dramaTitle}》</strong>
+          </div>
+          {onSwitchEpisode && (
+            <div className="comic-actions">
+              {project.dramaEpisodes!.map(ep => (
+                <button
+                  key={ep.seriesId}
+                  type="button"
+                  className="comic-episode-unit-btn"
+                  aria-current={ep.seriesId === project.seriesId ? "true" : undefined}
+                  onClick={() => {
+                    if (ep.seriesId !== project.seriesId && (!dirty || window.confirm(t("放弃未保存的工程修改？")))) {
+                      onSwitchEpisode(project.dramaId!, ep.seriesId);
+                    }
+                  }}
+                >
+                  <span className="comic-episode-unit-title">
+                    <strong>{t("第 {0} 集", [ep.episodeNo])}</strong>
+                    <span>{ep.title}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    )}
     <header className="comic-heading">
       <div>
-        {project.dramaTitle && (
+        {!embeddedInDramaTask && project.dramaTitle && (
           <small className="comic-take-origin">
             {project.dramaTitle}{project.episodeNo ? ` › ${t("第 {0} 集", [project.episodeNo])}` : ""}
             {project.episodeTitle ? ` · ${project.episodeTitle}` : ""}
           </small>
         )}
-        <h1>{project.title}</h1><small role="status">{t(saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small>
+        <div className="comic-cut-badges">
+          {project.taskKind === "drama" ? (
+            <small className="comic-pill" data-tone="frame">
+              {t("第 {0} 集", [project.episodeNo ?? 1])}
+            </small>
+          ) : (
+            <small className="comic-pill" data-tone="idle">{t("自由任务")}</small>
+          )}
+          <small role="status">{t(readOnly ? "已归档" : saving ? "保存中…" : dirty ? "未保存" : "已保存")}</small>
+        </div>
+        <h1>{embeddedInDramaTask && project.episodeTitle ? project.episodeTitle : project.title}</h1>
       </div>
       <div className="comic-actions">
         <button type="button" onClick={() => setShelfOpen(v => !v)}>{t(shelfOpen ? "收起片源架" : "展开片源架")}</button>
-        <button type="button" disabled={saving || dirty || !video.length} onClick={openAutoDialogue}>{t("一键配音与字幕")}</button>
-        <button type="button" onClick={exit}>{t("返回剪辑工程列表")}</button>
+        <button type="button" disabled={editorLocked || dirty || !video.length} onClick={openAutoDialogue}>{t("一键配音与字幕")}</button>
+        {!embeddedInDramaTask && (
+          <button type="button" onClick={exit}>{t("返回剪辑工程列表")}</button>
+        )}
         <button type="button" onClick={reload} disabled={saving}>{t("重新读取工程")}</button>
-        <button type="button" className="primary" disabled={!dirty || !draft.title.trim() || saving} onClick={save}>{t("保存工程")}</button>
+        <button type="button" className="primary" disabled={!dirty || !draft.title.trim() || editorLocked} onClick={save}>{t("保存工程")}</button>
       </div>
     </header>
     {error && <p className="comic-error" role="alert">{t(error)}</p>}
     {notice && <p className="comic-generation-note" role="status">{notice}</p>}
+    {!readOnly && unaddedAdopted.length > 0 && (
+      <div className="comic-sync-banner" role="status">
+        <span>
+          {t("本集分镜新增 {0} 个已采用成片尚未入轨：{1}", [
+            unaddedAdopted.length,
+            unaddedAdopted.map(u => `${t("分镜 {0}", [u.ordinal])}${u.scene ? `（${u.scene}）` : ""}`).join("、"),
+          ])}
+        </span>
+        <button type="button" className="primary" disabled={editorLocked} onClick={syncEpisodeTakes}>
+          {t("同步入轨（+{0}）", [unaddedAdopted.length])}
+        </button>
+      </div>
+    )}
     {picking ? <>
       <button type="button" disabled={saving} onClick={() => setPicking(false)}>{t("返回时间线")}</button>
       <ComicVideoHistory picker open={openVideo} choose={choose} />
@@ -354,7 +505,8 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         {shelfOpen && (
           <EditorSourceShelf
             seriesId={project.seriesId}
-            disabled={saving || video.length >= 200}
+            disabled={editorLocked || video.length >= 200}
+            inTimelineTakeIds={new Set(video.map(v => v.takeId))}
             addTake={choose}
             addAudio={addAudioFromShelf}
             browseAll={() => setPicking(true)}
@@ -364,9 +516,12 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
           seek={seek} position={position} onPosition={setPosition} />
         <section className="comic-edit-card">
           <header><h2>{t("视频轨")}</h2><strong>{t("总时长 {0} 秒", [seconds(layout.durationMs)])}</strong></header>
-          <fieldset disabled={saving} className="comic-editor-fields">
-            <label>{t("工程名称")}<input value={draft.title} maxLength={120} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
-            <div className="comic-actions"><button type="button" onClick={() => setPicking(true)} disabled={video.length >= 200}>{t("添加片源")}</button></div>
+          <fieldset disabled={editorLocked} className="comic-editor-fields">
+            <label>
+              {t(project.taskKind === "drama" ? "本集剪辑名称" : "工程名称")}
+              <input value={draft.title} maxLength={120} onChange={event => setDraft({ ...draft, title: event.target.value })} />
+            </label>
+            <div className="comic-actions"><button type="button" onClick={() => setPicking(true)} disabled={editorLocked || video.length >= 200}>{t("添加片源")}</button></div>
             <ol className="comic-video-track">{video.map((entry, index) => {
               const meta = sources.find(source => source.takeId === entry.takeId);
               return <li key={entry.id}
@@ -417,9 +572,9 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         </section>
       </div>
       <ComicTimelineTracks timeline={timeline} videoSources={sources} audioSources={audioSources} audioNames={audioNames}
-        selectedVideo={item?.id} positionMs={position} seek={locate} selectVideo={setSelected} update={apply} disabled={saving}
+        selectedVideo={item?.id} positionMs={position} seek={locate} selectVideo={setSelected} update={apply} disabled={editorLocked}
         canUndo={history.past.length > 0} canRedo={history.future.length > 0} onUndo={undo} onRedo={redo}
-        onInteractingChange={setInteracting} />
+        onInteractingChange={setInteracting} onPreviewTemp={() => setTempPreviewOpen(true)} />
       {item && project.timeline.video.some(saved => saved.id === item.id && saved.takeId === item.takeId) &&
         <ComicDialogueAudio key={item.id + item.takeId} projectId={id} revision={project.revision} item={item} audioMode={source?.audioMode}
           voice={timeline.voice}
@@ -429,7 +584,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
             ...(opts?.muteVideo ? { video: video.map(entry => entry.id === item.id ? { ...entry, volume: 0 } : entry) } : {}),
           })}
           subtitles={timeline.subtitles}
-          addSubtitle={cue => apply({ ...timeline, subtitles: [...timeline.subtitles, cue] })} disabled={saving} />}
+          addSubtitle={cue => apply({ ...timeline, subtitles: [...timeline.subtitles, cue] })} disabled={editorLocked} />}
       <ComicRenderPanel project={project} dirty={dirty || saving} />
     </>}
     {replacement && item && adopted && <LibraryDialog title={t("替换为采用版（版本 {0}）", [adopted.version])} submitLabel={t("确认替换")}
@@ -456,6 +611,14 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
         confirm={() => void executeAutoDialogue()}
         retry={() => void executeAutoDialogue(Object.values(dialogueOverrides))}
         close={() => { if (!dialogueBusy) setDialogueModalOpen(false); }}
+      />
+    )}
+    {tempPreviewOpen && (
+      <ComicTempPreviewDialog
+        aspectRatio={timeline.aspectRatio}
+        ensureSaved={ensureSaved}
+        fixOverflowAndSave={fixOverflowAndSave}
+        close={() => setTempPreviewOpen(false)}
       />
     )}
   </>;
@@ -653,9 +816,10 @@ function TrimFields({ item, apply }: { item: Video; apply: (inMs: number, outMs:
   </form>;
 }
 
-function EditorSourceShelf({ seriesId, disabled, addTake, addAudio, browseAll }: {
+function EditorSourceShelf({ seriesId, disabled, inTimelineTakeIds, addTake, addAudio, browseAll }: {
   seriesId: string | null;
   disabled: boolean;
+  inTimelineTakeIds?: ReadonlySet<string>;
   addTake: (takeId: string) => void;
   addAudio: (track: "sfx" | "music", material: ComicMaterial) => void;
   browseAll: () => void;
@@ -719,19 +883,23 @@ function EditorSourceShelf({ seriesId, disabled, addTake, addAudio, browseAll }:
       ) : (
         takes === null ? <p role="status">{t("加载中…")}</p> : takes.length === 0 ? <p className="comic-generation-note">{t("暂无匹配的成片")}</p> : (
           <div className="comic-shelf-list">
-            {takes.slice(0, 20).map(take => (
-              <div key={take.id} className="comic-shelf-item">
-                <div>
-                  <strong>{take.ordinal !== null ? t("分镜 {0}", [take.ordinal]) + " · " : ""}{take.scene || take.seriesTitle}</strong>
-                  <small>
-                    {take.dramaTitle ? `${take.dramaTitle} · ` : ""}
-                    {take.episodeNo ? `${t("第 {0} 集", [take.episodeNo])} · ` : ""}
-                    {t("版本 {0}", [take.version])} · {t("{0} 秒", [+(take.durationMs / 1000).toFixed(1)])}
-                  </small>
+            {takes.slice(0, 20).map(take => {
+              const inTrack = inTimelineTakeIds?.has(take.id) ?? false;
+              return (
+                <div key={take.id} className="comic-shelf-item">
+                  <div>
+                    <strong>{take.ordinal !== null ? t("分镜 {0}", [take.ordinal]) + " · " : ""}{take.scene || take.seriesTitle}</strong>
+                    <small>
+                      {take.dramaTitle ? `${take.dramaTitle} · ` : ""}
+                      {take.episodeNo ? `${t("第 {0} 集", [take.episodeNo])} · ` : ""}
+                      {t("版本 {0}", [take.version])} · {t("{0} 秒", [+(take.durationMs / 1000).toFixed(1)])}
+                      {inTrack ? ` · ${t("已在轨")}` : ""}
+                    </small>
+                  </div>
+                  <button type="button" disabled={disabled} onClick={() => addTake(take.id)}>＋ {t("入轨")}</button>
                 </div>
-                <button type="button" disabled={disabled} onClick={() => addTake(take.id)}>＋ {t("入轨")}</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
       )}

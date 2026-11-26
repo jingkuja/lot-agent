@@ -88,6 +88,33 @@ describe("runGenerationJob", () => {
     expect(provider.create).toHaveBeenCalledWith(expect.objectContaining({ input_reference: "/static/uploads/portrait.png?material_token=after-voice", reference_audio: "voice-id" }));
     expect(input.input_reference).toBe("/static/uploads/portrait.png");
   });
+  it("submits Ark asset IDs with the planned shot length and ratio on 720p marketing videos", async () => {
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => init?.method === "POST"
+      ? Response.json({ id: "video-job", status: "queued" })
+      : Response.json({ status: "completed", metadata: { url: "https://vendor.example/clip.mp4" } }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const model = "doubao-seedance-2-0";
+      const provider = new HttpVideoGenerationProvider({
+        baseUrl: "https://gateway.example/v1", apiKey: "user-key", adapter: new OpenaiVideoAdapter(), model,
+      });
+      const { deps } = fakeDeps(provider, {
+        modelId: model, vendorModel: model,
+        resolveReferenceUrl: async (url) => `asset://${url.includes("motion") ? "motion-id" : "voice-id"}`,
+      });
+      const input = {
+        marketingInputVersion: 4, durationSec: 8, ratio: "9:16", resolution: "720p", generate_audio: false,
+        reference_video: ["/static/uploads/motion.mp4"],
+      };
+      await runGenerationJob(deps, { ...job, input }, "video");
+      const payload = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+      expect(payload).toMatchObject({ model, seconds: "8", ratio: "9:16", metadata: { resolution: "720p" },
+        reference_video: ["asset://motion-id"] });
+      expect(payload).not.toHaveProperty("duration");
+      expect(input.reference_video).toEqual(["/static/uploads/motion.mp4"]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("signs only a new submission, retains stable input/cache identity and omits private request content from logs", async () => {
     const provider: JobGenerationProvider = {
       create: vi.fn(async () => ({ taskId: "v1", status: "queued", progress: 0 })),

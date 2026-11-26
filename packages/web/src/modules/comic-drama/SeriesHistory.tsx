@@ -15,7 +15,7 @@ const statusLabels: Record<ComicDramaSeriesStatus, string> = {
 
 export function SeriesHistory({
   busy, refreshToken = 0, focusDramaId, open, derive, change,
-  onCreateDrama, onOpenDrama, onEditDrama, onAddEpisode, onDramaChange,
+  onCreateDrama, onOpenDrama, onOpenDramaEditor, onEditEpisode, onEditDrama, onAddEpisode, onDramaChange,
 }: {
   busy: boolean;
   refreshToken?: number;
@@ -25,6 +25,8 @@ export function SeriesHistory({
   change: (entry: EpisodeEntry, action: "archive" | "remove") => Promise<boolean>;
   onCreateDrama?: () => void;
   onOpenDrama?: (dramaId: string) => void;
+  onOpenDramaEditor?: (dramaId: string) => void;
+  onEditEpisode?: (dramaId: string, episodeId: string) => void;
   onEditDrama?: (drama: ComicDrama) => void;
   onAddEpisode?: (drama: ComicDramaTreeEntry) => void;
   onDramaChange?: (drama: ComicDramaTreeEntry, action: "archive" | "remove") => Promise<boolean>;
@@ -125,6 +127,11 @@ export function SeriesHistory({
                   {t("全剧筹备")}
                 </button>
               )}
+              {!drama.archivedAt && onOpenDramaEditor && (
+                <button type="button" disabled={busy} onClick={() => onOpenDramaEditor(drama.id)}>
+                  {t("进入剪辑台")}
+                </button>
+              )}
               {!drama.archivedAt && onAddEpisode && (
                 <button type="button" className="primary" disabled={busy} onClick={() => onAddEpisode(drama)}>
                   ＋ {drama.episodeCount === 0 ? t("创建第 1 集") : t("新增分集")}
@@ -171,6 +178,9 @@ export function SeriesHistory({
                     </button>
                     <div className="comic-actions">
                       {!entry.archivedAt && <>
+                        {onEditEpisode && (
+                          <button type="button" disabled={busy} onClick={() => onEditEpisode(drama.id, entry.id)}>{t("去剪辑")}</button>
+                        )}
                         <button type="button" disabled={busy} onClick={() => void derive(entry.id, "copy")}>{t("复制剧集")}</button>
                         <button type="button" disabled={busy} onClick={() => setSequel(entry)}>{t("续写下一集")}</button>
                         <button type="button" disabled={busy} onClick={() => void update(entry, "archive")}>{t("归档")}</button>

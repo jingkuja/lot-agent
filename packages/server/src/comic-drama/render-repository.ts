@@ -12,7 +12,7 @@ import { comicJobLockKey } from "./generation-repository.js";
 
 const cd = "lot_comic_drama";
 const view = `SELECT r.id,r.edit_id AS "editId",r.edit_revision AS "editRevision",r.project_title AS title,r.created_at AS "createdAt",
-  r.created_at::text AS stamp,r.duration_ms AS "durationMs",r.media_id AS "mediaId",
+  r.created_at::text AS stamp,r.duration_ms AS "durationMs",r.media_id AS "mediaId",r.ephemeral,
   CASE WHEN r.media_id IS NOT NULL THEN 'ready' WHEN t.status IN ('pending','running','cancelled') THEN t.status ELSE 'failed' END AS status,
   CASE WHEN t.status='failed' THEN coalesce(t.error_code,'RENDER_FAILED') END AS error,
   CASE WHEN (r.frozen->>'outputFps') IN ('24','30') THEN (r.frozen->>'outputFps')::int END AS "outputFps",
@@ -22,6 +22,7 @@ const view = `SELECT r.id,r.edit_id AS "editId",r.edit_revision AS "editRevision
   FROM ${cd}.cd_renders r LEFT JOIN tasks t ON t.id=r.id AND t.user_id=r.owner_id::text AND t.type=$3`;
 type RenderRow = Omit<ComicRender, "createdAt"> & { createdAt: Date; stamp: string };
 type DeletedRenderFile = { id: string; key: string };
+type RemovedRender = { id: string; key: string | null; cancelled?: boolean };
 const renderView = ({ createdAt, stamp: _stamp, ...row }: RenderRow): ComicRender => ({ ...row, createdAt: createdAt.toISOString() });
 export class PgComicRenders {
   constructor(private readonly pool: Pool, private readonly edits = new PgComicEdits(pool)) {}
@@ -39,13 +40,17 @@ export class PgComicRenders {
       accepting?.();
       const { timeline, sources, media, title, seriesId } = await this.edits.snapshot(db, owner, editId, input.expectedRevision);
       const fpsMode = input.fpsMode ?? "auto";
+      const ephemeral = input.ephemeral === true;
       const issue = comicRenderIssue(timeline, fpsMode === "24" ? 24 : 30);
       if (issue) throw new ComicLibraryError(issue, 400);
       const id = randomUUID();
-      const frozen: ComicFrozenRenderInput = { schemaVersion: 1, editId, editRevision: input.expectedRevision, timeline, fpsMode };
-      await db.query(`INSERT INTO ${cd}.cd_renders(id,owner_id,request_id,edit_id,edit_revision,frozen,duration_ms,project_title,series_id)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [id, owner, input.requestId, editId, input.expectedRevision, frozen, layoutComicTimeline(timeline).durationMs, title, seriesId]);
+      const frozen: ComicFrozenRenderInput = {
+        schemaVersion: 1, editId, editRevision: input.expectedRevision, timeline, fpsMode,
+        ...(ephemeral ? { ephemeral: true } : {}),
+      };
+      await db.query(`INSERT INTO ${cd}.cd_renders(id,owner_id,request_id,edit_id,edit_revision,frozen,duration_ms,project_title,series_id,ephemeral)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [id, owner, input.requestId, editId, input.expectedRevision, frozen, layoutComicTimeline(timeline).durationMs, title, seriesId, ephemeral]);
       await db.query(`INSERT INTO ${cd}.cd_render_media(owner_id,render_id,media_id) SELECT $1,$2,unnest($3::uuid[])`, [owner, id, media]);
       await db.query(`INSERT INTO ${cd}.cd_render_takes(owner_id,render_id,take_id,media_id)
         SELECT $1,$2,take,media FROM unnest($3::uuid[],$4::uuid[]) AS s(take,media)`,
@@ -68,7 +73,8 @@ export class PgComicRenders {
     if (cursor && (extra !== undefined || !Number.isFinite(Date.parse(stamp)) || !comicDramaIdSchema.safeParse(id).success)) {
       throw new ComicLibraryError("INVALID_CURSOR", 400);
     }
-    const { rows } = await this.pool.query<RenderRow>(`${view} WHERE r.owner_id=$1 AND r.deleted_at IS NULL AND ($2::uuid IS NULL OR r.edit_id=$2)
+    const { rows } = await this.pool.query<RenderRow>(`${view} WHERE r.owner_id=$1 AND r.deleted_at IS NULL AND r.ephemeral=FALSE
+      AND ($2::uuid IS NULL OR r.edit_id=$2)
       AND ($4::timestamptz IS NULL OR (r.created_at,r.id)<($4,$5::uuid)) ORDER BY r.created_at DESC,r.id DESC LIMIT 25`,
     [owner, editId, COMIC_RENDER_TASK, stamp ?? null, id ?? null]);
     return { entries: rows.slice(0, 24).map(renderView), nextCursor: rows.length > 24 ? `${rows[23].stamp},${rows[23].id}` : null };
@@ -81,13 +87,28 @@ export class PgComicRenders {
     return !!result.rowCount;
   }
 
-  remove(owner: string, id: string) {
+  remove(owner: string, id: string): Promise<RemovedRender | null> {
     return libraryTransaction(this.pool, async db => {
-      const { rows: [row] } = await db.query<{ media_id: string | null; deleted_at: Date | null; deleted_storage_key: string | null }>(
-        `SELECT media_id,deleted_at,deleted_storage_key FROM ${cd}.cd_renders WHERE owner_id=$1 AND id=$2 FOR UPDATE`, [owner, id]);
+      const { rows: [row] } = await db.query<{
+        media_id: string | null; deleted_at: Date | null; deleted_storage_key: string | null; ephemeral: boolean;
+      }>(
+        `SELECT media_id,deleted_at,deleted_storage_key,ephemeral FROM ${cd}.cd_renders WHERE owner_id=$1 AND id=$2 FOR UPDATE`,
+        [owner, id],
+      );
       if (!row) libraryMissing();
       if (row.deleted_at) return row.deleted_storage_key ? { id, key: row.deleted_storage_key } : null;
-      if (!row.media_id) throw new ComicLibraryError("RENDER_DELETE_UNAVAILABLE", 409);
+      if (!row.media_id) {
+        if (!row.ephemeral) throw new ComicLibraryError("RENDER_DELETE_UNAVAILABLE", 409);
+        const taskRes = await db.query(
+          `UPDATE tasks SET status='cancelled',stage='已关闭预览',updated_at=now()
+           WHERE id=$1 AND user_id=$2::text AND type=$3 AND status IN ('pending','running')`,
+          [id, owner, COMIC_RENDER_TASK],
+        );
+        await db.query(`UPDATE ${cd}.cd_renders SET deleted_at=now() WHERE owner_id=$1 AND id=$2`, [owner, id]);
+        await db.query(`DELETE FROM ${cd}.cd_render_takes WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
+        await db.query(`DELETE FROM ${cd}.cd_render_media WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
+        return { id, key: null, cancelled: (taskRes.rowCount ?? 0) > 0 };
+      }
       await db.query(`UPDATE ${cd}.cd_renders SET media_id=NULL,deleted_at=now() WHERE owner_id=$1 AND id=$2`, [owner, id]);
       await db.query(`DELETE FROM ${cd}.cd_render_takes WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
       await db.query(`DELETE FROM ${cd}.cd_render_media WHERE owner_id=$1 AND render_id=$2`, [owner, id]);
@@ -125,6 +146,24 @@ export class PgComicRenders {
       `SELECT id,deleted_storage_key AS key FROM ${cd}.cd_renders
        WHERE deleted_storage_key IS NOT NULL ORDER BY deleted_at,id LIMIT 100`);
     for (const file of rows) await this.purgeDeletedFile(file, removeFile);
+  }
+
+  async purgeExpiredEphemeral(
+    maxAgeMs: number,
+    removeFile: (key: string) => Promise<void>,
+    stopCancelled?: (id: string) => Promise<void>,
+  ) {
+    const { rows } = await this.pool.query<{ id: string; owner: string }>(
+      `SELECT id,owner_id AS owner FROM ${cd}.cd_renders
+       WHERE ephemeral=TRUE AND deleted_at IS NULL AND created_at<now()-($1::bigint*interval '1 millisecond')
+       ORDER BY created_at,id LIMIT 100`,
+      [maxAgeMs],
+    );
+    for (const row of rows) {
+      const removed = await this.remove(row.owner, row.id).catch(() => null);
+      if (removed?.cancelled) await stopCancelled?.(row.id).catch(() => {});
+      if (removed?.key) await this.purgeDeletedFile({ id: removed.id, key: removed.key }, removeFile);
+    }
   }
 
   private async lockTask(db: ComicQuery, owner: string, id: string) {

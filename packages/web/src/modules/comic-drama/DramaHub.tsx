@@ -33,8 +33,8 @@ function defaultEpisodeCount(outline: string, existingEpisodes: number): number 
 }
 
 export function DramaHub({
-  view, busy, initialTab, onUpdated, onReload, onEditDrama, onAddEpisode, onOpenEpisode, onDeriveEpisode,
-  onChangeEpisode, onOpenHistory, onOpenCharacters, onRegisterFlush,
+  view, busy, initialTab, onUpdated, onReload, onEditDrama, onAddEpisode, onOpenEpisode, onOpenEditor, onEditEpisode,
+  onDeriveEpisode, onChangeEpisode, onOpenHistory, onOpenCharacters, onRegisterFlush,
 }: {
   view: ComicDramaView;
   busy: boolean;
@@ -44,6 +44,8 @@ export function DramaHub({
   onEditDrama: (drama: ComicDrama) => void;
   onAddEpisode: () => void;
   onOpenEpisode: (episodeId: string) => void;
+  onOpenEditor?: () => void;
+  onEditEpisode?: (episodeId: string) => void;
   onDeriveEpisode: (episodeId: string, action: "copy" | "sequel", inherit?: boolean) => Promise<boolean>;
   onChangeEpisode: (episode: ComicDramaEpisodeBrief, action: "archive" | "remove") => Promise<boolean>;
   onOpenHistory: () => void;
@@ -280,6 +282,9 @@ export function DramaHub({
               <NewEpisodeIcon size={15} />
               <span>{episodes.length === 0 ? t("创建第 1 集") : t("新增第 {0} 集", [nextEpisodeNo])}</span>
             </button>
+          )}
+          {onOpenEditor && (
+            <button type="button" disabled={busy} onClick={onOpenEditor}>{t("进入剪辑台")}</button>
           )}
           {!locked && (
             <button type="button" onClick={() => onEditDrama(drama)}>{t("编辑剧目设置")}</button>
@@ -640,6 +645,9 @@ export function DramaHub({
                       <button type="button" className="primary" disabled={busy} onClick={() => onOpenEpisode(entry.id)}>
                         {t("进入分镜")}
                       </button>
+                      {onEditEpisode && (
+                        <button type="button" disabled={busy} onClick={() => onEditEpisode(entry.id)}>{t("去剪辑")}</button>
+                      )}
                       {!entry.archivedAt && (
                         <>
                           <button type="button" disabled={busy} onClick={() => void onDeriveEpisode(entry.id, "copy")}>{t("复制剧集")}</button>

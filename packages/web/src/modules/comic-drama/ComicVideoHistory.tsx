@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import type { ComicCharacter, ComicEditListEntry, ComicVideoHistory as VideoHistory, ComicVideoTake } from "@lot-agent/core/comic-drama";
+import type {
+  ComicCharacter, ComicDramaEditTaskEntry, ComicEditListEntry, ComicVideoHistory as VideoHistory, ComicVideoTake,
+} from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { VideoTakeCard } from "./ComicVideoTakes.js";
 import { comicEditApi, editError } from "./edit-api.js";
@@ -26,10 +28,11 @@ function filters(form: FormData) {
   return params.toString();
 }
 
-export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
+export function ComicVideoHistory({ open, choose, openEdit, openDramaEdit, picker = false }: {
   open: (seriesId: string, clipId: string) => void;
   choose: (id: string) => void;
   openEdit?: (editId: string) => void;
+  openDramaEdit?: (dramaId: string, seriesId: string) => void;
   picker?: boolean;
 }) {
   const { t } = useI18n();
@@ -146,15 +149,21 @@ export function ComicVideoHistory({ open, choose, openEdit, picker = false }: {
         }}>{t("下一页")}</button>
       </div>}
     </> : <p role="status">{t("加载中…")}</p>}
-    {addingTake && openEdit && <AddToEditDialog take={addingTake} openEdit={openEdit} close={() => setAddingTake(null)} />}
+    {addingTake && openEdit && (
+      <AddToEditDialog take={addingTake} openEdit={openEdit} openDramaEdit={openDramaEdit} close={() => setAddingTake(null)} />
+    )}
   </>;
 }
 
-function AddToEditDialog({ take, openEdit, close }: {
-  take: ComicVideoTake; openEdit: (id: string) => void; close: () => void;
+function AddToEditDialog({ take, openEdit, openDramaEdit, close }: {
+  take: ComicVideoTake;
+  openEdit: (id: string) => void;
+  openDramaEdit?: (dramaId: string, seriesId: string) => void;
+  close: () => void;
 }) {
   const { t } = useI18n();
   const [edits, setEdits] = useState<ComicEditListEntry[] | null>(null);
+  const [dramaTasks, setDramaTasks] = useState<ComicDramaEditTaskEntry[]>([]);
   const [lastEditId, setLastEditId] = useState<string | null>(null);
   const [target, setTarget] = useState<string>("__new__");
   useEffect(() => {
@@ -162,13 +171,37 @@ function AddToEditDialog({ take, openEdit, close }: {
     void comicEditApi.list(undefined, controller.signal).then(res => {
       if (!controller.signal.aborted) {
         setEdits(res.entries);
+        setDramaTasks(res.dramaTasks ?? []);
         setLastEditId(res.lastEditId ?? null);
-        if (res.lastEditId && res.entries.some(e => e.id === res.lastEditId)) setTarget(res.lastEditId);
-        else if (res.entries[0]) setTarget(res.entries[0].id);
+        if (take.dramaId && take.seriesId) {
+          const matchedDrama = (res.dramaTasks ?? []).find(d => d.dramaId === take.dramaId);
+          if (matchedDrama?.episodes.some(ep => ep.seriesId === take.seriesId)) {
+            setTarget(`drama:${take.dramaId}:${take.seriesId}`);
+            return;
+          }
+        }
+        if (res.lastEdit?.taskKind === "drama" && res.lastEdit.dramaId && res.lastEdit.seriesId) {
+          setTarget(`drama:${res.lastEdit.dramaId}:${res.lastEdit.seriesId}`);
+        } else if (res.lastEditId && res.entries.some(e => e.id === res.lastEditId)) {
+          setTarget(`free:${res.lastEditId}`);
+        } else if (res.entries[0]) {
+          setTarget(`free:${res.entries[0].id}`);
+        }
       }
     }).catch(() => { if (!controller.signal.aborted) setEdits([]); });
     return () => controller.abort();
-  }, []);
+  }, [take.dramaId, take.seriesId]);
+
+  const dramaEpOptions = dramaTasks.flatMap(task =>
+    task.episodes.map(ep => ({
+      value: `drama:${task.dramaId}:${ep.seriesId}`,
+      label: `《${task.dramaTitle}》· ${t("第 {0} 集", [ep.episodeNo])} ${ep.title}`,
+      editId: ep.editId,
+      dramaId: task.dramaId,
+      seriesId: ep.seriesId,
+    })),
+  );
+
   return (
     <LibraryDialog title={t("加入剪辑台")} submitLabel={t("确认加入")} close={close} describeError={editError} save={async (form, signal) => {
       if (target === "__new__") {
@@ -177,7 +210,21 @@ function AddToEditDialog({ take, openEdit, close }: {
         if (!signal.aborted) openEdit(created.id);
         return;
       }
-      const chosen = edits?.find(e => e.id === target);
+      if (target.startsWith("drama:")) {
+        const [, dramaId, seriesId] = target.split(":");
+        const opened = await comicEditApi.openDramaTask(dramaId, seriesId, signal);
+        if (!opened.edit) throw new Error("Missing episode edit");
+        if (!opened.edit.timeline.video.some(v => v.takeId === take.id)) {
+          await comicEditApi.appendSource(opened.edit.id, { expectedRevision: opened.edit.revision, takeId: take.id }, signal);
+        }
+        if (!signal.aborted) {
+          if (openDramaEdit) openDramaEdit(dramaId, seriesId);
+          else openEdit(opened.edit.id);
+        }
+        return;
+      }
+      const freeId = target.startsWith("free:") ? target.slice(5) : target;
+      const chosen = edits?.find(e => e.id === freeId);
       if (!chosen) throw new Error("Missing edit");
       const updated = await comicEditApi.appendSource(chosen.id, { expectedRevision: chosen.revision, takeId: take.id }, signal);
       if (!signal.aborted) openEdit(updated.id);
@@ -185,16 +232,29 @@ function AddToEditDialog({ take, openEdit, close }: {
       <p>{take.seriesTitle} · {t("版本 {0}", [take.version])}</p>
       <label>{t("目标剪辑工程")}
         <select value={target} onChange={e => setTarget(e.target.value)}>
-          <option value="__new__">{t("新建剪辑工程")}</option>
-          {edits?.map(entry => (
-            <option key={entry.id} value={entry.id}>
-              {entry.title}{entry.id === lastEditId ? " · " + t("上次打开") : ""}
-            </option>
-          ))}
+          <option value="__new__">{t("新建自由剪辑任务")}</option>
+          {dramaEpOptions.length > 0 && (
+            <optgroup label={t("剧集剪辑任务")}>
+              {dramaEpOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}{opt.editId && opt.editId === lastEditId ? " · " + t("上次打开") : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {!!edits?.length && (
+            <optgroup label={t("自由剪辑任务")}>
+              {edits.map(entry => (
+                <option key={entry.id} value={`free:${entry.id}`}>
+                  {entry.title}{entry.id === lastEditId ? " · " + t("上次打开") : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </label>
       {target === "__new__" && (
-        <label>{t("工程名称")}<input name="title" required maxLength={120} defaultValue={take.seriesTitle} /></label>
+        <label>{t("任务名称")}<input name="title" required maxLength={120} defaultValue={take.seriesTitle} /></label>
       )}
     </LibraryDialog>
   );

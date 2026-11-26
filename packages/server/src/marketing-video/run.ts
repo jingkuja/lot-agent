@@ -52,8 +52,7 @@ export function gatewayFailure(error: unknown): error is ProviderError {
   return error instanceof ProviderError && error.phase === "create" && error.code === "HTTP_ERROR" && (error.httpStatus ?? 0) >= 500;
 }
 export const GATEWAY_FAILED_MESSAGE = "视频模型服务暂时出错，该片段没有生成；继续生成会重新提交该片段。";
-/** A clip refused for showing a real person: at 720p without a reference video the clips go to another model. */
-export const REAL_PERSON_MESSAGE = "所传素材有真人，未能通过服务商安全机制，可以尝试720p出片。";
+export const REAL_PERSON_MESSAGE = "所传素材有真人，未能通过服务商安全机制。";
 const realPersonRejected = (cause: unknown) => new MarketingRunError("REAL_PERSON_REJECTED", REAL_PERSON_MESSAGE, { cause });
 export interface MarketingRunDeps {
   db: DB; dataRoot: string;

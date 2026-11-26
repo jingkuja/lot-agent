@@ -30,6 +30,7 @@ import { ComicImageGeneration } from "./ComicImageGeneration.js";
 import { ComicVideoHistory } from "./ComicVideoHistory.js";
 import { ComicEditorSource } from "./ComicEditorSource.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
+import { ComicDramaEditWorkspace } from "./ComicDramaEditWorkspace.js";
 import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
 import { ComicDirectorPanel } from "./ComicDirectorPanel.js";
 import type { DirectorEnhanceIntent } from "./ComicEnhanceProposal.js";
@@ -82,6 +83,9 @@ const editorSourcesPath = editorPath + "/sources";
 const editorSourcePrefix = editorSourcesPath + "/";
 const renderHistoryPath = editorPath + "/exports";
 const legacyProjectPrefix = editorPath + "/projects/";
+const editorDramasPrefix = editorPath + "/dramas/";
+const dramaEditorPath = (id: string) => editorDramasPrefix + id;
+const dramaEditorEpisodePath = (id: string, epId: string) => `${dramaEditorPath(id)}/episodes/${epId}`;
 
 function formatMicros(micros: number, currency: "CNY" | "USD") {
   const symbol = currency === "USD" ? "$" : "¥";
@@ -143,7 +147,14 @@ export function ComicDramaWorkspace({
   const pickingSource = pathname === editorSourcesPath;
   const renderHistory = pathname === renderHistoryPath;
   const takeId = pathname.startsWith(editorSourcePrefix) ? pathname.slice(editorSourcePrefix.length) : "";
-  const editId = !legacyEditId && !pickingSource && !renderHistory && !takeId && pathname.startsWith(editorPath + "/")
+  const isEditorDramaRoute = pathname.startsWith(editorDramasPrefix);
+  const editorDramaSegments = isEditorDramaRoute ? pathname.slice(editorDramasPrefix.length).split("/") : [];
+  const editorDramaId = isEditorDramaRoute ? (editorDramaSegments[0] ?? "") : "";
+  const editorEpisodeId = isEditorDramaRoute && editorDramaSegments[1] === "episodes"
+    ? editorDramaSegments[2]
+    : undefined;
+  const editId = !legacyEditId && !pickingSource && !renderHistory && !takeId && !isEditorDramaRoute
+    && pathname.startsWith(editorPath + "/")
     ? pathname.slice(editorPath.length + 1) : "";
   const editorRoute = pathname === editorPath || pathname.startsWith(editorPath + "/");
   const editGuard = useRef<(() => boolean) | null>(null);
@@ -449,6 +460,28 @@ export function ComicDramaWorkspace({
   });
   const choose = (id: string) => void leave(() => navigate(editorSourcePrefix + id));
   const openEdit = (id: string) => navigate(editorPath + "/" + id);
+  const openDramaEditor = (dId: string, epId?: string) =>
+    void leave(() => navigate(epId ? dramaEditorEpisodePath(dId, epId) : dramaEditorPath(dId)));
+  const openCreateEpisodeFromEditor = (dId: string) => void leave(async () => {
+    try {
+      const fresh = await comicDramaApi.getDrama(dId);
+      setModalError(null);
+      setPresetDrama({
+        id: fresh.drama.id,
+        title: fresh.drama.title,
+        styleKey: fresh.drama.styleKey,
+        aspectRatio: fresh.drama.aspectRatio,
+        videoModel: fresh.drama.videoModel,
+        nextEpisodeNo: Math.max(0, ...fresh.episodes.map(ep => ep.episodeNo)) + 1,
+        latestEpisodeId: fresh.episodes.at(-1)?.id ?? null,
+        castCount: fresh.cast.length,
+        episodes: fresh.episodes,
+      });
+      setDialog("addEpisode");
+    } catch {
+      openDramaHub(dId, "episodes");
+    }
+  });
   const applyProposal = async (
     proposal: ComicDirectorProposal,
     decision?: ComicDirectorDecision | Omit<ComicDirectorApplyInput, "expectedRevision">,
@@ -723,6 +756,8 @@ export function ComicDramaWorkspace({
           change={handleChangeEpisode}
           onCreateDrama={() => showDramaDialog("create")}
           onOpenDrama={id => openDramaHub(id)}
+          onOpenDramaEditor={dId => openDramaEditor(dId)}
+          onEditEpisode={(dId, epId) => openDramaEditor(dId, epId)}
           onEditDrama={drama => showDramaDialog("edit", drama)}
           onAddEpisode={drama => showDialog("addEpisode", presetFromTree(drama))}
           onDramaChange={async (drama, action) => {
@@ -745,18 +780,36 @@ export function ComicDramaWorkspace({
         : library === "/materials" ? <MaterialLibrary />
         : library === "/settings" ? <ComicSettingsPage videoModels={models} imageModels={imageModels} />
         : renderHistory ? <ComicRenderPanel />
+        : isEditorDramaRoute ? <ComicDramaEditWorkspace
+          key={editorDramaId}
+          dramaId={editorDramaId}
+          seriesId={editorEpisodeId}
+          setGuard={setEditGuard}
+          openVideo={openVideo}
+          openDramaHub={(dId, tab) => openDramaHub(dId, tab)}
+          openEpisodeProduction={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
+          openEpisodeEditor={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))}
+          openCreateEpisode={openCreateEpisodeFromEditor}
+          exit={() => void leave(() => navigate(editorPath))}
+        />
         : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
           autoOpenDialogue={pendingAutoDialogueEditId === editId}
           onAutoDialogueOpened={() => setPendingAutoDialogueEditId(null)}
+          onSwitchEpisode={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))}
           exit={() => void leave(() => navigate(editorPath))} />
         : editorRoute && takeId ? <ComicEditorSource key={takeId} takeId={takeId} open={openVideo} openEdit={openEdit}
           browse={() => navigate(editorSourcesPath)} />
-        : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo} choose={choose} openEdit={openEdit} />
-        : editorRoute ? <ComicEditsIndex currentSeries={activeNavSummary?.seriesId ?? series?.id}
+        : videoHistory || pickingSource ? <ComicVideoHistory key={pathname} picker={pickingSource} open={openVideo}
+          choose={choose} openEdit={openEdit} openDramaEdit={(dId, epId) => navigate(dramaEditorEpisodePath(dId, epId))} />
+        : editorRoute ? <ComicEditsIndex
+          currentDramaId={activeDramaId}
+          currentSeries={activeNavSummary?.seriesId ?? series?.id}
           open={(nextId, opts) => {
             if (opts?.openAutoDialogue) setPendingAutoDialogueEditId(nextId);
             openEdit(nextId);
           }}
+          openDramaTask={(dId, epId) => navigate(epId ? dramaEditorEpisodePath(dId, epId) : dramaEditorPath(dId))}
+          openDramaHub={dId => openDramaHub(dId, "episodes")}
           browse={() => navigate(editorSourcesPath)} />
         : dramaView ? (
           <DramaHub
@@ -776,6 +829,8 @@ export function ComicDramaWorkspace({
             onEditDrama={drama => showDramaDialog("edit", drama)}
             onAddEpisode={() => { if (activeDramaPreset) showDialog("addEpisode", activeDramaPreset); }}
             onOpenEpisode={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
+            onOpenEditor={() => openDramaEditor(dramaView.drama.id)}
+            onEditEpisode={epId => openDramaEditor(dramaView.drama.id, epId)}
             onDeriveEpisode={(epId, action, inherit) => run(async () => saved(await comicDramaApi.derive(epId, action, inherit)))}
             onChangeEpisode={handleChangeEpisode}
             onOpenHistory={() => void leave(() => navigate(historyPath))}
@@ -899,7 +954,7 @@ export function ComicDramaWorkspace({
                   })}>{vidLabel}</button>
                 </>;
               })()}
-               <button type="button" onClick={() => void leave(() => navigate(editorPath))}>{t("去剪辑")}</button>
+               <button type="button" onClick={() => openDramaEditor(series.dramaId, series.id)}>{t("去剪辑")}</button>
                <button type="button" onClick={() => void leave(() => setBudgetSeriesId(series.id))}>{t("整集费用预估")}</button>
               <button type="button" disabled={locked} onClick={() => showDialog("edit")}>{t("编辑分集")}</button>
               <button type="button" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(v => !v)}>
@@ -928,7 +983,7 @@ export function ComicDramaWorkspace({
                   aria-pressed={stage === step}
                   onClick={() => {
                     if (step === "生成") void leave(() => { if (stage !== step) setOpenVideos(false); setStage(step); });
-                    else if (step === "剪辑") void leave(() => navigate(editorPath));
+                    else if (step === "剪辑") openDramaEditor(series.dramaId, series.id);
                     else setStage(step);
                   }}
                 >

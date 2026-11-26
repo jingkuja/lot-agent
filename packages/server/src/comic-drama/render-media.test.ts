@@ -314,4 +314,49 @@ describe("comic render audio stem premixing", () => {
       await rm(sandbox, { recursive: true, force: true });
     }
   });
+
+  it("renders ephemeral preview mode at 540x960 for 9:16 with valid H.264 + AAC and matching duration", async () => {
+    const caps = await mediaCapabilities();
+    if (!caps.composition) return;
+    const folder = await mkdtemp(join(tmpdir(), "lot-comic-preview-test-"));
+    try {
+      const videoPath = join(folder, "src.mp4");
+      await mediaProcess(ffmpeg(), [
+        "-nostdin", "-v", "error",
+        "-f", "lavfi", "-i", "color=c=0x224466:s=720x1280:r=30:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=500:sample_rate=48000:duration=2",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", "-threads", "1", videoPath,
+      ], { timeoutMs: 20_000 });
+      const info = await inspectMedia(videoPath);
+      const durationMs = Math.round(info.duration * 1000);
+      const takeId = uuid(991);
+      const timeline = comicTimelineSchema.parse({
+        schemaVersion: 1, aspectRatio: "9:16",
+        video: [{
+          id: uuid(992), takeId, sourceDurationMs: durationMs, inMs: 0, outMs: durationMs,
+          volume: 1, transitionIn: { kind: "cut", durationMs: 0 },
+        }],
+        voice: [], sfx: [], music: [], subtitles: [],
+      });
+      const rendered = await composeComicRender(
+        timeline,
+        { videos: new Map([[takeId, { path: videoPath, durationMs }]]), audio: new Map() },
+        AbortSignal.timeout(30_000),
+        { preview: true },
+      );
+      try {
+        const out = await inspectMedia(rendered.file);
+        expect(out.video).toBe(true);
+        expect(out.audio).toBe(true);
+        expect(out.width).toBe(540);
+        expect(out.height).toBe(960);
+        expect(Math.abs(out.duration * 1000 - durationMs)).toBeLessThanOrEqual(34);
+      } finally {
+        await rendered.dispose();
+      }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }, 45_000);
 });

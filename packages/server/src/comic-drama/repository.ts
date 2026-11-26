@@ -908,6 +908,22 @@ export class PgComicDramaRepository implements ComicDramaRepository {
     }, true);
   }
 
+  private async ensureDramaEditTask(
+    client: PoolClient,
+    owner: string,
+    dramaId: string,
+    lastSeriesId: string | null = null,
+  ) {
+    await client.query(
+      `INSERT INTO lot_comic_drama.cd_edit_tasks(owner_id,drama_id,last_series_id)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (owner_id,drama_id) DO UPDATE
+         SET last_series_id=coalesce(lot_comic_drama.cd_edit_tasks.last_series_id,excluded.last_series_id),
+             updated_at=clock_timestamp()`,
+      [owner, dramaId, lastSeriesId],
+    );
+  }
+
   createDrama(owner: string, input: ComicDramaCreateInput): Promise<{ drama: ComicDrama; detail: ComicDramaDetail | null }> {
     return this.transaction(async client => {
       await requireComicChoice(client, owner, "style", input.styleKey);
@@ -919,6 +935,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       );
       const drama = asDrama(dRow);
       if (input.createFirstEpisode === false) {
+        await this.ensureDramaEditTask(client, owner, drama.id);
         await this.setCurrentDrama(client, owner, drama.id);
         return { drama, detail: null };
       }
@@ -934,6 +951,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         aspectRatio: drama.aspectRatio,
         videoModel: drama.videoModel,
       });
+      await this.ensureDramaEditTask(client, owner, drama.id, series.id);
       await this.setCurrent(client, owner, series.id, drama.id);
       const detail = await this.buildDetail(client, owner, series, [], null, [], 0, 0);
       return { drama, detail };
@@ -1072,6 +1090,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
         );
         initialScript = { version: 1, content: input.initialScript };
       }
+      await this.ensureDramaEditTask(client, owner, drama.id, series.id);
       await this.touchDrama(client, owner, drama.id);
       await this.setCurrent(client, owner, series.id, drama.id);
       const cast = inherit ? await readSeriesCast(client, series.id) : [];
@@ -1279,6 +1298,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${dramaFields}`,
         [owner, groupTitle, fields.dramaSynopsis ?? "", fields.styleKey, fields.aspectRatio, fields.videoModel ?? null],
       );
+      await this.ensureDramaEditTask(client, owner, inserted.id);
       return { drama: asDrama(inserted), created: true };
     }
     const dramaTitle = fields.dramaTitle?.trim() || fields.title;
@@ -1288,6 +1308,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${dramaFields}`,
       [owner, dramaTitle, dramaSynopsis, fields.styleKey, fields.aspectRatio, fields.videoModel ?? null],
     );
+    await this.ensureDramaEditTask(client, owner, inserted.id);
     return { drama: asDrama(inserted), created: true };
   }
 
@@ -1324,6 +1345,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       } else if (!created && inherit) {
         await syncDramaCastToSeries(client, owner, drama.id, series.id);
       }
+      await this.ensureDramaEditTask(client, owner, drama.id, series.id);
       await this.touchDrama(client, owner, drama.id);
       await this.setCurrent(client, owner, series.id, drama.id);
       const cast = (parentId || !created) && inherit ? await readSeriesCast(client, series.id) : [];
@@ -1365,6 +1387,7 @@ export class PgComicDramaRepository implements ComicDramaRepository {
       await client.query(`INSERT INTO lot_comic_drama.cd_scripts(series_id,version,content,source)
         SELECT $1,1,content,source FROM lot_comic_drama.cd_scripts WHERE series_id=$2 ORDER BY version DESC LIMIT 1`, [series.id, id]);
     }
+    await this.ensureDramaEditTask(client, owner, drama.id, series.id);
     await this.touchDrama(client, owner, drama.id);
     await this.setCurrent(client, owner, series.id, drama.id);
     const { clips, script, cast } = await this.content(client, series.id, series.revision);
@@ -1423,6 +1446,17 @@ export class PgComicDramaRepository implements ComicDramaRepository {
          WHERE id=$1 RETURNING ${seriesFields}`,
         [id, targetDrama.id, title, logline, targetDrama.title, episodeNo, styleKey, aspectRatio, videoModel],
       );
+      if (targetDrama.id !== current.dramaId) {
+        await this.ensureDramaEditTask(client, owner, targetDrama.id, id);
+        await client.query(
+          `UPDATE lot_comic_drama.cd_edits e
+           SET drama_edit_task_id=t.id, updated_at=clock_timestamp()
+           FROM lot_comic_drama.cd_edit_tasks t
+           WHERE e.owner_id=$1 AND e.series_id=$2 AND e.drama_edit_task_id IS NOT NULL
+             AND t.owner_id=$1 AND t.drama_id=$3`,
+          [owner, id, targetDrama.id],
+        );
+      }
       await this.touchDrama(client, owner, targetDrama.id);
       return asSeries(rows[0]);
     });

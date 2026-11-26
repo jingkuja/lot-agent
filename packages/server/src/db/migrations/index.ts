@@ -148,6 +148,9 @@ export const migrations: Migration[] = [
   comicDramaPreparation,
   comicDramaCharacterDrama,
   comicDramaRenderDeletion,
+  comicDramaEphemeralPreview,
+  comicDramaEditTasks,
+  volcAssets,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -216,3 +219,6 @@ import { comicDramaQueues } from "./0103-comic-drama-queues.js";
 import { comicDramaPreparation } from "./0104-comic-drama-preparation.js";
 import { comicDramaCharacterDrama } from "./0105-comic-drama-character-drama.js";
 import { comicDramaRenderDeletion } from "./0106-comic-drama-render-deletion.js";
+import { comicDramaEphemeralPreview } from "./0107-comic-drama-ephemeral-preview.js";
+import { comicDramaEditTasks } from "./0108-comic-drama-edit-tasks.js";
+import { volcAssets } from "./0109-volc-assets.js";

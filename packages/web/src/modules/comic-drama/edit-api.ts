@@ -1,7 +1,8 @@
 import type {
-  ComicAutoDialoguePlan, ComicAutoDialogueResult, ComicEdit, ComicEditAppendSource, ComicEditAutoDialogue, ComicEditAutoDialoguePreview,
-  ComicEditCreate, ComicEditList, ComicEditReplace, ComicEditUpdate, ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest,
-  ComicSpeechLines, ComicSpeechRelease, ComicSpeechRequest, ComicSpeechTake, ComicVoiceAudition, ComicVoiceAuditionRelease,
+  ComicAutoDialoguePlan, ComicAutoDialogueResult, ComicDramaEditTaskView, ComicEdit, ComicEditAppendSource,
+  ComicEditAutoDialogue, ComicEditAutoDialoguePreview, ComicEditCreate, ComicEditList, ComicEditReplace,
+  ComicEditUpdate, ComicRender, ComicRenderDownload, ComicRenderHistory, ComicRenderRequest, ComicSpeechLines,
+  ComicSpeechRelease, ComicSpeechRequest, ComicSpeechTake, ComicVoiceAudition, ComicVoiceAuditionRelease,
   ComicVoiceBind, ComicVoiceSettings,
 } from "@lot-agent/core/comic-drama";
 import { ApiClientError, request } from "../../api/client.js";
@@ -9,12 +10,21 @@ import { libraryError } from "./LibraryParts.js";
 
 const root = "/comic-drama";
 const edit = (id: string) => root + "/edits/" + encodeURIComponent(id);
+const dramaEdit = (dramaId: string) => root + "/dramas/" + encodeURIComponent(dramaId) + "/edit";
 const item = (id: string, itemId: string) => edit(id) + "/items/" + encodeURIComponent(itemId);
 const voice = (id: string) => root + "/characters/" + encodeURIComponent(id) + "/voice";
 const send = <T>(url: string, method: string, value: unknown, signal?: AbortSignal) =>
   request<T>(url, { method, body: JSON.stringify(value), signal });
 export const comicEditApi = {
-  list: (cursor?: string, signal?: AbortSignal) => request<ComicEditList>(root + "/edits" + (cursor ? "?" + new URLSearchParams({ cursor }) : ""), { signal }),
+  list: (cursor?: string, signal?: AbortSignal) =>
+    request<ComicEditList>(root + "/edits" + (cursor ? "?" + new URLSearchParams({ cursor }) : ""), { signal }),
+  getDramaTask: (dramaId: string, seriesId?: string, signal?: AbortSignal) =>
+    request<ComicDramaEditTaskView>(
+      dramaEdit(dramaId) + (seriesId ? "?" + new URLSearchParams({ seriesId }) : ""),
+      { signal },
+    ),
+  openDramaTask: (dramaId: string, seriesId?: string, signal?: AbortSignal) =>
+    send<ComicDramaEditTaskView>(dramaEdit(dramaId) + "/open", "POST", seriesId ? { seriesId } : {}, signal),
   get: (id: string, signal?: AbortSignal) => request<ComicEdit>(edit(id), { signal }),
   create: (fields: ComicEditCreate, signal?: AbortSignal) => send<ComicEdit>(root + "/edits", "POST", fields, signal),
   update: (id: string, fields: ComicEditUpdate) => send<ComicEdit>(edit(id), "PATCH", fields),
@@ -23,6 +33,8 @@ export const comicEditApi = {
     send<ComicEdit>(item(id, itemId) + "/replace", "POST", fields, signal),
   appendSource: (id: string, fields: ComicEditAppendSource, signal?: AbortSignal) =>
     send<ComicEdit>(edit(id) + "/append-source", "POST", fields, signal),
+  syncEpisode: (id: string, expectedRevision: number, signal?: AbortSignal) =>
+    send<ComicEdit>(edit(id) + "/sync-episode", "POST", { expectedRevision }, signal),
   previewAutoDialogue: (id: string, fields: ComicEditAutoDialoguePreview, signal?: AbortSignal) =>
     send<ComicAutoDialoguePlan>(edit(id) + "/auto-dialogue/preview", "POST", fields, signal),
   autoDialogue: (id: string, fields: ComicEditAutoDialogue, signal?: AbortSignal) =>
@@ -45,10 +57,14 @@ export const comicEditApi = {
     if (cursor) params.set("cursor", cursor);
     return request<ComicRenderHistory>(root + "/renders?" + params, { signal });
   },
-  renderControl: (id: string, action: "recover" | "cancel") => send<ComicRender>(root + "/renders/" + encodeURIComponent(id) + "/" + action, "POST", {}),
+  renderControl: (id: string, action: "recover" | "cancel") =>
+    send<ComicRender>(root + "/renders/" + encodeURIComponent(id) + "/" + action, "POST", {}),
   downloadRender: (id: string, inline = false) =>
     request<ComicRenderDownload>(root + "/renders/" + encodeURIComponent(id) + "/download" + (inline ? "?inline=1" : "")),
-  removeRender: (id: string) => request<{ ok: true }>(root + "/renders/" + encodeURIComponent(id), { method: "DELETE" }),
+  removeRender: (id: string, keepalive = false) => request<{ ok: true }>(root + "/renders/" + encodeURIComponent(id), {
+    method: "DELETE",
+    ...(keepalive ? { keepalive: true } : {}),
+  }),
 };
 const errors: Record<string, string> = {
   COMIC_SUBMISSIONS_PAUSED: "新生成和导出已暂停",
@@ -68,6 +84,8 @@ const errors: Record<string, string> = {
   EDIT_SPEECH_UNKNOWN: "配音结果待核实，原请求可能已计费",
   EDIT_SPEECH_NOT_RELEASABLE: "此句配音暂不可释放，请重新读取台词",
   EDIT_SPEECH_SUPERSEDED: "旧的配音请求已失效，请以最新提交结果为准",
+  EDIT_DRAMA_BOUND: "剧集剪辑任务随剧集关联保留，不支持单独删除",
+  EDIT_DRAMA_ARCHIVED: "已归档剧集不可修改剪辑时间线",
   INVALID_MATERIAL_REFERENCE: "所选场景、道具或音效素材不可用，请重新选择",
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
   RENDER_NO_VIDEO: "请先添加视频片段",

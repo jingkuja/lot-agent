@@ -9,6 +9,8 @@ import { createComicGenerationRoutes } from "./generation-routes.js";
 import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import { ComicDramaError, type PgComicDramaRepository } from "./repository.js";
+import { createComicRenderRoutes } from "./render-routes.js";
+import type { PgComicRenders } from "./render-repository.js";
 import { createComicDramaRoutes } from "./routes.js";
 
 const seriesId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -354,5 +356,58 @@ describe("comic-drama route security checks", () => {
       truncated: false,
       modelId: "deepseek-v4.1-flash",
     });
+  });
+
+  it("supports ephemeral render submission and immediate cancel/file cleanup on DELETE /renders/:id", async () => {
+    const renderId = "11111111-1111-4111-8111-111111111111";
+    const editId = "22222222-2222-4222-8222-222222222222";
+    const reqId = "33333333-3333-4333-8333-333333333333";
+    const renderRecord = {
+      id: renderId, editId, editRevision: 3, durationMs: 6000,
+      status: "pending" as const, error: null, mediaId: null, title: "Demo",
+      createdAt: new Date().toISOString(), recoverable: false, ephemeral: true,
+    };
+    const start = vi.fn(async () => ({ id: renderId, created: true }));
+    const status = vi.fn(async () => renderRecord);
+    const remove = vi.fn()
+      .mockResolvedValueOnce({ id: renderId, key: null, cancelled: true })
+      .mockResolvedValueOnce({ id: renderId, key: "out.mp4" });
+    const purgeDeletedFile = vi.fn(async (file: { id: string; key: string }, fn: (key: string) => Promise<void>) => {
+      await fn(file.key);
+    });
+    const removeRenderFile = vi.fn(async () => {});
+    const publishNewTask = vi.fn(async () => {});
+    const stopCancelled = vi.fn(async () => {});
+
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicRenderRoutes(
+      { start, status, remove, purgeDeletedFile } as unknown as PgComicRenders,
+      { assertAvailable: () => {}, removeRenderFile } as unknown as ComicMediaLibrary,
+      { publishNewTask, canResumePersisted: async () => false, resumePersisted: async () => {}, stopCancelled },
+    ));
+
+    const startRes = await app.request(`/edits/${editId}/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 3, requestId: reqId, fpsMode: "auto", ephemeral: true }),
+    });
+    expect(startRes.status).toBe(202);
+    expect(start).toHaveBeenCalledWith(ownerId, editId, {
+      expectedRevision: 3, requestId: reqId, fpsMode: "auto", ephemeral: true,
+    }, undefined);
+    expect(publishNewTask).toHaveBeenCalledWith(renderId, "comic-drama.render");
+
+    // Deleting while still running cancels the BullMQ task
+    const delRunning = await app.request(`/renders/${renderId}`, { method: "DELETE" });
+    expect(delRunning.status).toBe(200);
+    expect(stopCancelled).toHaveBeenCalledWith(renderId);
+    expect(purgeDeletedFile).not.toHaveBeenCalled();
+
+    // Deleting a ready file purges the MP4 file on disk immediately
+    const delReady = await app.request(`/renders/${renderId}`, { method: "DELETE" });
+    expect(delReady.status).toBe(200);
+    expect(purgeDeletedFile).toHaveBeenCalledTimes(1);
+    expect(removeRenderFile).toHaveBeenCalledWith("out.mp4");
   });
 });

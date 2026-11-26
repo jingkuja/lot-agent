@@ -20,10 +20,71 @@ export const comicEditAppendSourceSchema = z.object({
 }).strict();
 export const comicEditDeleteSchema = z.object({ expectedRevision: revision }).strict();
 export const comicEditListSchema = z.object({ cursor: z.string().max(100).optional() }).strict();
+export const comicDramaEditOpenSchema = z.object({ seriesId: id.optional() }).strict();
+export const comicDramaEditSyncSchema = z.object({ expectedRevision: revision }).strict();
 export type ComicEditCreate = z.infer<typeof comicEditCreateSchema>;
 export type ComicEditUpdate = z.infer<typeof comicEditUpdateSchema>;
 export type ComicEditReplace = z.infer<typeof comicEditReplaceSchema>;
 export type ComicEditAppendSource = z.infer<typeof comicEditAppendSourceSchema>;
+export type ComicDramaEditOpen = z.infer<typeof comicDramaEditOpenSchema>;
+export type ComicDramaEditSync = z.infer<typeof comicDramaEditSyncSchema>;
+export type ComicEditTaskKind = "drama" | "free";
+export type ComicDramaEditEpisodeItem = {
+  seriesId: string;
+  episodeNo: number;
+  title: string;
+  logline: string;
+  aspectRatio: ComicTimeline["aspectRatio"];
+  archivedAt: string | null;
+  clipCount: number;
+  adoptedClipCount: number;
+  editId: string | null;
+  editRevision: number | null;
+  timelineClipCount: number;
+  timelineDurationMs: number;
+  unaddedAdoptedCount: number;
+  outdatedAdoptedCount: number;
+  renderCount: number;
+  hasReadyRender: boolean;
+  updatedAt: string;
+};
+export type ComicDramaEditTaskSummary = {
+  id: string;
+  dramaId: string;
+  dramaTitle: string;
+  synopsis: string;
+  styleKey: string;
+  aspectRatio: ComicTimeline["aspectRatio"];
+  archivedAt: string | null;
+  lastSeriesId: string | null;
+  updatedAt: string;
+};
+export type ComicDramaEditTaskEntry = ComicDramaEditTaskSummary & {
+  lastEpisodeNo: number | null;
+  lastEpisodeTitle: string | null;
+  episodeCount: number;
+  editedEpisodeCount: number;
+  exportedEpisodeCount: number;
+  coverMediaId: string | null;
+  episodes: ComicDramaEditEpisodeItem[];
+};
+export type ComicEditLastSummary = {
+  id: string;
+  title: string;
+  taskKind: ComicEditTaskKind;
+  dramaId: string | null;
+  dramaTitle: string | null;
+  seriesId: string | null;
+  episodeNo: number | null;
+  episodeTitle: string | null;
+};
+export type ComicEditUnaddedTake = {
+  clipId: string;
+  ordinal: number;
+  scene: string;
+  takeId: string;
+  durationMs: number;
+};
 export type ComicEditListEntry = {
   id: string;
   seriesId: string | null;
@@ -31,6 +92,7 @@ export type ComicEditListEntry = {
   dramaTitle?: string | null;
   episodeNo?: number | null;
   episodeTitle?: string | null;
+  taskKind?: ComicEditTaskKind;
   title: string;
   revision: number;
   updatedAt: string;
@@ -43,8 +105,28 @@ export type ComicEditSource = {
   audioMode?: ComicVideoAudioMode;
 };
 export type ComicEditAudioSource = { id: string; durationMs: number };
-export type ComicEdit = ComicEditListEntry & { timeline: ComicTimeline; sources: ComicEditSource[]; audioSources: ComicEditAudioSource[] };
-export type ComicEditList = { entries: ComicEditListEntry[]; nextCursor: string | null; lastEditId?: string | null };
+export type ComicEdit = ComicEditListEntry & {
+  dramaEditTaskId?: string | null;
+  dramaArchivedAt?: string | null;
+  dramaEpisodes?: ComicDramaEditEpisodeItem[];
+  unaddedAdoptedTakes?: ComicEditUnaddedTake[];
+  timeline: ComicTimeline;
+  sources: ComicEditSource[];
+  audioSources: ComicEditAudioSource[];
+};
+export type ComicDramaEditTaskView = {
+  task: ComicDramaEditTaskSummary;
+  episodes: ComicDramaEditEpisodeItem[];
+  activeSeriesId: string | null;
+  edit: ComicEdit | null;
+};
+export type ComicEditList = {
+  entries: ComicEditListEntry[];
+  dramaTasks?: ComicDramaEditTaskEntry[];
+  nextCursor: string | null;
+  lastEditId?: string | null;
+  lastEdit?: ComicEditLastSummary | null;
+};
 
 export function emptyComicTimeline(aspectRatio: ComicTimeline["aspectRatio"]): ComicTimeline {
   return { schemaVersion: 1, aspectRatio, video: [], voice: [], sfx: [], music: [], subtitles: [] };
