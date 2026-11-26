@@ -48,6 +48,9 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   const autoOpenedRef = useRef(false);
   const [position, setPosition] = useState(0);
   const [seek, setSeek] = useState({ ms: 0 });
+  const [interacting, setInteracting] = useState(false);
+  const [audioNames, setAudioNames] = useState<Record<string, string>>({});
+  const [history, setHistory] = useState<{ past: ComicTimeline[]; future: ComicTimeline[] }>({ past: [], future: [] });
   const draggingIndex = useRef<number | null>(null);
   const pending = useRef(false);
   const dirty = !!project && !!draft && (draft.title !== project.title || draft.timeline !== project.timeline);
@@ -70,6 +73,8 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
   }, [dirty]);
   useEffect(() => {
     const controller = new AbortController();
+    setHistory({ past: [], future: [] });
+    setAudioNames({});
     void comicEditApi.get(id, controller.signal).then(data => {
       if (!controller.signal.aborted) { receive(data); setError(""); }
     }).catch(error => { if (!controller.signal.aborted) setError(editError(error)); });
@@ -101,16 +106,60 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
     });
   }, [draft, dirty, id, project, run]);
   useEffect(() => {
-    if (!dirty || saving || savePaused || picking || replacement) return;
+    if (!dirty || saving || savePaused || picking || replacement || interacting) return;
     const timer = setTimeout(save, 850);
     return () => clearTimeout(timer);
-  }, [dirty, picking, replacement, save, savePaused, saving]);
+  }, [dirty, interacting, picking, replacement, save, savePaused, saving]);
   const apply = (value: ComicTimeline) => {
     const valid = comicTimelineSchema.safeParse(value);
     if (!valid.success) { setError("请检查时间线中的裁切和素材"); return; }
     setError("");
+    if (draft && valid.data !== draft.timeline) {
+      setHistory(prev => ({
+        past: [...prev.past.slice(-49), draft.timeline],
+        future: [],
+      }));
+    }
     setDraft(previous => previous && { ...previous, timeline: valid.data });
   };
+  const undo = useCallback(() => {
+    if (saving || !draft || !history.past.length) return;
+    const previous = history.past[history.past.length - 1]!;
+    setHistory(prev => ({
+      past: prev.past.slice(0, -1),
+      future: [draft.timeline, ...prev.future.slice(0, 49)],
+    }));
+    setError("");
+    setDraft({ ...draft, timeline: previous });
+  }, [draft, history.past, saving]);
+  const redo = useCallback(() => {
+    if (saving || !draft || !history.future.length) return;
+    const next = history.future[0]!;
+    setHistory(prev => ({
+      past: [...prev.past.slice(-49), draft.timeline],
+      future: prev.future.slice(1),
+    }));
+    setError("");
+    setDraft({ ...draft, timeline: next });
+  }, [draft, history.future, saving]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (saving || picking || replacement || dialogueModalOpen) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey && history.past.length) {
+        event.preventDefault();
+        undo();
+      } else if (((key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey)) && history.future.length) {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dialogueModalOpen, history.future.length, history.past.length, picking, redo, replacement, saving, undo]);
   const choose = (takeId: string) => void run(async () => {
     const take = await comicGenerationApi.videoTake(takeId);
     if (!draft || !take.mediaId || take.durationMs <= 0) return;
@@ -142,6 +191,7 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
       loop: false,
     };
     setExtraAudio(prev => [...prev, { id: material.media.id, durationMs: material.media.durationMs! }]);
+    setAudioNames(prev => ({ ...prev, [material.media.id]: material.name }));
     apply({ ...draft.timeline, [track]: [...draft.timeline[track], entry] });
   };
 
@@ -366,8 +416,10 @@ export function ComicEditWorkspace({ id, exit, openVideo, setGuard, autoOpenDial
           </fieldset>
         </section>
       </div>
-      <ComicTimelineTracks timeline={timeline} videoSources={sources} audioSources={audioSources} selectedVideo={item?.id}
-        positionMs={position} seek={locate} selectVideo={setSelected} update={apply} disabled={saving} />
+      <ComicTimelineTracks timeline={timeline} videoSources={sources} audioSources={audioSources} audioNames={audioNames}
+        selectedVideo={item?.id} positionMs={position} seek={locate} selectVideo={setSelected} update={apply} disabled={saving}
+        canUndo={history.past.length > 0} canRedo={history.future.length > 0} onUndo={undo} onRedo={redo}
+        onInteractingChange={setInteracting} />
       {item && project.timeline.video.some(saved => saved.id === item.id && saved.takeId === item.takeId) &&
         <ComicDialogueAudio key={item.id + item.takeId} projectId={id} revision={project.revision} item={item} audioMode={source?.audioMode}
           voice={timeline.voice}

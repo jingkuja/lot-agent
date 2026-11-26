@@ -206,6 +206,18 @@ describe("comic-drama error copy and trilingual i18n coverage", () => {
       "将结合全剧大纲与全剧角色设定按集分段生成总剧本。",
       "查看任务",
       "定位到下方生成任务",
+      "撤销上一步",
+      "吸附对齐",
+      "配音联动字幕",
+      "整轨平移 · {0}",
+      "提前 {0} 秒",
+      "延后 {0} 秒",
+      "往前移（提前）",
+      "往后移（延后）",
+      "一键修复超出项",
+      "改为跨片段定位",
+      "对齐播放头",
+      "平移此轨",
     ];
     for (const key of requiredKeys) {
       expect(messages[key]?.en).toBeTruthy();

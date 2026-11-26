@@ -2108,13 +2108,73 @@ div.comic-version-list article {
 }
 
 .comic-multitrack {
-  --track-label-width: min(7.2rem, 24%);
+  --track-label-width: min(9.4rem, 32%);
+}
+
+.comic-multitrack-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .comic-multitrack output {
   color: var(--accent);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.comic-timeline-toolbar {
+  gap: 6px;
+}
+
+.comic-timeline-toolbar button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+.comic-timeline-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.comic-zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--overlay-sink);
+}
+
+.comic-zoom-group span {
+  min-width: 2.3rem;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.comic-zoom-group button {
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.comic-timeline-hint {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .comic-track-ruler {
@@ -2142,6 +2202,74 @@ div.comic-version-list article {
   font-variant-numeric: tabular-nums;
 }
 
+.comic-tracks-viewport {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+}
+
+.comic-tracks-inner {
+  min-width: 100%;
+}
+
+.comic-ruler-bar {
+  display: grid;
+  grid-template-columns: var(--track-label-width) minmax(0, 1fr);
+  align-items: center;
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-card));
+}
+
+.comic-ruler-track {
+  position: relative;
+  height: 24px;
+  margin: 2px 8px;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.comic-ruler-tick {
+  position: absolute;
+  top: 4px;
+  padding-inline-start: 4px;
+  border-inline-start: 1px solid var(--border-input);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.comic-ruler-tick[data-major="true"] {
+  color: var(--text-secondary);
+}
+
+.comic-ruler-head-marker {
+  position: absolute;
+  top: 0;
+  bottom: -4px;
+  width: 2px;
+  background: var(--cd-coral);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.comic-ruler-head-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline-start: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px 3px 50% 50%;
+  background: var(--cd-coral);
+}
+
 .comic-track-row {
   display: grid;
   grid-template-columns: var(--track-label-width) minmax(0, 1fr);
@@ -2149,12 +2277,46 @@ div.comic-version-list article {
   border-top: 1px solid var(--border);
 }
 
-.comic-track-row > span {
-  padding-inline-end: 8px;
+.comic-track-head {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 100%;
+  padding: 4px 8px;
+  background: var(--bg-card);
+  border-inline-end: 1px solid var(--border);
+  min-width: 0;
+}
+
+.comic-ruler-head {
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-card));
+}
+
+.comic-track-head > span {
   font-size: 0.84rem;
   font-weight: 600;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.comic-page button.comic-track-shift-btn {
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.comic-page button.comic-track-shift-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .comic-track-lane {
@@ -2165,9 +2327,19 @@ div.comic-version-list article {
   background: color-mix(in srgb, var(--bg) 72%, var(--bg-hover));
   border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   border-radius: 8px;
+  cursor: pointer;
 }
 
-.comic-track-lane button {
+.comic-cut-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-inline-start: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);
+  pointer-events: none;
+}
+
+.comic-track-lane[data-track="video"] button {
   position: absolute;
   top: 3px;
   height: calc(var(--comic-track-row) - 6px);
@@ -2180,11 +2352,100 @@ div.comic-version-list article {
   text-overflow: ellipsis;
   overflow: hidden;
   box-shadow: none;
-}
-
-.comic-track-lane[data-track="video"] button {
   border-color: var(--cd-jade);
   background: color-mix(in srgb, var(--cd-jade) 18%, var(--bg-card));
+}
+
+.comic-track-clip {
+  position: absolute;
+  height: calc(var(--comic-track-row) - 6px);
+  min-width: 12px;
+}
+
+.comic-track-clip[data-dragging="true"] {
+  z-index: 5;
+}
+
+.comic-track-clip .comic-track-item {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  box-shadow: none;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.comic-track-clip .comic-track-item:active {
+  cursor: grabbing;
+}
+
+.comic-track-clip[data-dragging="true"] .comic-track-item {
+  box-shadow: var(--shadow-md);
+  opacity: 0.92;
+}
+
+.comic-track-handle {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 7px;
+  z-index: 3;
+  cursor: ew-resize;
+  touch-action: none;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.comic-track-handle-start {
+  inset-inline-start: 0;
+}
+
+.comic-track-handle-end {
+  inset-inline-end: 0;
+}
+
+.comic-track-clip:hover .comic-track-handle,
+.comic-track-clip:has([aria-pressed="true"]) .comic-track-handle,
+.comic-track-clip[data-dragging="true"] .comic-track-handle {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.comic-drag-badge {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  inset-inline-start: 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg-card);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.comic-snap-guide {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 1px;
+  border-inline-start: 1.5px dashed var(--accent-2);
+  z-index: 4;
+  pointer-events: none;
 }
 
 .comic-track-lane[data-track="voice"] button {
@@ -2227,6 +2488,87 @@ div.comic-version-list article {
   border-radius: 999px;
   z-index: 2;
   pointer-events: none;
+}
+
+.comic-track-shift-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+}
+
+.comic-shift-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.comic-shift-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.comic-shift-head small {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-shift-custom {
+  align-items: end;
+}
+
+.comic-shift-custom > label {
+  max-width: 140px;
+}
+
+.comic-overflow-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.comic-inspector-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.comic-inspector-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.comic-inspector-head small {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.comic-quick-nudge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.comic-quick-nudge button {
+  min-height: 29px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .comic-multitrack {
+    --track-label-width: min(6.8rem, 34%);
+  }
 }
 
 .comic-track-editor {
