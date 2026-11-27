@@ -2,14 +2,19 @@
 import React, { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ComicDramaEditTaskView, ComicEditList } from "@lot-agent/core/comic-drama";
+import type {
+  ComicDramaEditTaskView, ComicEdit, ComicEditList, ComicSpeechLines, ComicTimeline,
+} from "@lot-agent/core/comic-drama";
 import { api } from "../../api/client.js";
 import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicDramaEditWorkspace } from "./ComicDramaEditWorkspace.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
+import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
+import { ComicTrimmedPreview } from "./ComicTrimmedPreview.js";
 import { comicEditApi } from "./edit-api.js";
 import { comicGenerationApi } from "./generation-api.js";
+import { comicLibraryApi } from "./library-api.js";
 
 const uuid = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
@@ -406,5 +411,373 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       await Promise.resolve();
     });
     expect(getSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes source shelf and links upper stage video track selection with dialogue voice-over panel", async () => {
+    const projectId = uuid(100);
+    const seriesId = uuid(101);
+    const clipItem1 = uuid(111);
+    const clipItem2 = uuid(112);
+    const take1 = uuid(121);
+    const take2 = uuid(122);
+    const media1 = uuid(131);
+    const media2 = uuid(132);
+    const voiceMedia1 = uuid(141);
+
+    const editProject: ComicEdit = {
+      id: projectId,
+      seriesId,
+      dramaId: uuid(102),
+      dramaTitle: "雨夜便利店",
+      episodeNo: 1,
+      episodeTitle: "雨夜里的过期快乐",
+      taskKind: "drama",
+      dramaEditTaskId: uuid(103),
+      dramaArchivedAt: null,
+      episodeClipCount: 2,
+      episodeAdoptedCount: 2,
+      title: "《雨夜便利店》第 1 集",
+      revision: 3,
+      updatedAt: "2026-11-27T10:00:00.000Z",
+      timeline: {
+        schemaVersion: 1,
+        aspectRatio: "9:16",
+        video: [
+          {
+            id: clipItem1,
+            takeId: take1,
+            sourceDurationMs: 6042,
+            inMs: 0,
+            outMs: 6042,
+            volume: 1,
+            transitionIn: { kind: "cut", durationMs: 0 },
+          },
+          {
+            id: clipItem2,
+            takeId: take2,
+            sourceDurationMs: 7042,
+            inMs: 0,
+            outMs: 7042,
+            volume: 1,
+            transitionIn: { kind: "cut", durationMs: 0 },
+          },
+        ],
+        voice: [
+          {
+            id: uuid(151),
+            mediaId: voiceMedia1,
+            lineId: "line-1",
+            anchor: { kind: "clip", videoItemId: clipItem1, offsetMs: 0 },
+            durationMs: 2200,
+            sourceInMs: 0,
+            volume: 1,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            loop: false,
+          },
+        ],
+        sfx: [],
+        music: [],
+        subtitles: [
+          {
+            id: uuid(161),
+            lineId: "line-1",
+            text: "鲜食五折，最后十分钟。",
+            anchor: { kind: "clip", videoItemId: clipItem1, offsetMs: 0 },
+            durationMs: 2200,
+          },
+        ],
+      },
+      sources: [
+        {
+          takeId: take1,
+          mediaId: media1,
+          seriesId,
+          seriesTitle: "雨夜里的过期快乐",
+          clipId: uuid(171),
+          clipOrdinal: 1,
+          scene: "深夜双重打击",
+          version: 1,
+          durationMs: 6042,
+          aspectRatio: "9:16",
+          adopted: null,
+        },
+        {
+          takeId: take2,
+          mediaId: media2,
+          seriesId,
+          seriesTitle: "雨夜里的过期快乐",
+          clipId: uuid(172),
+          clipOrdinal: 2,
+          scene: "暴雨冲进便利店",
+          version: 1,
+          durationMs: 7042,
+          aspectRatio: "9:16",
+          adopted: null,
+        },
+      ],
+      audioSources: [{ id: voiceMedia1, durationMs: 2200 }],
+    };
+
+    const speechByItem: Record<string, ComicSpeechLines> = {
+      [clipItem1]: {
+        clipRevision: 1,
+        presets: ["nova"],
+        characters: [],
+        lines: [{ id: "line-1", speaker: "店员", text: "鲜食五折，最后十分钟。", speed: 1, emotionKey: null }],
+      },
+      [clipItem2]: {
+        clipRevision: 1,
+        presets: ["nova"],
+        characters: [],
+        lines: [{ id: "line-2", speaker: "林夏", text: "雨太大了，先躲一躲。", speed: 1, emotionKey: null }],
+      },
+    };
+
+    vi.spyOn(comicEditApi, "renders").mockResolvedValue({ entries: [], nextCursor: null });
+    vi.spyOn(comicLibraryApi, "links").mockResolvedValue({
+      url: "https://example.com/media.mp4",
+      thumbnailUrl: null,
+    });
+    const linesSpy = vi.spyOn(comicEditApi, "lines").mockImplementation(async (_pid, itemId) => speechByItem[itemId]!);
+
+    const host = await mount(createElement(ComicEditWorkspace, {
+      id: projectId,
+      initialData: editProject,
+      exit: vi.fn(),
+      openVideo: vi.fn(),
+      setGuard: vi.fn(),
+    }), "zh");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain("片源架");
+    expect(host.textContent).not.toContain("收起片源架");
+    expect(host.textContent).not.toContain("展开片源架");
+
+    const stage = host.querySelector(".comic-edit-stage");
+    expect(stage).toBeTruthy();
+    expect(stage?.querySelector(".comic-timeline-preview")).toBeTruthy();
+    expect(stage?.querySelector(".comic-video-track-card")).toBeTruthy();
+    const dialoguePanel = stage?.querySelector(".comic-dialogue-panel");
+    expect(dialoguePanel).toBeTruthy();
+
+    const multitrack = host.querySelector(".comic-multitrack");
+    expect(multitrack).toBeTruthy();
+    expect(Boolean(dialoguePanel!.compareDocumentPosition(multitrack!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    const clipRows = Array.from(host.querySelectorAll(".comic-video-track li"));
+    expect(clipRows).toHaveLength(2);
+    expect(clipRows[0]?.textContent).toContain("已配音 1");
+    expect(clipRows[0]?.textContent).toContain("字幕 1");
+    expect(clipRows[0]?.textContent).toContain("配音中");
+    expect(linesSpy).toHaveBeenCalledWith(projectId, clipItem1, expect.anything());
+    expect(dialoguePanel?.textContent).toContain("深夜双重打击");
+    expect(dialoguePanel?.textContent).toContain("鲜食五折，最后十分钟。");
+
+    const clip2Btn = clipRows[1]?.querySelector(".comic-track-label") as HTMLButtonElement;
+    await act(async () => {
+      clip2Btn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(clip2Btn.getAttribute("aria-pressed")).toBe("true");
+    expect(clipRows[1]?.textContent).toContain("配音中");
+    expect(linesSpy).toHaveBeenCalledWith(projectId, clipItem2, expect.anything());
+    expect(dialoguePanel?.querySelector(".comic-dialogue-context")?.textContent).toContain("暴雨冲进便利店");
+    expect(dialoguePanel?.textContent).toContain("雨太大了，先躲一躲。");
+
+    const prevBtn = dialoguePanel?.querySelector('button[aria-label="切换到上一片段"]') as HTMLButtonElement;
+    expect(prevBtn).toBeTruthy();
+    expect(prevBtn.disabled).toBe(false);
+    await act(async () => {
+      prevBtn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const clip1Btn = clipRows[0]?.querySelector(".comic-track-label") as HTMLButtonElement;
+    expect(clip1Btn.getAttribute("aria-pressed")).toBe("true");
+    expect(dialoguePanel?.querySelector(".comic-dialogue-context")?.textContent).toContain("深夜双重打击");
+
+    const previewCard = stage?.querySelector(".comic-timeline-preview") as HTMLElement;
+    const videoCard = stage?.querySelector(".comic-video-track-card") as HTMLElement;
+    const dialogueCard = stage?.querySelector(".comic-dialogue-panel") as HTMLElement;
+    const previewToggle = previewCard.querySelector(".comic-stage-collapse-btn") as HTMLButtonElement;
+    const videoToggle = videoCard.querySelector(".comic-stage-collapse-btn") as HTMLButtonElement;
+    const dialogueToggle = dialogueCard.querySelector(".comic-stage-collapse-btn") as HTMLButtonElement;
+    expect(previewToggle).toBeTruthy();
+    expect(videoToggle).toBeTruthy();
+    expect(dialogueToggle).toBeTruthy();
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(videoToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(dialogueToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(stage?.getAttribute("data-preview-collapsed")).toBeNull();
+    expect(stage?.getAttribute("data-all-collapsed")).toBeNull();
+
+    const previewVideoBefore = previewCard.querySelector("video");
+    const linesCallCountBefore = linesSpy.mock.calls.length;
+
+    act(() => {
+      previewToggle.click();
+    });
+    expect(stage?.getAttribute("data-preview-collapsed")).toBe("true");
+    expect(stage?.getAttribute("data-video-collapsed")).toBeNull();
+    expect(stage?.getAttribute("data-dialogue-collapsed")).toBeNull();
+    expect(stage?.getAttribute("data-all-collapsed")).toBeNull();
+
+    act(() => {
+      videoToggle.click();
+      dialogueToggle.click();
+    });
+
+    expect(stage?.getAttribute("data-video-collapsed")).toBe("true");
+    expect(stage?.getAttribute("data-dialogue-collapsed")).toBe("true");
+    expect(stage?.getAttribute("data-all-collapsed")).toBe("true");
+    expect(previewCard.classList.contains("is-collapsed")).toBe(true);
+    expect(videoCard.classList.contains("is-collapsed")).toBe(true);
+    expect(dialogueCard.classList.contains("is-collapsed")).toBe(true);
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(videoToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(dialogueToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(previewToggle.textContent).toContain("展开");
+    expect(videoToggle.textContent).toContain("展开");
+    expect(dialogueToggle.textContent).toContain("展开");
+    expect((previewCard.querySelector(".comic-stage-card-body") as HTMLElement).hidden).toBe(true);
+    expect((videoCard.querySelector(".comic-editor-fields") as HTMLElement).hidden).toBe(true);
+    expect((dialogueCard.querySelector(".comic-stage-card-body") as HTMLElement).hidden).toBe(true);
+    expect(previewCard.querySelector("video")).toBe(previewVideoBefore);
+    expect(linesSpy.mock.calls.length).toBe(linesCallCountBefore);
+
+    act(() => {
+      previewCard.click();
+    });
+    expect(stage?.getAttribute("data-preview-collapsed")).toBeNull();
+    expect(stage?.getAttribute("data-all-collapsed")).toBeNull();
+    expect(previewCard.classList.contains("is-collapsed")).toBe(false);
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("true");
+
+    act(() => {
+      videoToggle.click();
+      dialogueCard.click();
+    });
+
+    expect(stage?.getAttribute("data-video-collapsed")).toBeNull();
+    expect(stage?.getAttribute("data-dialogue-collapsed")).toBeNull();
+    expect(previewCard.classList.contains("is-collapsed")).toBe(false);
+    expect(videoCard.classList.contains("is-collapsed")).toBe(false);
+    expect(dialogueCard.classList.contains("is-collapsed")).toBe(false);
+    expect(previewToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(videoToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(dialogueToggle.getAttribute("aria-expanded")).toBe("true");
+    expect((previewCard.querySelector(".comic-stage-card-body") as HTMLElement).hidden).toBe(false);
+    expect((videoCard.querySelector(".comic-editor-fields") as HTMLElement).hidden).toBe(false);
+    expect((dialogueCard.querySelector(".comic-stage-card-body") as HTMLElement).hidden).toBe(false);
+  });
+
+  it("adapts widescreen 16:9 and 21:9 previews and toggles lightbox zoom without unmounting video", async () => {
+    const takeId = uuid(201);
+    const mediaId = uuid(202);
+    const makeTimeline = (ratio: string): ComicTimeline => ({
+      schemaVersion: 1,
+      aspectRatio: ratio as ComicTimeline["aspectRatio"],
+      video: [{
+        id: uuid(211),
+        takeId,
+        sourceDurationMs: 5000,
+        inMs: 0,
+        outMs: 5000,
+        volume: 1,
+        transitionIn: { kind: "cut", durationMs: 0 },
+      }],
+      voice: [],
+      sfx: [],
+      music: [],
+      subtitles: [],
+    });
+    const sources = [{
+      takeId,
+      mediaId,
+      seriesId: uuid(203),
+      seriesTitle: "宽屏样片",
+      clipId: uuid(204),
+      clipOrdinal: 1,
+      scene: "城市全景",
+      version: 1,
+      durationMs: 5000,
+      aspectRatio: "16:9" as const,
+      adopted: null,
+    }];
+    vi.spyOn(comicLibraryApi, "links").mockResolvedValue({
+      url: "https://example.com/wide.mp4",
+      thumbnailUrl: null,
+    });
+
+    const host = await mount(createElement(ComicTrimmedPreview, {
+      timeline: makeTimeline("16:9"),
+      sources,
+      seek: { ms: 0 },
+      position: 0,
+      onPosition: vi.fn(),
+    }), "zh");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const stage = host.querySelector(".comic-timeline-stage");
+    const panel = host.querySelector(".comic-preview-panel");
+    const player = host.querySelector(".comic-timeline-player") as HTMLElement;
+    expect(stage?.getAttribute("data-orientation")).toBe("landscape");
+    expect(panel?.getAttribute("data-orientation")).toBe("landscape");
+    expect(player.style.aspectRatio).toBe("16 / 9");
+    expect(host.textContent).toContain("16:9");
+
+    const videoBefore = host.querySelector(".comic-timeline-player video");
+    expect(videoBefore).toBeTruthy();
+
+    const expandBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "放大预览");
+    expect(expandBtn).toBeTruthy();
+    act(() => { (expandBtn as HTMLButtonElement).click(); });
+
+    const shell = host.querySelector(".comic-preview-shell");
+    expect(shell?.classList.contains("is-expanded")).toBe(true);
+    expect(shell?.getAttribute("role")).toBe("dialog");
+    expect(shell?.getAttribute("aria-modal")).toBe("true");
+    expect(host.querySelector(".comic-preview-placeholder")).toBeTruthy();
+    expect(host.querySelector(".comic-timeline-player video")).toBe(videoBefore);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(shell?.classList.contains("is-expanded")).toBe(false);
+    expect(host.querySelector(".comic-preview-placeholder")).toBeFalsy();
+    expect(host.querySelector(".comic-timeline-player video")).toBe(videoBefore);
+
+    const zoomFab = host.querySelector('button[aria-label="放大视频画面"]') as HTMLButtonElement;
+    expect(zoomFab).toBeTruthy();
+    act(() => { zoomFab.click(); });
+    expect(shell?.classList.contains("is-expanded")).toBe(true);
+
+    const collapseBtn = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "收起预览");
+    expect(collapseBtn).toBeTruthy();
+    act(() => { (collapseBtn as HTMLButtonElement).click(); });
+    expect(shell?.classList.contains("is-expanded")).toBe(false);
+
+    await act(async () => {
+      root?.render(createElement(LanguageProvider, null, createElement(ComicTrimmedPreview, {
+        timeline: makeTimeline("21:9"),
+        sources,
+        seek: { ms: 0 },
+        position: 0,
+        onPosition: vi.fn(),
+      })));
+      await Promise.resolve();
+    });
+    expect(stage?.getAttribute("data-orientation")).toBe("landscape");
+    expect(player.style.aspectRatio).toBe("21 / 9");
   });
 });

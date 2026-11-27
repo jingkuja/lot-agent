@@ -8,13 +8,39 @@ import {
   computeOverlayAudioStates, effectiveVideoAudioState, type PreviewAudioTrack, type PreviewTrackToggles,
 } from "./preview-audio.js";
 
-export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek, position, onPosition }: {
+function parseAspectRatio(ratio: string): {
+  css: string;
+  value: number;
+  orientation: "landscape" | "portrait" | "square";
+} {
+  const parts = ratio.split(":").map(Number);
+  const w = parts[0] && Number.isFinite(parts[0]) && parts[0] > 0 ? parts[0] : 9;
+  const h = parts[1] && Number.isFinite(parts[1]) && parts[1] > 0 ? parts[1] : 16;
+  const value = w / h;
+  const orientation = value > 1.05 ? "landscape" : value < 0.95 ? "portrait" : "square";
+  return { css: `${w} / ${h}`, value, orientation };
+}
+
+export function ComicTrimmedPreview({
+  timeline,
+  sources,
+  audioSources = [],
+  seek,
+  position,
+  onPosition,
+  onSelectVideo,
+  collapsed,
+  onToggleCollapse,
+}: {
   timeline: ComicTimeline;
   sources: ComicEditSource[];
   audioSources?: readonly ComicEditAudioSource[];
   seek: { ms: number };
   position: number;
   onPosition: (ms: number) => void;
+  onSelectVideo?: (videoItemId: string) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const { t } = useI18n();
   const items = timeline.video;
@@ -33,6 +59,33 @@ export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek
   const [trackEnabled, setTrackEnabled] = useState<PreviewTrackToggles>({
     video: true, voice: true, sfx: true, music: true,
   });
+  const [expanded, setExpanded] = useState(false);
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const isCollapsed = collapsed ?? localCollapsed;
+  const toggleCollapse = onToggleCollapse ?? (() => setLocalCollapsed(v => !v));
+  const aspect = useMemo(() => parseAspectRatio(timeline.aspectRatio), [timeline.aspectRatio]);
+  useEffect(() => {
+    if (!isCollapsed) return;
+    setExpanded(false);
+    const player = playerRef.current;
+    if (player && !player.paused) player.pause();
+    continuePlaying.current = false;
+    setPlaying(false);
+  }, [isCollapsed]);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setExpanded(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expanded]);
+  useEffect(() => {
+    if (!items.length && expanded) setExpanded(false);
+  }, [expanded, items.length]);
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const audioLinkRequestedRef = useRef<Set<string>>(new Set());
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -223,66 +276,138 @@ export function ComicTrimmedPreview({ timeline, sources, audioSources = [], seek
   const toggleTrack = (key: keyof PreviewTrackToggles) => setTrackEnabled(prev => ({ ...prev, [key]: !prev[key] }));
   const trackLabel = (track: PreviewAudioTrack) => track === "voice" ? "对白" : track === "sfx" ? "音效" : "配乐";
 
-  return <section className="comic-edit-card comic-timeline-preview">
-    <header>
-      <h2>{t("剪辑预览")}</h2>
-      {videoAudio?.muted && <small className="comic-pill" data-tone="idle">{t("片段原声已静音")}</small>}
-    </header>
-    {items.length === 0 ? <p className="comic-generation-note">{t("添加片源后即可预览")}</p> :
-      failed ? <button onClick={() => setRetry(value => value + 1)}>{t("重新获取预览")}</button> : <>
-        <div className="comic-timeline-player" style={{ aspectRatio: timeline.aspectRatio.replace(":", "/") }}>
-          {url && item ? <video ref={playerRef} key={item.id + url} src={url} controls playsInline preload="metadata" aria-label={t("剪辑预览")}
-            onLoadedMetadata={event => {
-              const player = event.currentTarget;
-              applyVideoVolume(player);
-              const ms = requested.current ?? item.inMs;
-              requested.current = null;
-              if (ms > 0) player.currentTime = ms / 1000;
-              ready.current = true;
-              if (continuePlaying.current) void player.play().catch(() => {});
-            }} onTimeUpdate={event => advance(event.currentTarget)} onEnded={event => advance(event.currentTarget)}
-            onPlay={event => {
-              applyVideoVolume(event.currentTarget);
-              if (event.currentTarget.currentTime >= item.outMs / 1000) event.currentTarget.currentTime = item.inMs / 1000;
-              ready.current = true;
-              setPlaying(true);
-            }}
-            onPause={() => { if (!continuePlaying.current) setPlaying(false); }}
-            onError={() => setFailed(true)} /> : <span role="status">{t("加载中…")}</span>}
-          {item && activeCaption >= 0 && <span className="comic-preview-caption" data-position={timeline.captionStyle?.position}
-            data-size={timeline.captionStyle?.size} data-color={timeline.captionStyle?.color}>{timeline.subtitles[activeCaption].text}</span>}
-        </div>
-        <div className="comic-actions comic-preview-tracks" role="group" aria-label={t("试听轨道")}>
-          <button type="button" aria-pressed={trackEnabled.video} onClick={() => toggleTrack("video")}>
-            {t("原声")}{item ? ` (${Math.round(item.volume * 100)}%)` : ""}
-          </button>
-          <button type="button" aria-pressed={trackEnabled.voice} onClick={() => toggleTrack("voice")}>
-            {t("对白")} ({timeline.voice.length})
-          </button>
-          <button type="button" aria-pressed={trackEnabled.sfx} onClick={() => toggleTrack("sfx")}>
-            {t("音效")} ({timeline.sfx.length})
-          </button>
-          <button type="button" aria-pressed={trackEnabled.music} onClick={() => toggleTrack("music")}>
-            {t("配乐")} ({timeline.music.length})
-          </button>
-        </div>
-        {activeAudio.length > 0 && (
-          <div className="comic-preview-cues" role="status">
-            <small>{t("当前时间点激活音轨：")}</small>
-            {activeAudio.map(entry => (
-              <small key={entry.key} className="comic-pill" data-tone="done">
-                {t(trackLabel(entry.track))} · {Math.round(entry.gain * 100)}%
-              </small>
-            ))}
+  return <section
+    className={`comic-edit-card comic-timeline-preview${isCollapsed ? " is-collapsed" : ""}`}
+    onClick={isCollapsed ? toggleCollapse : undefined}
+  >
+    {expanded && (
+      <div className="comic-preview-placeholder">
+        <span>{t("正在放大预览中…")}</span>
+        <button type="button" onClick={() => setExpanded(false)}>{t("退出放大")}</button>
+      </div>
+    )}
+    <div
+      className={`comic-preview-shell${expanded ? " is-expanded" : ""}`}
+      role={expanded ? "dialog" : undefined}
+      aria-modal={expanded ? true : undefined}
+      aria-label={expanded ? t("放大预览") : undefined}
+      onClick={expanded ? event => { if (event.target === event.currentTarget) setExpanded(false); } : undefined}
+    >
+      <div className="comic-preview-panel" data-orientation={aspect.orientation}>
+        <header className="comic-stage-card-header">
+          <div className="comic-stage-card-header-main">
+            <div className="comic-preview-title-group">
+              <h2>{t("剪辑预览")}</h2>
+              <small className="comic-pill" data-tone="idle">{timeline.aspectRatio}</small>
+              {videoAudio?.muted && <small className="comic-pill" data-tone="idle">{t("片段原声已静音")}</small>}
+            </div>
+            {!isCollapsed && items.length > 0 && !failed && (
+              <button type="button" className="comic-preview-expand-btn" onClick={() => setExpanded(v => !v)}>
+                {t(expanded ? "收起预览" : "放大预览")}
+              </button>
+            )}
           </div>
-        )}
-        <div className="comic-actions">
-          <button type="button" disabled={!index} onClick={() => locate(index - 1, layout.video[index - 1].startMs, false)}>{t("上一片段")}</button>
-          <small>{t("片段 {0} / {1}", [index + 1, items.length])}</small>
-          <button type="button" disabled={index + 1 >= items.length} onClick={() => locate(index + 1, layout.video[index + 1].startMs, false)}>
-            {t("下一片段")}
-          </button>
+          {!expanded && (
+            <button
+              type="button"
+              className="comic-stage-collapse-btn"
+              aria-expanded={!isCollapsed}
+              aria-label={t(isCollapsed ? "展开剪辑预览" : "收起剪辑预览")}
+              title={t(isCollapsed ? "展开剪辑预览" : "收起剪辑预览")}
+              onClick={event => {
+                event.stopPropagation();
+                toggleCollapse();
+              }}
+            >
+              <span className="comic-stage-collapse-icon" aria-hidden="true">{isCollapsed ? "»" : "«"}</span>
+              <span className="comic-stage-collapse-label">{t(isCollapsed ? "展开" : "收起")}</span>
+            </button>
+          )}
+        </header>
+        <div className="comic-stage-card-body" hidden={isCollapsed}>
+          {items.length === 0 ? <p className="comic-generation-note">{t("添加片源后即可预览")}</p> :
+            failed ? <button onClick={() => setRetry(value => value + 1)}>{t("重新获取预览")}</button> : <>
+              <div
+                className="comic-timeline-stage"
+                data-orientation={aspect.orientation}
+                onClick={!expanded ? event => { if (event.target === event.currentTarget) setExpanded(true); } : undefined}
+              >
+                <div className="comic-timeline-player" style={{ aspectRatio: aspect.css }}>
+                  {url && item ? <video ref={playerRef} key={item.id + url} src={url} controls playsInline preload="metadata" aria-label={t("剪辑预览")}
+                    onLoadedMetadata={event => {
+                      const player = event.currentTarget;
+                      applyVideoVolume(player);
+                      const ms = requested.current ?? item.inMs;
+                      requested.current = null;
+                      if (ms > 0) player.currentTime = ms / 1000;
+                      ready.current = true;
+                      if (continuePlaying.current) void player.play().catch(() => {});
+                    }} onTimeUpdate={event => advance(event.currentTarget)} onEnded={event => advance(event.currentTarget)}
+                    onPlay={event => {
+                      applyVideoVolume(event.currentTarget);
+                      if (event.currentTarget.currentTime >= item.outMs / 1000) event.currentTarget.currentTime = item.inMs / 1000;
+                      ready.current = true;
+                      setPlaying(true);
+                    }}
+                    onPause={() => { if (!continuePlaying.current) setPlaying(false); }}
+                    onError={() => setFailed(true)} /> : <span role="status">{t("加载中…")}</span>}
+                  {item && activeCaption >= 0 && <span className="comic-preview-caption" data-position={timeline.captionStyle?.position}
+                    data-size={timeline.captionStyle?.size} data-color={timeline.captionStyle?.color}>{timeline.subtitles[activeCaption].text}</span>}
+                </div>
+                {!expanded && (
+                  <button
+                    type="button"
+                    className="comic-preview-zoom-fab"
+                    aria-label={t("放大视频画面")}
+                    title={t("点击放大预览")}
+                    onClick={() => setExpanded(true)}
+                  >
+                    ⤢
+                  </button>
+                )}
+              </div>
+              <div className="comic-actions comic-preview-tracks" role="group" aria-label={t("试听轨道")}>
+                <button type="button" aria-pressed={trackEnabled.video} onClick={() => toggleTrack("video")}>
+                  {t("原声")}{item ? ` (${Math.round(item.volume * 100)}%)` : ""}
+                </button>
+                <button type="button" aria-pressed={trackEnabled.voice} onClick={() => toggleTrack("voice")}>
+                  {t("对白")} ({timeline.voice.length})
+                </button>
+                <button type="button" aria-pressed={trackEnabled.sfx} onClick={() => toggleTrack("sfx")}>
+                  {t("音效")} ({timeline.sfx.length})
+                </button>
+                <button type="button" aria-pressed={trackEnabled.music} onClick={() => toggleTrack("music")}>
+                  {t("配乐")} ({timeline.music.length})
+                </button>
+              </div>
+              {activeAudio.length > 0 && (
+                <div className="comic-preview-cues" role="status">
+                  <small>{t("当前时间点激活音轨：")}</small>
+                  {activeAudio.map(entry => (
+                    <small key={entry.key} className="comic-pill" data-tone="done">
+                      {t(trackLabel(entry.track))} · {Math.round(entry.gain * 100)}%
+                    </small>
+                  ))}
+                </div>
+              )}
+              <div className="comic-actions">
+                <button type="button" disabled={!index} onClick={() => {
+                  const prev = index - 1;
+                  locate(prev, layout.video[prev].startMs, false);
+                  onSelectVideo?.(items[prev].id);
+                }}>{t("上一片段")}</button>
+                <small>{t("片段 {0} / {1}", [index + 1, items.length])}</small>
+                <button type="button" disabled={index + 1 >= items.length} onClick={() => {
+                  const next = index + 1;
+                  locate(next, layout.video[next].startMs, false);
+                  onSelectVideo?.(items[next].id);
+                }}>
+                  {t("下一片段")}
+                </button>
+              </div>
+            </>}
         </div>
-      </>}
+      </div>
+    </div>
   </section>;
 }
