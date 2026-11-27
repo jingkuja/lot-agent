@@ -162,7 +162,9 @@ describe("runMigrations", () => {
         [95, "comic-drama-v1-features"], [96, "assignment-schedules"], [97, "comic-drama-v1-remediation"],
         [98, "comic-video-credits"], [99, "comic-drama-material-generation"],
         [100, "comic-drama-reference-video"], [101, "comic-drama-settlements"],
-        [102, "comic-drama-hierarchy"], [103, "comic-drama-queues"]]);
+        [102, "comic-drama-hierarchy"], [103, "comic-drama-queues"], [104, "comic-drama-preparation"],
+        [105, "comic-drama-character-drama"], [106, "comic-drama-render-deletion"], [107, "comic-drama-ephemeral-preview"],
+        [108, "comic-drama-edit-tasks"], [109, "volc-assets"], [110, "comic-drama-voices"], [111, "comic-drama-character-gender"]]);
     expect(calls.some(({ sql }) => sql.includes("CREATE TABLE IF NOT EXISTS virtual_payment_orders"))).toBe(true);
   });
 

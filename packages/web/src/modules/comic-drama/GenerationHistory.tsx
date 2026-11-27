@@ -27,7 +27,7 @@ export function ComicTakeStatus({ take }: { take: ComicImageTake }) {
 }
 
 export function useGenerationHistory<T>(
-  load: (signal: AbortSignal) => Promise<T>,
+  load: ((signal: AbortSignal) => Promise<T>) | null,
   interval = 5_000,
   revision = 0,
   options?: { shouldPoll?: (data: T) => boolean; onData?: (data: T) => void },
@@ -40,6 +40,7 @@ export function useGenerationHistory<T>(
   const onDataRef = useRef(options?.onData);
   onDataRef.current = options?.onData;
   useEffect(() => {
+    if (!load) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;

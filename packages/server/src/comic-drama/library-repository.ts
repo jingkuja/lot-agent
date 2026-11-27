@@ -5,12 +5,13 @@ import type {
   ComicMediaVersion, ComicOutfit, StoredComicMedia,
 } from "@lot-agent/core/comic-drama";
 import { requireComicChoice } from "./dictionary.js";
+import { bindComicCharacterDesignVoice, readComicCharacterDesignVoice } from "./character-voice-store.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction, type ComicQuery } from "./library-db.js";
 
 const tables = "lot_comic_drama";
 const pageSize = 24;
 const characterColumns = `c.id,c.name,c.aliases,c.tags,c.role_key AS "roleKey",d.id AS "dramaId",d.title AS "dramaTitle",
-  c.age,c.personality,c.appearance,(c.archived_at IS NOT NULL) AS archived`;
+  c.age,c.gender,c.personality,c.appearance,(c.archived_at IS NOT NULL) AS archived`;
 const materialColumns = `m.id,kind,name,category_key AS "categoryKey",tags,(archived_at IS NOT NULL) AS archived`;
 const mediaValue = `jsonb_build_object('id',f.id,'mime',f.mime,'sizeBytes',f.size_bytes,'width',f.width,'height',f.height,
   'durationMs',f.duration_ms,'hasThumbnail',f.thumbnail_key IS NOT NULL)`;
@@ -125,18 +126,21 @@ export class PgComicLibrary implements ComicLibraryRepository {
       a.kind,a.key,a.outfit_id AS "outfitId",a.version,${mediaValue} AS media FROM ${tables}.cd_character_assets a
       JOIN ${tables}.cd_media f ON f.id=a.media_id WHERE a.owner_id=$1 AND a.character_id=$2 AND a.deleted_at IS NULL
       ORDER BY a.kind,a.outfit_id,a.key,a.version DESC`, [owner, id]);
-    return { ...character, outfits: outfits.rows, assets, cover: (assets.find(asset => asset.kind === "slot" && asset.key === "front") ?? assets[0])?.media ?? null };
+    const designVoice = await readComicCharacterDesignVoice(db, owner, id);
+    const cover = (assets.find(asset => asset.kind === "slot" && asset.key === "front") ?? assets[0])?.media ?? null;
+    return { ...character, outfits: outfits.rows, assets, cover, designVoice };
   }
 
   async createCharacter(owner: string, input: ComicCharacterInput) {
     return libraryTransaction(this.pool, async db => {
       await requireComicChoice(db, owner, "role", input.roleKey);
       await this.verifyCharacterDrama(db, owner, input.dramaId);
-      const { name, aliases, tags, roleKey, age, personality, appearance } = input;
-      const { rows } = await db.query<{ id: string }>(`INSERT INTO ${tables}.cd_characters
-        (owner_id,name,aliases,tags,role_key,drama_id,age,personality,appearance) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [owner, name, aliases, tags, roleKey, input.dramaId ?? null, age, personality, appearance]);
-      return rows[0].id;
+      const { name, aliases, tags, roleKey, age, personality, appearance, gender, designVoiceId } = input;
+      const { rows: [{ id }] } = await db.query<{ id: string }>(`INSERT INTO ${tables}.cd_characters
+        (owner_id,name,aliases,tags,role_key,drama_id,age,personality,appearance,gender) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [owner, name, aliases, tags, roleKey, input.dramaId ?? null, age, personality, appearance, gender ?? null]);
+      if (designVoiceId) await bindComicCharacterDesignVoice(db, owner, id, designVoiceId);
+      return id;
     });
   }
 
@@ -148,9 +152,12 @@ export class PgComicLibrary implements ComicLibraryRepository {
       if (nextDramaId !== (current.dramaId ?? null)) {
         await this.verifyCharacterDrama(db, owner, nextDramaId);
       }
-      const { name, aliases, tags, roleKey, age, personality, appearance } = input;
+      const { name, aliases, tags, roleKey, age, personality, appearance, gender, designVoiceId } = input;
+      const nextGender = gender === undefined ? current.gender ?? null : gender;
       await db.query(`UPDATE ${tables}.cd_characters SET name=$2,aliases=$3,tags=$4,role_key=$5,drama_id=$6,age=$7,personality=$8,appearance=$9,
-        updated_at=clock_timestamp() WHERE id=$1`, [id, name, aliases, tags, roleKey, nextDramaId, age, personality, appearance]);
+        gender=$10,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$11`,
+      [id, name, aliases, tags, roleKey, nextDramaId, age, personality, appearance, nextGender, owner]);
+      if (designVoiceId) await bindComicCharacterDesignVoice(db, owner, id, designVoiceId);
     });
   }
 

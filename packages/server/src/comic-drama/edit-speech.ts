@@ -10,6 +10,7 @@ import {
   type ComicVoiceBind, type ComicVoiceSettings, type ComicSpeechPresetId, type ComicSpeechPresetMeta,
 } from "@lot-agent/core/comic-drama";
 import { readComicDictionary } from "./dictionary.js";
+import { writeComicCharacterVoice } from "./character-voice-store.js";
 import { assertComicDramaCompliance } from "./compliance.js";
 import { ComicEditConflict, type PgComicEdits } from "./edit-repository.js";
 import { ComicLibraryError, libraryMissing, libraryTransaction } from "./library-db.js";
@@ -17,6 +18,7 @@ import { insertComicMedia } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import { DEFAULT_TTS_MODEL } from "../models/media-defaults.js";
 import { COMIC_LOCAL_SPEECH_MODEL } from "./local-speech.js";
+import type { ComicVoices } from "./voices.js";
 
 // Keep the stored preset IDs valid across the switch to Qwen system voices.
 const qwenVoiceIds: Record<ComicSpeechPresetId, string> = { alloy: "longanlingxin", nova: "longanlingxin", onyx: "longanlufeng" };
@@ -42,6 +44,7 @@ export type ComicSpeechDeps = {
   presetModel?: string;
   localSpeech?: SpeechProvider;
   ownerSpeech(owner: string): Promise<SpeechProvider | null>;
+  libraryVoices?: Pick<ComicVoices, "ready" | "choices">;
   clones?: {
     list(owner: string): Promise<{ id: string; title: string }[]>;
     ready(owner: string, itemId: string): Promise<CloneVoice>;
@@ -86,11 +89,13 @@ export class ComicEditSpeech {
   async settings(owner: string, id: string): Promise<ComicVoiceSettings> {
     if (!(await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2`, [owner, id])).rowCount) libraryMissing();
     const [current, clones] = await Promise.all([this.binding(owner, id), this.deps.clones?.list(owner) ?? []]);
+    const boundId = current?.binding.kind === "library" ? current.binding.voiceId : null;
     return {
       binding: current?.binding ?? { kind: "none" },
       ...this.presets(),
       clonesEnabled: !!this.deps.clones,
       clones,
+      libraryVoices: await this.deps.libraryVoices?.choices(owner, boundId),
     };
   }
 
@@ -98,20 +103,15 @@ export class ComicEditSpeech {
     const exists = await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL`, [owner, id]);
     if (!exists.rowCount) libraryMissing();
     if (binding.kind === "preset" && !this.presetModel()) throw unavailable();
+    if (binding.kind === "library") {
+      const current = (await this.binding(owner, id))?.binding;
+      await this.readyLibraryVoice(owner, binding.voiceId, current?.kind === "library" && current.voiceId === binding.voiceId);
+    }
     const fingerprint = binding.kind === "clone" ? digest(await this.ready(owner, binding.itemId)) : null;
     await libraryTransaction(this.pool, async db => {
       const locked = await db.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2 AND archived_at IS NULL FOR UPDATE`, [owner, id]);
       if (!locked.rowCount) libraryMissing();
-      if (binding.kind === "none") {
-        await db.query(`DELETE FROM ${cd}.cd_character_voice WHERE owner_id=$1 AND character_id=$2`, [owner, id]);
-        return;
-      }
-      await db.query(`INSERT INTO ${cd}.cd_character_voice AS v(owner_id,character_id,binding,voice_version,clone_fingerprint,authorized_at)
-        VALUES($1,$2,$3,$4,$5,CASE WHEN $5::text IS NOT NULL THEN now() END)
-        ON CONFLICT (owner_id,character_id) DO UPDATE SET binding=excluded.binding,voice_version=excluded.voice_version,
-          clone_fingerprint=excluded.clone_fingerprint,authorized_at=excluded.authorized_at
-        WHERE v.binding IS DISTINCT FROM excluded.binding OR v.clone_fingerprint IS DISTINCT FROM excluded.clone_fingerprint`,
-      [owner, id, binding, randomUUID(), fingerprint]);
+      await writeComicCharacterVoice(db, owner, id, binding, fingerprint);
     });
   }
 
@@ -123,9 +123,10 @@ export class ComicEditSpeech {
         'aliases',x.snapshot->'aliases') ORDER BY x.snapshot->>'name',x.character_id)
         FROM ${cd}.cd_series_cast x JOIN ${cd}.cd_character_voice v ON (v.owner_id,v.character_id)=(x.owner_id,x.character_id)
         WHERE (x.owner_id,x.series_id)=(s.owner_id,s.id)
-          AND (($3::boolean AND v.binding->>'kind'='preset') OR ($4::boolean AND v.binding->>'kind'='clone'))),'[]'::jsonb) AS characters
+          AND (($3::boolean AND v.binding->>'kind'='preset') OR ($4::boolean AND v.binding->>'kind'='clone')
+            OR ($5::boolean AND v.binding->>'kind'='library'))),'[]'::jsonb) AS characters
       FROM ${cd}.cd_clips c JOIN ${cd}.cd_series s ON s.id=c.series_id WHERE c.id=$1 AND s.owner_id=$2 AND s.deleted_at IS NULL`,
-      [clipId, owner, !!this.presetModel(), !!this.deps.clones]);
+      [clipId, owner, !!this.presetModel(), !!this.deps.clones, !!this.deps.libraryVoices]);
     return { clipRevision: source?.revision ?? null, presets, presetCatalog, characters: source?.characters ?? [],
       lines: source ? comicDramaClipDraftSchema.parse(source.draft).lines.filter(line => line.text) : [] };
   }
@@ -140,6 +141,10 @@ export class ComicEditSpeech {
   }
 
   private async resolve(owner: string, scope: ComicSpeechRequest["voice"]) {
+    if (scope.kind === "library") {
+      const voice = await this.readyLibraryVoice(owner, scope.voiceId, false);
+      return { voice, version: null, clone: false };
+    }
     const binding = scope.kind === "character" ? await this.binding(owner, scope.characterId) : undefined;
     const selected = scope.kind === "preset" ? scope : binding?.binding;
     if (selected?.kind === "clone" && this.deps.clones) {
@@ -147,12 +152,21 @@ export class ComicEditSpeech {
       if (digest(voice) !== binding?.fingerprint) throw unavailable();
       return { voice, version: binding.version, clone: true };
     }
+    if (selected?.kind === "library" && binding) {
+      const voice = await this.readyLibraryVoice(owner, selected.voiceId, true);
+      return { voice, version: binding.version, clone: false };
+    }
     const targetModel = this.presetModel();
     if (selected?.kind === "preset" && targetModel) {
       const voiceId = targetModel === DEFAULT_TTS_MODEL ? qwenVoiceIds[selected.preset] : selected.preset;
       return { voice: { targetModel, voiceId }, version: binding?.version ?? null, clone: false };
     }
     throw unavailable();
+  }
+
+  private async readyLibraryVoice(owner: string, voiceId: string, allowArchived: boolean) {
+    if (!this.deps.libraryVoices) throw unavailable();
+    return this.deps.libraryVoices.ready(owner, voiceId, allowArchived);
   }
 
   private async readCacheRow(owner: string, fingerprint: string): Promise<CacheRow | undefined> {
@@ -199,6 +213,9 @@ export class ComicEditSpeech {
     if (fields.voice.kind === "clone") {
       const cloneVoice = await this.ready(owner, fields.voice.itemId);
       resolved = { voice: cloneVoice, version: null, clone: true };
+    } else if (fields.voice.kind === "library") {
+      const voice = await this.readyLibraryVoice(owner, fields.voice.voiceId, true);
+      resolved = { voice, version: null, clone: false };
     } else if (fields.voice.kind === "character") {
       const exists = await this.pool.query(`SELECT 1 FROM ${cd}.cd_characters WHERE owner_id=$1 AND id=$2`, [owner, fields.voice.characterId]);
       if (!exists.rowCount) libraryMissing();

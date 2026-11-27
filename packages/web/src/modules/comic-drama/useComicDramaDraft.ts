@@ -39,6 +39,23 @@ export function useComicDramaDraft() {
   const load = useCallback((detail: ComicDramaDetail | null) => {
     commit({ ...initial, detail: detail ? { ...detail, cast: detail.cast ?? [] } : null });
   }, [commit]);
+  const refreshDetail = useCallback((previous: ComicDramaDetail, fresh: ComicDramaDetail) => {
+    const current = state.current;
+    if (current.detail !== previous || current.saving) return false;
+    if (!dirty(current)) {
+      load(fresh);
+    } else {
+      const byId = new Map(fresh.clips.map(clip => [clip.id, clip]));
+      const clips = previous.clips.map(clip => {
+        const updated = byId.get(clip.id);
+        return updated?.revision === clip.revision
+          ? { ...clip, progress: updated.progress, selectionRevision: updated.selectionRevision }
+          : clip;
+      });
+      commit({ ...current, detail: { ...previous, clips, summary: fresh.summary, episodes: fresh.episodes } });
+    }
+    return true;
+  }, [commit, load]);
   const editClip = (id: string, draft: ComicDramaClipDraft) => {
     const next = state.current;
     const revision = next.clips[id]?.revision ?? next.detail?.clips.find(clip => clip.id === id)?.revision;
@@ -132,5 +149,5 @@ export function useComicDramaDraft() {
   };
 
   const getDetail = useCallback(() => state.current.detail, []);
-  return { editor, flush, load, editClip, editScript, reapply, dirty: dirty(editor), getDetail };
+  return { editor, flush, load, refreshDetail, editClip, editScript, reapply, dirty: dirty(editor), getDetail };
 }

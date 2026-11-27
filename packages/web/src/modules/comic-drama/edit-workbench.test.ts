@@ -8,6 +8,7 @@ import type {
 import { api } from "../../api/client.js";
 import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
+import { ComicDialogueAudio } from "./ComicDialogueAudio.js";
 import { ComicDramaEditWorkspace } from "./ComicDramaEditWorkspace.js";
 import { ComicEditsIndex } from "./ComicEditList.js";
 import { ComicEditWorkspace } from "./ComicEditWorkspace.js";
@@ -47,6 +48,64 @@ async function mount(node: React.ReactElement, locale: "zh" | "en" = "zh"): Prom
   });
   return host;
 }
+
+it.each([
+  ["zh", "素材库暂无可用音色", "去素材库创建音色", "AI 生成配音音色", "从素材库选择音色", "合成此句", "加入配音轨"],
+  ["en", "No ready voices in the asset library", "Create a voice in the library", "Generate AI voice",
+    "Select a voice from the library", "Synthesize this line", "Add to the voice track"],
+] as const)("generates a library voice from the %s dialogue panel and synthesizes with it", async (locale, empty, library, ai, prompt, synth, add) => {
+  const projectId = uuid(301);
+  const item: ComicTimeline["video"][number] = {
+    id: uuid(302), takeId: uuid(303), sourceDurationMs: 4000, inMs: 0, outMs: 4000, volume: 1,
+    transitionIn: { kind: "cut", durationMs: 0 },
+  };
+  const line = { id: uuid(304), speaker: "阿澈", text: "准备——开团！", speed: 1, emotionKey: null };
+  vi.spyOn(comicEditApi, "lines").mockResolvedValue({ clipRevision: 2, presets: ["nova"], characters: [], lines: [line] });
+  const voice = { id: uuid(305), name: "探险家", kind: "design" as const };
+  const generated = { ...voice, archived: false, previewMediaId: null, previewText: null, voicePrompt: null };
+  vi.spyOn(comicLibraryApi, "voiceChoices").mockResolvedValueOnce({ entries: [], enabled: true }).mockResolvedValue({ entries: [voice], enabled: true });
+  const create = vi.spyOn(comicLibraryApi, "createVoice").mockResolvedValue({ ...generated, status: "DEPLOYING" });
+  const refresh = vi.spyOn(comicLibraryApi, "refreshVoice").mockResolvedValue({ ...generated, status: "OK" });
+  const speak = vi.spyOn(comicEditApi, "speak").mockResolvedValue({ mediaId: uuid(306), durationMs: 2000, cached: false });
+  vi.spyOn(comicLibraryApi, "links").mockResolvedValue({ url: "https://example.com/voice.wav", thumbnailUrl: null });
+  const openVoiceLibrary = vi.fn();
+
+  vi.useFakeTimers();
+  try {
+    const host = await mount(createElement(ComicDialogueAudio, {
+      projectId, revision: 1, item, voice: [], subtitles: [], change: vi.fn(), addSubtitle: vi.fn(), disabled: false, openVoiceLibrary,
+    }), locale);
+    const button = (label: string) => Array.from(host.querySelectorAll("button")).find(candidate => candidate.textContent === label)!;
+    expect(host.textContent).toContain(empty);
+    expect(host.querySelector(".comic-dialogue-controls")).toBeNull();
+    act(() => button(library).click());
+    expect(openVoiceLibrary).toHaveBeenCalledOnce();
+
+    act(() => button(ai).click());
+    const dialog = host.querySelector("dialog")!;
+    expect(dialog.querySelector('input[type="file"]')).toBeNull();
+    dialog.querySelector<HTMLInputElement>('input[name="name"]')!.value = voice.name;
+    dialog.querySelector<HTMLTextAreaElement>('textarea[name="prompt"]')!.value = "年轻、明亮、吐字清楚";
+    await act(async () => { dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(JSON.parse(String(create.mock.calls[0][0].get("fields")))).toMatchObject({ name: voice.name, kind: "design" });
+    expect(refresh).not.toHaveBeenCalled();
+    expect(host.querySelector(".comic-dialogue-controls")).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(refresh).toHaveBeenCalledWith(voice.id, expect.any(AbortSignal));
+    const select = host.querySelector<HTMLSelectElement>(".comic-dialogue-controls select")!;
+    expect([...select.options].map(option => option.textContent)).toEqual([prompt, voice.name]);
+    expect(button(synth).disabled).toBe(true);
+    act(() => { select.value = voice.id; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { button(synth).click(); });
+    expect(speak).toHaveBeenCalledWith(projectId, item.id, line.id, {
+      expectedRevision: 1, expectedClipRevision: 2, voice: { kind: "library", voiceId: voice.id },
+    }, expect.any(AbortSignal));
+    expect(button(add)).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe("editing workbench drama tasks and episode-unit workflow", () => {
   it("renders separate drama editing tasks (with episode jump chips) and free tasks in ComicEditsIndex", async () => {
@@ -540,6 +599,7 @@ describe("editing workbench drama tasks and episode-unit workflow", () => {
       thumbnailUrl: null,
     });
     const linesSpy = vi.spyOn(comicEditApi, "lines").mockImplementation(async (_pid, itemId) => speechByItem[itemId]!);
+    vi.spyOn(comicLibraryApi, "voiceChoices").mockResolvedValue({ entries: [], enabled: true });
 
     const host = await mount(createElement(ComicEditWorkspace, {
       id: projectId,

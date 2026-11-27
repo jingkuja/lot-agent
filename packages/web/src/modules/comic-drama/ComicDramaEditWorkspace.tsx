@@ -29,6 +29,7 @@ export function ComicDramaEditWorkspace({
   openEpisodeEditor,
   openCreateEpisode,
   openVideo,
+  openVoiceLibrary,
   setGuard,
 }: {
   dramaId: string;
@@ -40,6 +41,7 @@ export function ComicDramaEditWorkspace({
   openEpisodeEditor: (dramaId: string, seriesId: string) => void;
   openCreateEpisode?: (dramaId: string) => void;
   openVideo: (seriesId: string, clipId: string) => void;
+  openVoiceLibrary?: () => void;
   setGuard: (guard: (() => boolean) | null) => void;
 }) {
   const { t, locale } = useI18n();
@@ -482,6 +484,7 @@ export function ComicDramaEditWorkspace({
           embeddedInDramaTask
           setGuard={registerChildGuard}
           openVideo={openVideo}
+          openVoiceLibrary={openVoiceLibrary}
           onProjectChange={handleProjectUpdated}
           onOpenDramaSelect={openDramaTaskSelect ? () => openDramaTaskSelect(dramaId) : exit}
           onEpisodeProduction={openEpisodeProduction}

@@ -3,7 +3,7 @@ import {
   analyzeComicModelSwitch, COMIC_SCRIPT_MAX_CHARS, comicVideoModel, comicVideoOptions, resolveComicEpisodeMasterScript,
   selectComicVideoModel, type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaEpisodeCreateInput,
   type ComicDramaSeries, type ComicDramaSeriesInput, type ComicDramaTreeEntry, type ComicModelSwitchIssue,
-  type ResolvedComicEpisodeScript,
+  type ComicSeriesCast, type ResolvedComicEpisodeScript,
 } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
@@ -28,9 +28,10 @@ export type SeriesModelAdaptOptions = { apply: boolean; clampDuration: boolean }
 
 export type EpisodeDialogPayload = ComicDramaSeriesInput & Pick<ComicDramaEpisodeCreateInput, "initialScript">;
 
-export function SeriesDialog({ series, clips, presetDrama, models, close, save, error }: {
+export function SeriesDialog({ series, clips, cast, presetDrama, models, close, save, error }: {
   series?: ComicDramaSeries;
   clips?: readonly ComicDramaClip[];
+  cast?: readonly ComicSeriesCast[];
   presetDrama?: PresetDramaTarget;
   models: readonly ComicDramaModel[];
   close: () => void;
@@ -72,8 +73,8 @@ export function SeriesDialog({ series, clips, presetDrama, models, close, save, 
   const videoTouched = useRef(false);
   const available = comicVideoOptions(models, videoModel);
   const switchReport = useMemo(
-    () => (series && clips?.length && videoModel ? analyzeComicModelSwitch(clips, videoModel, { clampDuration }) : null),
-    [series, clips, videoModel, clampDuration],
+    () => (series && clips?.length && videoModel ? analyzeComicModelSwitch(clips, videoModel, { clampDuration, cast }) : null),
+    [series, clips, videoModel, clampDuration, cast],
   );
   const describeSwitchIssue = (issue: ComicModelSwitchIssue): string => {
     switch (issue.code) {

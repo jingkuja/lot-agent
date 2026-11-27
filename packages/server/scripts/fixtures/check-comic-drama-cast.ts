@@ -49,6 +49,7 @@ export async function verifyComicCast(app: Hono<{ Variables: { userId: string } 
   const stale = await api<ComicDramaDetail>(episodePath);
   assert.equal(stale.cast[0].hasUpdates, true);
   assert.deepEqual(stale.cast[0].snapshot, initialSnapshot);
+  assert.equal(stale.cast[0].availableAppearance, undefined);
   const sequel = await api<ComicDramaDetail>(episodePath + "/sequel", "POST", { inheritCastAndStyle: true }, 201);
   assert.deepEqual(sequel.cast[0].snapshot, initialSnapshot);
   assert.equal(sequel.series.styleKey, "ink");
@@ -72,7 +73,14 @@ export async function verifyComicCast(app: Hono<{ Variables: { userId: string } 
   });
   assert.equal(change.clips[0].draft.cast?.[0].slotKey, null);
   await api(clipPath, "PATCH", { expectedRevision: updated.clips[0].revision, draft }, 409);
-  const removed = await api<ComicDramaContent>(castPath + "/" + characterId, "DELETE", { expectedRevision: change.seriesRevision });
+  const lateImage = await upload(emptyOutfit.id, second);
+  const lateAppearance = await api<ComicDramaDetail>(episodePath);
+  assert.deepEqual(lateAppearance.cast[0].snapshot.assets, []);
+  assert.equal(lateAppearance.cast[0].availableAppearance?.media.id, lateImage.mediaId);
+  const syncedAppearance = await api<ComicDramaContent>(castPath + "/" + characterId + "/sync", "POST", { expectedRevision: change.seriesRevision });
+  assert.equal(syncedAppearance.cast[0].snapshot.assets[0]?.media.id, lateImage.mediaId);
+  assert.equal(syncedAppearance.clips[0].draft.cast?.[0].slotKey, "front");
+  const removed = await api<ComicDramaContent>(castPath + "/" + characterId, "DELETE", { expectedRevision: syncedAppearance.seriesRevision });
   assert.deepEqual(removed.cast, []);
   assert.deepEqual(removed.clips[0].draft.cast, []);
   await api(characterPath + "/archive", "POST");

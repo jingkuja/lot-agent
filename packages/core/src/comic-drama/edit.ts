@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ComicVideoAudioMode } from "./models.js";
 import { comicTimelineSchema, type ComicTimeline } from "./timeline.js";
+import type { ComicLibraryVoice } from "./voices.js";
 
 const id = z.string().uuid().transform(value => value.toLowerCase());
 const revision = z.number().int().min(1).max(2_147_483_647);
@@ -190,6 +191,7 @@ export const comicVoiceBindSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }).strict(),
   z.object({ kind: z.literal("preset"), preset: voice }).strict(),
   z.object({ kind: z.literal("clone"), itemId: id, authorized: z.literal(true) }).strict(),
+  z.object({ kind: z.literal("library"), voiceId: id }).strict(),
 ]);
 export const comicVoiceAuditionSchema = z.object({
   text: z.string().trim().min(1).max(300),
@@ -198,6 +200,7 @@ export const comicVoiceAuditionSchema = z.object({
   voice: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("preset"), preset: voice }).strict(),
     z.object({ kind: z.literal("clone"), itemId: id }).strict(),
+    z.object({ kind: z.literal("library"), voiceId: id }).strict(),
     z.object({ kind: z.literal("character"), characterId: id }).strict(),
   ]),
 }).strict();
@@ -227,6 +230,7 @@ export const comicSpeechRequestSchema = z.object({
   voice: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("preset"), preset: voice }).strict(),
     z.object({ kind: z.literal("character"), characterId: id }).strict(),
+    z.object({ kind: z.literal("library"), voiceId: id }).strict(),
   ]),
 }).strict();
 export const comicSpeechReleaseSchema = comicSpeechRequestSchema.extend({
@@ -246,6 +250,7 @@ export type ComicVoiceSettings = {
   presetCatalog?: readonly ComicSpeechPresetMeta[];
   clonesEnabled: boolean;
   clones: { id: string; title: string }[];
+  libraryVoices?: Pick<ComicLibraryVoice, "id" | "name" | "kind">[];
 };
 export type ComicSpeechLines = {
   clipRevision: number | null;

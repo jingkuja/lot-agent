@@ -2,6 +2,7 @@ import type {
   ComicCharacter, ComicCharacterDetail, ComicCharacterInput, ComicCharacterUpload, ComicDictionaryDomain, ComicDictionaryEntry,
   ComicDictionaryUpdate, ComicLabels, ComicLibraryPage, ComicMaterial, ComicMaterialInput, ComicMaterialUpdate, ComicMediaLinks,
   ComicMediaVersion, ComicOutfit, ComicStylePreset, ComicUserPreferences, ComicUserSettings,
+  ComicCharacterDesignVoice, ComicCharacterVoiceDesignInput, ComicLibraryVoice, ComicLibraryVoiceChoices,
 } from "@lot-agent/core/comic-drama";
 import { request } from "../../api/client.js";
 
@@ -69,6 +70,14 @@ export const comicLibraryApi = {
   character: (id: string, signal?: AbortSignal) => get<ComicCharacterDetail>(`/characters/${encodeURIComponent(id)}`, signal),
   createCharacter: (data: ComicCharacterInput) => write<{ id: string }>("/characters", "POST", data),
   editCharacter: (id: string, data: ComicCharacterInput) => write<{ ok: true }>(`/characters/${id}`, "PATCH", data),
+  voiceChoices: (signal?: AbortSignal) => get<ComicLibraryVoiceChoices>("/voices/choices", signal),
+  createVoice: (body: FormData, signal: AbortSignal) => request<ComicLibraryVoice>(root + "/voices", { method: "POST", body, signal }),
+  refreshVoice: (id: string, signal?: AbortSignal) =>
+    request<ComicLibraryVoice>(`${root}/voices/${encodeURIComponent(id)}/refresh`, { method: "POST", signal }),
+  designCharacterVoice: (data: ComicCharacterVoiceDesignInput, signal: AbortSignal) =>
+    request<ComicCharacterDesignVoice>(root + "/voices/character-design", { method: "POST", body: JSON.stringify(data), signal }),
+  refreshCharacterVoice: (id: string, signal: AbortSignal) =>
+    request<ComicCharacterDesignVoice>(`${root}/voices/character-design/${encodeURIComponent(id)}/refresh`, { method: "POST", signal }),
   archiveCharacter: (id: string) => write<{ ok: true }>(`/characters/${id}/archive`, "POST"),
   outfit: (id: string, name: string) => write<ComicOutfit>(`/characters/${id}/outfits`, "POST", { name }),
   renameOutfit: (id: string, outfitId: string, name: string) => write<ComicOutfit>(`/characters/${id}/outfits/${outfitId}`, "PATCH", { name }),

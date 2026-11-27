@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import {
-  buildComicDramaHierarchy, comicDramaClipSchema, comicDramaIdSchema, comicDramaSchema, comicDramaSeriesSchema,
+  buildComicDramaHierarchy, comicCastReferenceAsset, comicDramaClipSchema, comicDramaIdSchema, comicDramaSchema, comicDramaSeriesSchema,
   resolveComicEpisodeMasterScript, type ComicClipProgress, type ComicCurrencyAmount, type ComicDrama, type ComicDramaCastContent,
   type ComicDramaClip, type ComicDramaClipDraft, type ComicDramaClipUpdate, type ComicCastChange, type ComicDramaContent,
   type ComicDramaCreateInput, type ComicDramaCurrentState, type ComicDramaDetail, type ComicDramaEpisodeBrief,
@@ -341,7 +341,7 @@ function isCastSnapshotStale(refs: unknown, cast: readonly ComicSeriesCast[]): b
     const member = cast.find(entry => entry.snapshot.characterId === ref.characterId);
     if (!member) continue;
     const assetKind = ref.kind === "appearance" ? "slot" : "expression";
-    const asset = member.snapshot.assets.find(item => item.kind === assetKind && item.key === ref.label);
+    const asset = comicCastReferenceAsset(member, assetKind, ref.label);
     if (!asset || asset.version !== ref.version || asset.media.id !== ref.mediaId) return true;
   }
   return false;

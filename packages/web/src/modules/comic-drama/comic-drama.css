@@ -837,6 +837,11 @@
   flex-wrap: wrap;
 }
 
+.comic-heading.comic-material-heading {
+  justify-content: flex-start;
+  align-items: center;
+}
+
 .comic-heading h1 {
   margin: 0;
   font-family: var(--font-display);
@@ -1627,6 +1632,75 @@ details.comic-edit-card[open] > summary {
   background: var(--bg-card);
   box-shadow: var(--shadow-sm);
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.comic-voice-card {
+  display: grid;
+  grid-row: span 5;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: subgrid;
+  row-gap: 8px;
+}
+
+.comic-character-voice-design {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.comic-dialog .comic-character-voice-design .comic-actions {
+  justify-content: start;
+}
+
+.comic-voice-card-description {
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comic-voice-card-description small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comic-page .comic-voice-card-description button {
+  flex: none;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+}
+
+.comic-voice-card-preview {
+  grid-row: 4;
+  align-self: start;
+  min-width: 0;
+}
+
+.comic-voice-card-preview .comic-media-well {
+  aspect-ratio: auto;
+  min-height: 54px;
+}
+
+.comic-voice-card-preview audio {
+  color-scheme: light;
+}
+
+[data-theme="dark"] .comic-voice-card-preview audio {
+  color-scheme: dark;
+}
+
+.comic-voice-card > .comic-actions {
+  grid-row: 5;
+}
+
+.comic-voice-description {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .comic-manual-keyframe {
@@ -2603,6 +2677,16 @@ div.comic-version-list article {
   overflow-wrap: anywhere;
   font-size: 13.5px;
   line-height: 1.5;
+}
+
+.comic-dialogue-voice-empty {
+  display: grid;
+  gap: 8px;
+  margin-block: 8px;
+}
+
+.comic-dialogue-voice-status {
+  margin-block: 8px;
 }
 
 .comic-dialogue-controls {

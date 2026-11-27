@@ -505,6 +505,7 @@ export * from "./generation.js";
 export * from "./models.js";
 export * from "./timeline.js";
 export * from "./edit.js";
+export * from "./voices.js";
 export * from "./director.js";
 export * from "./master-script.js";
 export * from "./checks.js";

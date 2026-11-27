@@ -136,8 +136,11 @@ export class PgComicGeneration {
     const items = inputs.map(input => {
       const video = "clipId" in input && input.mode !== "keyframe" ? input : undefined;
       const quantity = unit === "second" && video ? video.durationMs / 1000 : 1;
-      const referenceVersions: NonNullable<ComicGenerationQuote["items"][number]["referenceVersions"]> =
-        input.references.map(({ mediaId, version }) => ({ mediaId, version, ...(video ? { kind: "image" as const } : {}) }));
+      const referenceVersions: NonNullable<ComicGenerationQuote["items"][number]["referenceVersions"]> = video
+        ? video.references.map(({ mediaId, version, kind, characterId }) => ({
+          mediaId, version, kind: kind === "appearance" || kind === "expression" ? kind : "image",
+          ...(characterId ? { characterId } : {}),
+        })) : input.references.map(({ mediaId, version }) => ({ mediaId, version }));
       if (video?.firstFrame) referenceVersions.unshift({ mediaId: video.firstFrame.mediaId, version: video.firstFrame.version, kind: "first_frame" });
       if (video?.lastFrame) referenceVersions.push({ mediaId: video.lastFrame.mediaId, version: video.lastFrame.version, kind: "last_frame" });
       for (const { kind, mediaId, version } of video?.timedReferences ?? []) referenceVersions.push({ kind, mediaId, version });

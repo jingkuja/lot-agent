@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   comicSystemDictionary,
-  type ComicDirectorProposal, type ComicDramaClip, type ComicDramaEpisodeBrief, type ComicDramaSeries,
+  type ComicDirectorProposal, type ComicDramaClip, type ComicDramaDetail, type ComicDramaEpisodeBrief, type ComicDramaSeries,
   type ComicDramaTreeListing, type ComicDramaView,
 } from "@lot-agent/core/comic-drama";
 import { api, ApiClientError } from "../../api/client.js";
@@ -12,14 +12,19 @@ import { LanguageProvider } from "../../i18n/index.js";
 import { LOCALE_STORAGE_KEY } from "../../i18n/locale.js";
 import { ComicClipOriginBadge, ComicWorkspaceHierarchyBar } from "./ComicHierarchyBar.js";
 import { CastPanel } from "./CastPanel.js";
+import { CharacterLibrary } from "./CharacterLibrary.js";
+import { ComicDramaWorkspace } from "./ComicDramaWorkspace.js";
 import { ComicImageGeneration } from "./ComicImageGeneration.js";
 import { DramaDialog } from "./DramaDialog.js";
 import { DramaHub } from "./DramaHub.js";
+import { MaterialLibrary } from "./MaterialLibrary.js";
 import { useGenerationHistory } from "./GenerationHistory.js";
 import { SeriesDialog } from "./SeriesDialog.js";
 import { SeriesHistory } from "./SeriesHistory.js";
 import { Storyboard } from "./Storyboard.js";
 import { comicDramaApi } from "./api.js";
+import { comicDirectorApi } from "./director-api.js";
+import { comicEditApi } from "./edit-api.js";
 import { comicGenerationApi } from "./generation-api.js";
 import { comicLibraryApi } from "./library-api.js";
 
@@ -89,6 +94,149 @@ const makeEpisodes = (dramaId: string): ComicDramaEpisodeBrief[] => [
     status: "in_progress",
   },
 ];
+
+it.each([
+  ["zh", "编辑角色", "取消", "绑定角色音色", "AI 生成配音音色", "生成中…", "音色审核中", "可用于配音"],
+  ["en", "Edit character", "Cancel", "Bind character voice", "Generate AI voice", "Generating…", "Voice under review", "Ready for dubbing"],
+] as const)("generates and binds a voice from the saved profile in the %s voice dialog", async (locale, edit, cancel, bind, action, working, reviewing, ready) => {
+  vi.useFakeTimers();
+  try {
+    vi.spyOn(comicDramaApi, "listDramaOptions").mockResolvedValue([]);
+    vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async domain => [...comicSystemDictionary[domain]]);
+    const characterId = uuid(37);
+    vi.spyOn(comicLibraryApi, "character").mockResolvedValue({
+      id: characterId, name: "Lily", gender: "female", age: "22", aliases: [], tags: [], roleKey: "lead",
+      appearance: "Long hair", personality: "Reserved", archived: false, cover: null, outfits: [], assets: [],
+    });
+    vi.spyOn(comicGenerationApi, "characterTakes").mockResolvedValue([]);
+    vi.spyOn(comicEditApi, "voice").mockResolvedValue({ binding: { kind: "none" }, presets: [], clonesEnabled: false, clones: [] });
+    const save = vi.spyOn(comicEditApi, "bindVoice").mockResolvedValue({ ok: true });
+    const voice = { id: uuid(38), name: "Lily", status: "DEPLOYING" as const, voiceId: "provider-voice-id", previewMediaId: null };
+    let finish!: (value: typeof voice) => void;
+    const generate = vi.spyOn(comicLibraryApi, "designCharacterVoice").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const refresh = vi.spyOn(comicLibraryApi, "refreshCharacterVoice").mockResolvedValue({ ...voice, status: "OK" });
+    const host = await mount(createElement(CharacterLibrary, { characterId, open: vi.fn() }), locale);
+    const buttonFor = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
+    await act(async () => { buttonFor(edit).click(); });
+    const editDialog = host.querySelector("dialog")!;
+    expect(editDialog.querySelector<HTMLSelectElement>('select[name="gender"]')?.value).toBe("female");
+    expect(editDialog.textContent).not.toContain(action);
+    await act(async () => { buttonFor(cancel).click(); });
+    await act(async () => { buttonFor(bind).click(); });
+    const dialog = host.querySelector("dialog")!;
+    expect(dialog.getAttribute("aria-label")).toBe(bind);
+    const form = dialog.querySelector("form")!;
+    const submit = dialog.querySelector<HTMLButtonElement>("button.primary")!;
+    const button = buttonFor(action);
+    await act(async () => { button.click(); });
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({
+      language: locale, character: expect.objectContaining({ name: "Lily", gender: "female", age: "22", personality: "Reserved" }),
+    }), expect.any(AbortSignal));
+    expect(button.textContent).toBe(working);
+    expect(submit.disabled).toBe(true);
+    await act(async () => { finish(voice); });
+    expect(dialog.textContent).toContain(voice.voiceId);
+    expect(dialog.textContent).toContain(reviewing);
+    expect(submit.disabled).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(refresh).toHaveBeenCalledWith(voice.id, expect.any(AbortSignal));
+    expect(dialog.textContent).toContain(ready);
+    expect(dialog.querySelector<HTMLSelectElement>("select[required]")?.value).toBe(voice.id);
+    expect(submit.disabled).toBe(false);
+    await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(save).toHaveBeenCalledWith(characterId, { kind: "library", voiceId: voice.id }, expect.any(AbortSignal));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([
+  ["zh", "人物配音", "创建音色", "使用参考音效", "上传本人录音"],
+  ["en", "Character voices", "Create voice", "Use reference audio", "Upload a recording of my voice"],
+] as const)("opens the third %s material tab and toggles the own-voice sample form", async (locale, tab, action, ownVoiceLabel, sample) => {
+  vi.spyOn(comicLibraryApi, "materials").mockResolvedValue({ entries: [], more: false });
+  vi.spyOn(comicGenerationApi, "materialTakes").mockResolvedValue([]);
+  vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async domain => [...comicSystemDictionary[domain]]);
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ entries: [], more: false, enabled: true }));
+  vi.stubGlobal("fetch", fetcher);
+  const host = await mount(createElement(MaterialLibrary), locale);
+  const button = (label: string) => [...host.querySelectorAll("button")].find(element => element.textContent?.includes(label))!;
+  expect(host.querySelectorAll("nav.comic-steps button")[2]).toBe(button(tab));
+  await act(async () => { button(tab).click(); });
+  expect(button(tab).getAttribute("aria-pressed")).toBe("true");
+  expect(fetcher.mock.calls[0][0]).toContain("/comic-drama/voices?");
+  await act(async () => { button(action).click(); });
+  const dialog = host.querySelector("dialog")!;
+  const mode = dialog.querySelector<HTMLInputElement>('input[type="checkbox"][name="useOwnVoice"]')!;
+  expect(mode.labels?.[0]?.textContent?.trim()).toBe(ownVoiceLabel);
+  expect(mode.checked).toBe(false);
+  expect(dialog.querySelector('select[name="gender"]')).not.toBeNull();
+  expect(dialog.querySelector('input[name="sample"]')).toBeNull();
+  await act(async () => { mode.click(); });
+  expect(mode.checked).toBe(true);
+  expect(dialog.textContent).toContain(sample);
+  expect(dialog.querySelector('select[name="gender"]')).toBeNull();
+  const consent = dialog.querySelector<HTMLInputElement>('input[name="ownVoice"]')!;
+  expect(consent.required).toBe(true);
+  expect(consent.checked).toBe(false);
+  await act(async () => { mode.click(); });
+  expect(mode.checked).toBe(false);
+  expect(dialog.querySelector('select[name="gender"]')).not.toBeNull();
+  expect(dialog.querySelector('input[name="sample"]')).toBeNull();
+});
+
+it("opens the full description for the selected voice and closes the dialog", async () => {
+  vi.spyOn(comicLibraryApi, "materials").mockResolvedValue({ entries: [], more: false });
+  vi.spyOn(comicGenerationApi, "materialTakes").mockResolvedValue([]);
+  vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async domain => [...comicSystemDictionary[domain]]);
+  const voicePrompt = "偏高音区，语速适中，吐字清晰。\n" + "补充音色描述。".repeat(20);
+  const entries = [
+    { id: uuid(21), name: "路人女童", kind: "design", status: "DEPLOYING", voicePrompt },
+    { id: uuid(22), name: "路人大叔", kind: "design", status: "DEPLOYING", voicePrompt: "古代路人大叔" },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ entries, more: false, enabled: true })));
+  const host = await mount(createElement(MaterialLibrary));
+  const voiceTab = [...host.querySelectorAll<HTMLButtonElement>("nav button")].find(button => button.textContent === "人物配音")!;
+  await act(async () => { voiceTab.click(); });
+  const more = host.querySelector<HTMLButtonElement>('button[aria-label="更多 · 路人女童"]')!;
+  expect(more.textContent).toBe("更多");
+  expect(host.querySelector("dialog")).toBeNull();
+  await act(async () => { more.click(); });
+  const dialog = host.querySelector("dialog")!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector("h2")?.textContent).toBe("路人女童");
+  expect(dialog.querySelector("p")?.textContent).toBe(voicePrompt);
+  await act(async () => { dialog.querySelector("button")!.click(); });
+  expect(host.querySelector("dialog")).toBeNull();
+});
+
+it.each([
+  ["zh", "人物配音", "创建音色", "女声，青年感，偏低音区，语速偏慢"],
+  ["en", "Character voices", "Create voice", "Female voice, Young adult, Slightly low pitch, Slightly slow pace"],
+] as const)("submits selected %s design traits with the preview settings and no extra description", async (locale, tab, action, voicePrompt) => {
+  vi.spyOn(comicLibraryApi, "materials").mockResolvedValue({ entries: [], more: false });
+  vi.spyOn(comicGenerationApi, "materialTakes").mockResolvedValue([]);
+  vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async domain => [...comicSystemDictionary[domain]]);
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => init.method === "POST"
+    ? Response.json({ status: "DEPLOYING" }) : Response.json({ entries: [], more: false, enabled: true }));
+  vi.stubGlobal("fetch", fetcher);
+  const host = await mount(createElement(MaterialLibrary), locale);
+  const button = (label: string) => [...host.querySelectorAll("button")].find(element => element.textContent?.includes(label))!;
+  await act(async () => { button(tab).click(); });
+  await act(async () => { button(action).click(); });
+  const dialog = host.querySelector("dialog")!;
+  dialog.querySelector<HTMLInputElement>('input[name="name"]')!.value = "Detective";
+  for (const [key, value] of Object.entries({
+    gender: "女声", age: "青年感", pitch: "偏低音区", pace: "语速偏慢", sampleRate: "48000", previewFormat: "mp3",
+  })) {
+    dialog.querySelector<HTMLSelectElement>(`select[name="${key}"]`)!.value = value;
+  }
+  await act(async () => { dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  const body = fetcher.mock.calls.find(([, init]) => init.method === "POST")?.[1].body as FormData | undefined;
+  expect(JSON.parse(String(body?.get("fields")))).toMatchObject({
+    kind: "design", language: locale, voicePrompt, sampleRate: 48000, previewFormat: "mp3",
+  });
+});
 
 describe("3-tier drama -> episode -> clip workspace UI", () => {
   it("renders ComicWorkspaceHierarchyBar across zh and en and triggers episode switching", async () => {
@@ -1047,7 +1195,10 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
       .mockResolvedValueOnce({
         confirmationId: uuid(799),
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        items: [{ clipId: uuid(701), modelId: "doubao-seedance-2-5", unit: "second", quantity: 5, amountMicros: 500_000 }],
+        items: [{
+          clipId: uuid(701), modelId: "doubao-seedance-2-5", unit: "second", quantity: 5, amountMicros: 500_000,
+          referenceVersions: [{ mediaId: uuid(704), kind: "appearance", characterName: "丽丽", version: 2 }],
+        }],
         skipped: [],
         totalMicros: 500_000,
         currency: "CNY",
@@ -1131,6 +1282,86 @@ describe("3-tier drama -> episode -> clip workspace UI", () => {
     expect(previewSpy).toHaveBeenCalledTimes(2);
     expect(previewSpy.mock.calls[1]?.[1]).toMatchObject({ mode: "references" });
     expect(host.querySelector("dialog")?.textContent).toContain("doubao-seedance-2-5");
+    expect(host.querySelector("dialog")?.textContent).toContain("丽丽 角色定妆照 V2");
+  });
+
+  it("refreshes non-selected video badges and episode counts as each video finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      const seriesId = uuid(11);
+      const makeDetail = (completed: number): ComicDramaDetail => ({
+        series: {
+          id: seriesId, dramaId: uuid(1), parentId: null, title: "第一集", logline: "", seriesGroup: "雨夜便利店",
+          episodeNo: 1, styleKey: "thick_painting", aspectRatio: "9:16", videoModel: "doubao-seedance-2-0",
+          revision: 1, archivedAt: null,
+        },
+        clips: [1, 2, 3].map(ordinal => ({
+          id: uuid(500 + ordinal), ordinal, revision: 1, selectionRevision: 1,
+          draft: { schemaVersion: 1, durationMs: 5000, scene: "", shots: [], lines: [] },
+          progress: {
+            keyframeState: "none", keyframeMediaId: null, keyframeApproved: false, keyframeStale: false,
+            videoState: ordinal <= completed ? "ready" : "running", videoTakeCount: 1, adoptedVideoTakeId: null,
+            adoptedVideoVersion: null, adoptedVideoMediaId: null, adoptedStale: false, castSnapshotStale: false,
+          },
+        })),
+        script: null,
+        cast: [],
+        summary: {
+          seriesId, title: "第一集", archived: false, clipCount: 3, completedCount: completed, generatingCount: 3 - completed,
+          totalDurationMs: 15_000, estimatedMicros: null, estimatedUnverifiedCount: 0, spentMicros: 0, spentUnverifiedCount: 0, currency: "CNY",
+          costs: {
+            settled: [], settledTakeCount: 0, quotedUnbilled: [], unbilledReadyCount: 0, pendingReconcileCount: 0,
+            remainingEstimate: { currency: "CNY", amountMicros: null, unverifiedCount: 0 },
+          },
+        },
+      });
+      const initial = makeDetail(1);
+      const get = vi.spyOn(comicDramaApi, "get").mockResolvedValue(initial);
+      vi.spyOn(comicDramaApi, "open").mockResolvedValue(initial);
+      vi.spyOn(comicDramaApi, "currentSummary").mockResolvedValue({ seriesId, summary: initial.summary! });
+      vi.spyOn(comicDramaApi, "currentDrama").mockResolvedValue({ seriesId, dramaId: null, drama: null, episodeCount: 1, castCount: 0 });
+      vi.spyOn(comicDirectorApi, "state").mockResolvedValue({ conversationId: null, proposals: [] });
+      vi.spyOn(api, "getManagedBalance").mockResolvedValue({ balance: 0, totalUsed: 0, totalRecharged: 0, usedRatio: 0 });
+      vi.spyOn(comicLibraryApi, "dictionary").mockImplementation(async domain => [...comicSystemDictionary[domain]]);
+      vi.spyOn(comicGenerationApi, "creditPauses").mockResolvedValue([]);
+      vi.spyOn(comicGenerationApi, "keyframes").mockResolvedValue({ takes: [], approvedTakeId: null, approvedMediaId: null, selectionRevision: 1 });
+      const videos = vi.spyOn(comicGenerationApi, "videos").mockResolvedValue([]);
+      const host = await mount(createElement(ComicDramaWorkspace, {
+        user: { id: uuid(777), name: "User", username: null, phone: null, apiKeys: [], activeKeyIndex: 0 },
+        pathname: "/comic-drama/series/" + seriesId, active: true, models: [],
+        navigate: vi.fn(), replacePath: vi.fn(), onOpenAssistant: vi.fn(), onOpenDigitalEmployee: vi.fn(), onLogout: vi.fn(),
+      }));
+      const stage = Array.from(host.querySelectorAll(".comic-steps button")).find(button => button.textContent?.includes("生成"));
+      expect(stage).toBeTruthy();
+      await act(async () => { (stage as HTMLButtonElement).click(); });
+      const mode = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "直接参考生成");
+      expect(mode).toBeTruthy();
+      await act(async () => { mode!.click(); });
+
+      const badges = () => Array.from(host.querySelectorAll(".comic-generation-targets .comic-pill"), badge => badge.textContent);
+      const batch = () => host.querySelector(".comic-batch-banner")?.textContent;
+      const episode = () => host.querySelector(".comic-episode-stats")?.textContent;
+      expect(badges()).toEqual(["待采用", "生成中", "生成中"]);
+      expect(videos).toHaveBeenCalledWith(seriesId, initial.clips[0]!.id, expect.any(AbortSignal));
+
+      get.mockResolvedValue(makeDetail(2));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(badges()).toEqual(["待采用", "待采用", "生成中"]);
+      expect(batch()).toContain("生成中 1");
+      expect(episode()).toContain("已完成 2/3");
+
+      get.mockResolvedValue(makeDetail(3));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(badges()).toEqual(["待采用", "待采用", "待采用"]);
+      expect(batch()).not.toContain("生成中");
+      expect(episode()).toContain("已完成 3/3");
+      const requests = get.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(get).toHaveBeenCalledTimes(requests);
+      expect(videos).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops idle polling via shouldPoll, backs off on 429 Retry-After, and pauses when hidden", async () => {

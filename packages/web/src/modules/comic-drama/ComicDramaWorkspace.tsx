@@ -40,6 +40,7 @@ import { ComicRenderPanel } from "./ComicRenderPanel.js";
 import { ComicStudioLanding } from "./ComicStudioLanding.js";
 import { ComicEpisodeBudgetDialog } from "./ComicEpisodeBudgetDialog.js";
 import { ComicVideoCreditPauses } from "./ComicVideoCreditPauses.js";
+import { useGenerationHistory } from "./GenerationHistory.js";
 import {
   CharactersIcon, ClapperboardIcon, EpisodesIcon, ExportBoxIcon, MaterialsIcon, NewEpisodeIcon,
   ScriptIcon, SettingsIcon, SparklesIcon, StoryboardIcon, TimelineEditIcon, VideoReelIcon,
@@ -79,6 +80,7 @@ const libraryPaths = [
   { suffix: "/settings", label: "设置", tone: "slate", Icon: SettingsIcon },
 ] as const;
 const videosPath = COMIC_DRAMA_ROOT + "/clips";
+const voiceLibraryPath = COMIC_DRAMA_ROOT + "/materials/voices";
 const editorPath = COMIC_DRAMA_ROOT + "/editor";
 const editorSourcesPath = editorPath + "/sources";
 const editorSourcePrefix = editorSourcesPath + "/";
@@ -98,13 +100,19 @@ function formatCurrencyList(entries: readonly ComicCurrencyAmount[]): string {
   return entries.map(entry => formatMicros(entry.amountMicros, entry.currency)).join(" + ");
 }
 
+function hasActiveGeneration(detail: ComicDramaDetail) {
+  const isActive = (state: string | undefined) => state === "pending" || state === "running";
+  return (detail.summary?.generatingCount ?? 0) > 0 || detail.clips.some(({ progress }) =>
+    isActive(progress?.keyframeState) || isActive(progress?.latestVideoState ?? progress?.videoState));
+}
+
 export function ComicDramaWorkspace({
   user, pathname, active, navigate, replacePath, onOpenAssistant, onOpenDigitalEmployee, onLogout,
   models, imageModels = [],
 }: Props) {
   const { t, locale } = useI18n();
   const styles = useComicChoices("style");
-  const { editor, load, flush, editClip, editScript, reapply, dirty, getDetail } = useComicDramaDraft();
+  const { editor, load, refreshDetail, flush, editClip, editScript, reapply, dirty, getDetail } = useComicDramaDraft();
   const detail = editor.detail;
   const series = detail?.series;
   const [sidebarSummary, setSidebarSummary] = useState<ComicDramaEpisodeSummary | null>(null);
@@ -144,7 +152,7 @@ export function ComicDramaWorkspace({
   const [breakdownNotice, setBreakdownNotice] = useState<string | null>(null);
   const [breakdownProposal, setBreakdownProposal] = useState<ComicDirectorProposal | null>(null);
   const [directorRefreshToken, setDirectorRefreshToken] = useState(0);
-  const [creditPauseRefresh, setCreditPauseRefresh] = useState(0);
+  const [seriesRefresh, setSeriesRefresh] = useState<{ seriesId: string; revision: number } | null>(null);
   const breakdownAbortRef = useRef<AbortController | null>(null);
   const [pendingAutoDialogueEditId, setPendingAutoDialogueEditId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -172,10 +180,29 @@ export function ComicDramaWorkspace({
   const directDramaId = pathname.startsWith(dramasPath + "/") ? pathname.slice(dramasPath.length + 1) : null;
   const directId = pathname.startsWith(historyPath + "/") ? pathname.slice(historyPath.length + 1) : null;
   const library = libraryPaths.find(({ suffix }) => pathname === COMIC_DRAMA_ROOT + suffix ||
+    (suffix === "/materials" && pathname === voiceLibraryPath) ||
     (suffix === "/characters" && pathname.startsWith(COMIC_DRAMA_ROOT + suffix + "/")))?.suffix;
   const characterId = library === "/characters" ? pathname.split("/")[3] : undefined;
   const workspace = !history && !editorRoute && !library && !videoHistory;
   const locked = !!series?.archivedAt || busy;
+  const generating = !!detail && hasActiveGeneration(detail);
+  const refreshRevision = seriesRefresh && seriesRefresh.seriesId === series?.id ? seriesRefresh.revision : 0;
+  const refreshSeriesId = active && workspace && !loading && loadedPath.current === pathname ? series?.id : undefined;
+  const refreshSeries = useCallback(async (signal: AbortSignal) => {
+    const current = getDetail();
+    if (!refreshSeriesId || current?.series.id !== refreshSeriesId) return false;
+    const fresh = await comicDramaApi.get(refreshSeriesId, signal);
+    if (signal.aborted) return false;
+    return !refreshDetail(current, fresh) || hasActiveGeneration(fresh);
+  }, [getDetail, refreshDetail, refreshSeriesId]);
+  useGenerationHistory(refreshSeriesId && (generating || refreshRevision) ? refreshSeries : null, 5_000, refreshRevision, {
+    shouldPoll: active => active,
+  });
+  const notifySeriesChanged = useCallback(() => {
+    const seriesId = getDetail()?.series.id;
+    if (!seriesId) return;
+    setSeriesRefresh(previous => ({ seriesId, revision: (previous?.revision ?? 0) + 1 }));
+  }, [getDetail]);
 
   // Redirect legacy /comic-drama/editor/projects/:editId to aligned /comic-drama/editor/:editId
   useEffect(() => {
@@ -342,19 +369,6 @@ export function ComicDramaWorkspace({
     setDramaTabHint(tab);
     navigate(dramaPath(id));
   });
-  const reloadCurrent = useCallback(async () => {
-    const current = getDetail();
-    if (!current) return;
-    try {
-      const fresh = await comicDramaApi.get(current.series.id);
-      load(fresh);
-      if (fresh.summary && !fresh.series.archivedAt) setSidebarSummary(fresh.summary);
-    } catch { /* ignore */ }
-  }, [getDetail, load]);
-  const notifySeriesChanged = useCallback(() => {
-    setCreditPauseRefresh(v => v + 1);
-    void reloadCurrent();
-  }, [reloadCurrent]);
   const reloadDramaView = useCallback(async () => {
     const id = dramaView?.drama.id;
     if (!id) return;
@@ -397,6 +411,7 @@ export function ComicDramaWorkspace({
         for (const clip of current.clips) {
           const adapted = adaptComicClipDraftForModel(clip.draft, fields.videoModel, {
             clampDuration: modelAdapt.clampDuration,
+            cast: current.cast,
           });
           if (adapted.changed) {
             await comicDramaApi.saveClip(updated.id, clip.id, adapted.draft, clip.revision);
@@ -610,7 +625,7 @@ export function ComicDramaWorkspace({
       if (controller.signal.aborted) return;
       setBreakdownError(t(comicDirectorError(error)));
       if (error instanceof ApiClientError && (error.status === 409 || error.code === "DIRECTOR_PROPOSAL_STALE")) {
-        void reloadCurrent();
+        notifySeriesChanged();
       }
     } finally {
       if (breakdownAbortRef.current === controller) breakdownAbortRef.current = null;
@@ -911,7 +926,7 @@ export function ComicDramaWorkspace({
           }} />
         : library === "/characters" ? <CharacterLibrary characterId={characterId}
           open={id => navigate(COMIC_DRAMA_ROOT + "/characters" + (id ? "/" + id : ""))} />
-        : library === "/materials" ? <MaterialLibrary />
+        : library === "/materials" ? <MaterialLibrary key={pathname} initialVoiceTab={pathname === voiceLibraryPath} />
         : library === "/settings" ? <ComicSettingsPage videoModels={models} imageModels={imageModels} />
         : renderHistory ? <ComicRenderPanel />
         : isEditorDramaRoute ? <ComicDramaEditWorkspace
@@ -920,6 +935,7 @@ export function ComicDramaWorkspace({
           seriesId={editorEpisodeId}
           setGuard={setEditGuard}
           openVideo={openVideo}
+          openVoiceLibrary={() => void leave(() => navigate(voiceLibraryPath))}
           openDramaHub={(dId, tab) => openDramaHub(dId, tab)}
           openEpisodeProduction={epId => void leave(() => { warnGeneratingIfSwitching(epId); navigate(seriesPath(epId)); })}
           openDramaTaskSelect={dId => void leave(() => navigate(dramaEditorPath(dId)))}
@@ -928,6 +944,7 @@ export function ComicDramaWorkspace({
           exit={() => void leave(() => navigate(editorPath))}
         />
         : editId ? <ComicEditWorkspace key={editId} id={editId} setGuard={setEditGuard} openVideo={openVideo}
+          openVoiceLibrary={() => void leave(() => navigate(voiceLibraryPath))}
           autoOpenDialogue={pendingAutoDialogueEditId === editId}
           onAutoDialogueOpened={() => setPendingAutoDialogueEditId(null)}
           onOpenDramaSelect={dId => void leave(() => navigate(dramaEditorPath(dId)))}
@@ -1112,9 +1129,8 @@ export function ComicDramaWorkspace({
           <ComicVideoCreditPauses
             key={series.id}
             seriesId={series.id}
-            active={(episodeSummary?.generatingCount ?? 0) > 0
-              || detail.clips.some(c => ["pending", "running"].includes(c.progress?.latestVideoState ?? c.progress?.videoState ?? "none"))}
-            revision={creditPauseRefresh}
+            active={generating}
+            revision={refreshRevision}
             onResumed={notifySeriesChanged}
             label={id => {
               const clip = detail.clips.find(clip => clip.id === id);
@@ -1364,6 +1380,7 @@ export function ComicDramaWorkspace({
     {dialog && <SeriesDialog
       series={dialog === "edit" ? series : undefined}
       clips={dialog === "edit" ? detail?.clips : undefined}
+      cast={dialog === "edit" ? detail?.cast : undefined}
       presetDrama={dialog === "addEpisode" ? presetDrama : undefined}
       models={models}
       error={modalError}

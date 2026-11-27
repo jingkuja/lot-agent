@@ -151,6 +151,8 @@ export const migrations: Migration[] = [
   comicDramaEphemeralPreview,
   comicDramaEditTasks,
   volcAssets,
+  comicDramaVoices,
+  comicDramaCharacterGender,
 ];
 import { marketingShotDurations } from "./0041-marketing-shot-durations.js";
 
@@ -222,3 +224,5 @@ import { comicDramaRenderDeletion } from "./0106-comic-drama-render-deletion.js"
 import { comicDramaEphemeralPreview } from "./0107-comic-drama-ephemeral-preview.js";
 import { comicDramaEditTasks } from "./0108-comic-drama-edit-tasks.js";
 import { volcAssets } from "./0109-volc-assets.js";
+import { comicDramaVoices } from "./0110-comic-drama-voices.js";
+import { comicDramaCharacterGender } from "./0111-comic-drama-character-gender.js";

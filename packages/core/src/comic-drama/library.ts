@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ComicCharacterDesignVoice } from "./voices.js";
 
 const id = z.string().uuid().transform(value => value.toLowerCase());
 const label = z.string().trim().min(1).max(120);
@@ -63,10 +64,14 @@ export const comicSystemDictionary: Record<ComicDictionaryDomain, readonly Comic
 };
 
 const words = z.array(label).max(20);
+export const comicCharacterGenders = ["male", "female", "other"] as const;
+export const comicCharacterGender = z.enum(comicCharacterGenders);
 export const comicCharacterInput = z.object({
   name: label, aliases: words, tags: words, roleKey: key.nullable(),
   dramaId: id.nullable().optional(),
   age: z.string().trim().max(120), personality: z.string().trim().max(2000), appearance: z.string().trim().max(2000),
+  gender: comicCharacterGender.nullable().optional(),
+  designVoiceId: id.optional(),
 }).strict();
 export const comicOutfitInput = z.object({ name: label }).strict();
 export const comicOutfitOrder = z.object({
@@ -120,11 +125,13 @@ export type ComicMediaLinks = { url: string; thumbnailUrl: string | null };
 export type ComicMediaVersion = { version: number; media: ComicMedia };
 export type ComicCharacterAsset = { kind: "slot" | "expression"; key: string; outfitId: string | null } & ComicMediaVersion;
 export type ComicOutfit = { id: string; name: string; sort?: number };
-export type ComicCharacter = ComicCharacterInput & {
+export type ComicCharacter = Omit<ComicCharacterInput, "designVoiceId"> & {
   id: string; archived: boolean; cover: ComicMedia | null;
   dramaId?: string | null; dramaTitle?: string | null;
 };
-export type ComicCharacterDetail = ComicCharacter & { outfits: ComicOutfit[]; assets: ComicCharacterAsset[] };
+export type ComicCharacterDetail = ComicCharacter & {
+  outfits: ComicOutfit[]; assets: ComicCharacterAsset[]; designVoice?: ComicCharacterDesignVoice | null;
+};
 export type ComicMaterial = ComicMaterialInput & { id: string; archived: boolean } & ComicMediaVersion;
 export type ComicStylePreset = { styleKey: string; mediaId: string; media: ComicMedia; updatedAt: string };
 export type ComicUserSettings = { preferences: ComicUserPreferences; stylePresets: ComicStylePreset[] };

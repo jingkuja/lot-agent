@@ -174,6 +174,42 @@ describe("comic generation contracts", () => {
     expect(comicFrozenGenerationSchema.parse(JSON.parse(JSON.stringify(result)))).toEqual(result);
   });
 
+  it("uses photos of named episode characters on unassigned clips without casting unrelated or ambiguous characters", () => {
+    const namedCast = [
+      { ...cast[0], snapshot: { ...snapshot, name: "丽丽", aliases: ["小丽"] } },
+      { ...cast[0], snapshot: { ...snapshot, characterId: uuid(30), name: "Lin", assets: [{ ...snapshot.assets[0], media: image(31) }] } },
+      { ...cast[0], snapshot: { ...snapshot, characterId: uuid(32), name: "小陈", aliases: ["同事"] } },
+      { ...cast[0], snapshot: { ...snapshot, characterId: uuid(33), name: "小夏", aliases: ["同事"] } },
+      { ...cast[0], snapshot: { ...snapshot, characterId: uuid(34), name: "Lina", assets: [{ ...snapshot.assets[0], media: image(35) }] } },
+    ];
+    const draft = { ...clip.draft, cast: undefined, scene: "便利店 · 同事值夜班", shots: [{ ...clip.draft.shots[0], description: "Lina enters." }],
+      lines: [{ id: uuid(36), speaker: "小丽！", text: "有手电吗？", speed: 1, emotionKey: null }] };
+    const request = { ...base, clip: { ...clip, draft }, cast: namedCast, mode: "references" as const };
+    const input = freeze(buildComicGenerationInput(request));
+    expect(input.references.map(ref => ref.mediaId)).toEqual([uuid(4), uuid(35)]);
+    expect(input.prompt).toContain("@Image1 is 丽丽's appearance");
+    expect(input.prompt).toContain("@Image2 is Lina's appearance");
+    expect(countComicClipReferences(request.clip, { cast: namedCast })).toBe(2);
+    expect(freeze(buildComicGenerationInput({ ...request, clip: { ...clip, draft: { ...draft, cast: [] } } })).references).toEqual([]);
+  });
+
+  it("uses a later photo of the selected outfit when its snapshot had none and respects description-only, folding and first-frame mode", () => {
+    const actor = { characterId: snapshot.characterId, slotKey: null, expressionKey: null };
+    const member = { ...cast[0], snapshot: { ...snapshot, assets: [] }, availableAppearance: snapshot.assets[0] };
+    const inputFor = (actors: NonNullable<ComicDramaClip["draft"]["cast"]>, videoInputs?: ComicDramaClip["draft"]["videoInputs"]) => ({
+      ...base, cast: [member], mode: "references" as const, clip: { ...clip, draft: { ...clip.draft, cast: actors, videoInputs } },
+    });
+    const result = freeze(buildComicGenerationInput(inputFor([actor])));
+    expect(result.references).toMatchObject([{ mediaId: uuid(4), version: 1, kind: "appearance" }]);
+    expect(freeze(buildComicGenerationInput(inputFor([{ ...actor, descriptionOnly: true }]))).references).toEqual([]);
+    expect(freeze(buildComicGenerationInput({ ...inputFor([actor]), cast })).references).toEqual([]);
+    expect(freeze(buildComicGenerationInput({ ...inputFor([actor]), mode: "from_keyframe", firstFrame: keyframe })).references).toEqual([]);
+    const videoInputs = { references: [], modelAdaptation: {
+      targetModelId: base.modelId, foldedCastRefs: [{ characterId: actor.characterId, kind: "slot" as const }],
+    } };
+    expect(freeze(buildComicGenerationInput(inputFor([actor], videoInputs))).references).toEqual([]);
+  });
+
   it("keeps review mode gated and rejects missing or unsupported references", () => {
     expect(buildComicGenerationInput({ ...base, mode: "from_keyframe" })).toMatchObject({
       ok: false, issues: [{ code: "KEYFRAME_NOT_CONFIRMED" }],

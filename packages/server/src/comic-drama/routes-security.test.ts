@@ -12,6 +12,8 @@ import { ComicDramaError, type PgComicDramaRepository } from "./repository.js";
 import { createComicRenderRoutes } from "./render-routes.js";
 import type { PgComicRenders } from "./render-repository.js";
 import { createComicDramaRoutes } from "./routes.js";
+import { createComicVoiceRoutes } from "./voice-routes.js";
+import type { ComicVoices } from "./voices.js";
 
 const seriesId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const dramaId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -30,6 +32,46 @@ function makeSeries(videoModel: string | null): ComicDramaDetail {
 }
 
 describe("comic-drama route security checks", () => {
+  it("uses the session owner and rejects client-supplied IDs as voice design output", async () => {
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    const designCharacter = vi.fn(async () => ({ id: clipId, voiceId: null, status: "unknown" }));
+    const resolveModel = vi.fn();
+    app.route("/", createComicVoiceRoutes({ designCharacter } as unknown as ComicVoices, () => {}, resolveModel));
+    const character = { name: "Lily", gender: "female", age: "22", roleKey: "lead", tags: [], personality: "Reserved", appearance: "" };
+    const payload = { id: clipId, language: "en", character };
+    const submit = (body: object) => app.request("/voices/character-design", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    expect((await submit({ ...payload, voiceId: "forged-id" })).status).toBe(400);
+    expect((await submit({ ...payload, character: { ...character, ownerId: takeId } })).status).toBe(400);
+    expect((await submit({ ...payload, character: { ...character, gender: "invalid" } })).status).toBe(400);
+    expect(designCharacter).not.toHaveBeenCalled();
+    expect((await submit(payload)).status).toBe(201);
+    expect(designCharacter).toHaveBeenCalledWith(ownerId, payload, expect.any(AbortSignal), expect.any(Function), resolveModel);
+  });
+
+  it("requires own-voice confirmation and takes the voice owner from the session", async () => {
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    const create = vi.fn(async () => ({ id: clipId, status: "DEPLOYING" }));
+    app.route("/", createComicVoiceRoutes({ create } as unknown as ComicVoices, () => {}));
+    const submit = (fields: object) => {
+      const form = new FormData();
+      form.set("fields", JSON.stringify({ id: clipId, name: "My voice", kind: "clone", ...fields }));
+      form.set("sample", new File(["sample"], "voice.wav", { type: "audio/wav" }));
+      return app.request("/voices", { method: "POST", body: form });
+    };
+    expect((await submit({ ownVoice: false })).status).toBe(400);
+    expect((await submit({ ownVoice: true, ownerId: takeId })).status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+    expect((await submit({ ownVoice: true })).status).toBe(201);
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(
+      ownerId, { id: clipId, name: "My voice", kind: "clone", ownVoice: true }, expect.any(File), expect.any(AbortSignal), expect.any(Function),
+    );
+  });
+
   it("blocks unsupported video models on series create and update via comicVideoProfile", async () => {
     const detail = makeSeries(null);
     const repo = {

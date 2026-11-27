@@ -20,6 +20,10 @@ const errors: Record<string, string> = {
   OUTFIT_IN_USE: "该造型套装正在剧集选角中使用，无法删除",
   MATERIAL_IN_USE: "该素材正在剪辑工程或画风参考中使用，无法删除",
   MODEL_UNAVAILABLE: "所选模型不可用，请重新选择",
+  COMIC_DIRECTOR_LLM_UNAVAILABLE: "漫剧 AI 模型暂不可用",
+  COMIC_VOICE_UNCONFIGURED: "漫剧音色服务尚未配置",
+  COMIC_CHARACTER_VOICE_DESIGN_FAILED: "AI 音色设计失败，请重试",
+  EDIT_VOICE_UNAVAILABLE: "此音色未就绪或需重新授权",
   CONTENT_COMPLIANCE_REJECTED: "内容未通过安全合规检查，请修改剧本、分镜或台词后重试",
 };
 export function libraryError(error: unknown) {
@@ -151,10 +155,14 @@ export function MediaPreview({ media, title, thumbOnly = false, openOriginal = f
   </div>;
 }
 
-export function LibraryDialog({ title, submitLabel, close, save, children, describeError = libraryError, closeOnSave = true }: {
+export function LibraryDialog({
+  title, submitLabel, close, save, children, describeError = libraryError, closeOnSave = true, wide = false, submitDisabled = false,
+}: {
   title: string; submitLabel: string; close: () => void;
   save: (form: FormData, signal: AbortSignal) => Promise<unknown>; children: ReactNode; describeError?: (error: unknown) => string;
   closeOnSave?: boolean;
+  wide?: boolean;
+  submitDisabled?: boolean;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
@@ -164,7 +172,7 @@ export function LibraryDialog({ title, submitLabel, close, save, children, descr
   useEffect(() => { ref.current?.showModal(); return () => running.current?.abort(); }, []);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (running.current) return;
+    if (running.current || submitDisabled) return;
     const form = new FormData(event.currentTarget);
     const controller = new AbortController();
     running.current = controller;
@@ -174,14 +182,15 @@ export function LibraryDialog({ title, submitLabel, close, save, children, descr
     catch (error) { if (!controller.signal.aborted) setFailure(describeError(error)); }
     finally { running.current = null; if (!controller.signal.aborted) setSaving(false); }
   };
-  return <dialog className="comic-dialog" ref={ref} aria-label={title} onCancel={event => { event.preventDefault(); close(); }}>
+  return <dialog className={wide ? "comic-dialog comic-dialog--wide" : "comic-dialog"} ref={ref} aria-label={title}
+    onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={submit}>
       <h2>{title}</h2>
       <fieldset disabled={saving}>{children}</fieldset>
       {failure && <p className="comic-error" role="alert">{t(failure)}</p>}
       <div className="comic-actions comic-dialog-actions">
         <button type="button" onClick={close}>{t("取消")}</button>
-        <button className="primary" disabled={saving}>{saving ? t("保存中…") : submitLabel}</button>
+        <button className="primary" disabled={saving || submitDisabled}>{saving ? t("保存中…") : submitLabel}</button>
       </div>
     </form>
   </dialog>;

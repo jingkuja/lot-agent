@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import type { ComicCharacter, ComicCharacterInput, ComicDramaOption } from "@lot-agent/core/comic-drama";
+import { comicCharacterGenders, type ComicCharacter, type ComicCharacterInput, type ComicDramaOption } from "@lot-agent/core/comic-drama";
 import { useI18n } from "../../i18n/index.js";
 import { comicDramaApi } from "./api.js";
 import { ChoiceSelect, comicListWords, LibraryDialog } from "./LibraryParts.js";
+
+export const comicCharacterGenderLabels = { male: "男性", female: "女性", other: "其他" } as const;
 
 export function useComicDramaOptions(refresh = 0) {
   const [options, setOptions] = useState<ComicDramaOption[]>([]);
@@ -50,6 +52,7 @@ export function CharacterFormDialog({
           tags: comicListWords(field("tags")),
           roleKey: field("role") || null,
           dramaId: dramaId || null,
+          gender: comicCharacterGenders.find(gender => gender === form.get("gender")) ?? null,
           age: field("age"),
           personality: field("personality"),
           appearance: field("appearance"),
@@ -94,6 +97,13 @@ export function CharacterFormDialog({
             defaultValue={character?.roleKey ?? ""}
             empty={t("未分类")}
           />
+        </label>
+        <label>
+          {t("性别")}
+          <select name="gender" defaultValue={character?.gender ?? ""}>
+            <option value="">{t("不指定")}</option>
+            {comicCharacterGenders.map(gender => <option key={gender} value={gender}>{t(comicCharacterGenderLabels[gender])}</option>)}
+          </select>
         </label>
         <label>
           {t("年龄")}

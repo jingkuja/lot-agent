@@ -88,7 +88,7 @@ export function Storyboard({
     ? checkComicClipIssues({ videoModel: series?.videoModel ?? null }, { ...clip, draft: activeDraft }, cast)
     : [];
   const adaptedPreview = clip && activeDraft && series?.videoModel
-    ? adaptComicClipDraftForModel(activeDraft, series.videoModel)
+    ? adaptComicClipDraftForModel(activeDraft, series.videoModel, { cast })
     : null;
   const move = (id: string, to: number) => {
     const from = clips.findIndex(item => item.id === id);
@@ -510,7 +510,7 @@ function ClipFields({ draft, disabled, generateDisabled, cast, profile, styleKey
         }} /></label>
     </div>
 
-    <ClipVideoInputs draft={draft} profile={profile} change={videoInputs => update({ videoInputs })} />
+    <ClipVideoInputs draft={draft} cast={cast} profile={profile} change={videoInputs => update({ videoInputs })} />
     <div className="comic-section-heading"><h3>{t("场景 / 道具 / 音效素材引用")}</h3>
       <div className="comic-actions">
         <button type="button" onClick={() => setPicker({ kind: "scene" })}>{t(draft.sceneRef ? "更换场景图" : "绑定场景图")}</button>
@@ -667,8 +667,9 @@ function StoryboardMaterialResult({ task, disabled, bind, close }: {
   </div>;
 }
 
-function ClipVideoInputs({ draft, profile, change }: {
-  draft: ComicDramaClipDraft; profile?: ComicVideoProfile; change: (value: ComicDramaClipDraft["videoInputs"]) => void;
+function ClipVideoInputs({ draft, cast, profile, change }: {
+  draft: ComicDramaClipDraft; cast: readonly ComicSeriesCast[]; profile?: ComicVideoProfile;
+  change: (value: ComicDramaClipDraft["videoInputs"]) => void;
 }) {
   const { t } = useI18n();
   const input = draft.videoInputs;
@@ -696,7 +697,7 @@ function ClipVideoInputs({ draft, profile, change }: {
   const update = (value: Partial<NonNullable<ComicDramaClipDraft["videoInputs"]>>) => change({ ...input, references: refs, ...value });
   const hasAudioRef = refs.some(ref => ref.kind === "audio");
   const audioMode = resolveComicVideoAudioMode(input?.audioMode, hasAudioRef);
-  const foldedCount = countComicClipFoldedReferences(draft);
+  const foldedCount = countComicClipFoldedReferences(draft, { cast });
   const hasAdaptation = foldedCount > 0 || Boolean(input?.modelAdaptation?.originalResolution) || Boolean(input?.modelAdaptation?.originalSourceDuration);
   return <details className="comic-video-references" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{t("分镜视频输入（{0}）", [refs.length])}</summary>
@@ -850,15 +851,21 @@ function ClipCast({ cast, current, change }: { cast: readonly ComicSeriesCast[];
     {current.map((actor, index) => {
       const snapshot = cast.find(entry => entry.snapshot.characterId === actor.characterId)?.snapshot;
       if (!snapshot) return null;
+      const appearanceSlots = snapshot.assets.filter(asset => asset.kind === "slot");
       const update = (fields: Partial<typeof actor>) => change(current.map((entry, i) => i === index ? { ...entry, ...fields } : entry));
       return <div className="comic-subcard" key={actor.characterId}>
         <div className="comic-actions"><strong>{snapshot.name}</strong> <small>{snapshot.outfitName}</small>
           <button type="button" onClick={() => change(current.filter((_, i) => i !== index))}>{t("移除出镜")}</button>
         </div>
         <div className="comic-fields">
-          <label>{t("造型槽位")}<select value={actor.slotKey ?? ""} onChange={event => update({ slotKey: event.target.value || null })}>
+          <label>{t("造型槽位")}<select value={actor.slotKey ?? (!appearanceSlots.length && !actor.descriptionOnly ? ":auto" : "")}
+            onChange={event => {
+              const value = event.target.value;
+              update({ slotKey: value === ":auto" ? null : value || null, descriptionOnly: value === "" ? true : undefined });
+            }}>
+            {!appearanceSlots.length && <option value=":auto">{t("自动使用定妆照")}</option>}
             <option value="">{t("仅用角色描述")}</option>
-            {snapshot.assets.filter(asset => asset.kind === "slot").map(asset =>
+            {appearanceSlots.map(asset =>
               <option value={asset.key} key={asset.key}>{slots.find(row => row.key === asset.key)?.labels[locale] ?? asset.key}</option>)}
           </select></label>
           <label>{t("表情")}<select value={actor.expressionKey ?? ""} onChange={event => update({ expressionKey: event.target.value || null })}>

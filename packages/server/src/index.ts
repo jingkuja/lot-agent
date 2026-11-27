@@ -99,6 +99,8 @@ import { PgComicSettings } from "./comic-drama/settings-repository.js";
 import { comicRollout } from "./comic-drama/rollout.js";
 import { registerAgentExtension } from "./services/agent-extensions.js";
 import { createComicEditRoutes } from "./comic-drama/edit-routes.js";
+import { createComicVoiceRoutes } from "./comic-drama/voice-routes.js";
+import { ComicVoices } from "./comic-drama/voices.js";
 import { quoteComicImageCatalogPrice, quoteComicVideoPrices } from "./comic-drama/pricing.js";
 import { startComicSettlementSync } from "./comic-drama/settlement.js";
 import { TokenhubBillingLogs } from "./tokenhub/billing-logs.js";
@@ -535,8 +537,10 @@ async function main() {
     };
     const edits = comicEdits;
     const speechModel = loadTwinVoiceConfig().targetModel;
+    const libraryVoices = new ComicVoices(service.db.pool, comicMedia);
     const speech = new ComicEditSpeech(service.db.pool, edits, comicMedia, {
       presetModel: speechModel,
+      libraryVoices,
       localSpeech: createComicLocalSpeech(),
       ownerSpeech: async owner => {
         const apiKey = await service.db.getUserApiKey(owner, service.managedKeysEnabled);
@@ -561,9 +565,12 @@ async function main() {
       `${COMIC_DRAMA_API_ROOT}/edits/:id/items/:itemId/lines/:lineId/speech`,
       `${COMIC_DRAMA_API_ROOT}/edits/:id/auto-dialogue`,
       `${COMIC_DRAMA_API_ROOT}/voices/audition`,
+      `${COMIC_DRAMA_API_ROOT}/voices`,
+      `${COMIC_DRAMA_API_ROOT}/voices/character-design`,
       `${COMIC_DRAMA_API_ROOT}/characters/:id/voice/audition`,
     ], generationRateLimit);
     app.route(COMIC_DRAMA_API_ROOT, createComicEditRoutes(edits, speech, rollout.accepting));
+    app.route(COMIC_DRAMA_API_ROOT, createComicVoiceRoutes(libraryVoices, rollout.accepting, resolveComicDirectorLlm));
     app.on("POST", [
       `${COMIC_DRAMA_API_ROOT}/edits/:id/render`, `${COMIC_DRAMA_API_ROOT}/renders/:id/recover`,
     ], generationRateLimit);

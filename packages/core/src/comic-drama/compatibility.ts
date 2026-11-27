@@ -2,6 +2,8 @@ import {
   comicVideoDurationSupported, comicVideoModel, comicVideoProfile, mapComicVideoResolution,
   type ComicVideoProfile, type ComicVideoResolution,
 } from "./models.js";
+import type { ComicSeriesCast } from "./cast.js";
+import { resolveComicReferenceCast } from "./checks.js";
 import type { ComicClipModelAdaptation, ComicDramaClip, ComicDramaClipDraft } from "./index.js";
 
 export type ComicModelAdaptationAction =
@@ -56,12 +58,13 @@ type ImagePrioritySlot =
   | { group: "extra_image"; mediaId: string };
 
 /** Ordered highest-to-lowest priority: cast (slot -> expression) > scene > style > prop > extra image. */
-function prioritizedImageSlots(draft: ComicDramaClipDraft, hasStyleRef: boolean): ImagePrioritySlot[] {
+function prioritizedImageSlots(draft: ComicDramaClipDraft, hasStyleRef: boolean, cast?: readonly ComicSeriesCast[]): ImagePrioritySlot[] {
   const slots: ImagePrioritySlot[] = [];
-  for (const actor of draft.cast ?? []) {
+  const actors = cast ? resolveComicReferenceCast(draft, cast) : draft.cast ?? [];
+  for (const actor of actors) {
     if (actor.slotKey) slots.push({ group: "cast_slot", characterId: actor.characterId });
   }
-  for (const actor of draft.cast ?? []) {
+  for (const actor of actors) {
     if (actor.expressionKey) slots.push({ group: "cast_expression", characterId: actor.characterId });
   }
   if (draft.sceneRef) slots.push({ group: "scene" });
@@ -91,7 +94,7 @@ function countFoldedInAdaptation(adaptation: ComicClipModelAdaptation | undefine
 export function adaptComicClipDraftForModel(
   draft: ComicDramaClipDraft,
   targetModelId: string,
-  opts?: { hasStyleRef?: boolean; clampDuration?: boolean },
+  opts?: { hasStyleRef?: boolean; clampDuration?: boolean; cast?: readonly ComicSeriesCast[] },
 ): { draft: ComicDramaClipDraft; changed: boolean; actions: ComicModelAdaptationAction[] } {
   const profile = comicVideoProfile(targetModelId);
   if (!profile) return { draft, changed: false, actions: [] };
@@ -140,7 +143,7 @@ export function adaptComicClipDraftForModel(
   }
 
   // 3. Reference image folding in priority order: cast > scene > style > prop > extra image.
-  const allSlots = prioritizedImageSlots(draft, hasStyleRef);
+  const allSlots = prioritizedImageSlots(draft, hasStyleRef, opts?.cast);
   const maxImagesByFiles = Math.max(0, profile.referenceMedia.totalFiles - audioCount - videoCount);
   const effectiveImageBudget = Math.min(profile.referenceImages.total, maxImagesByFiles);
   const foldedSlots = allSlots.slice(effectiveImageBudget);
@@ -221,7 +224,7 @@ export function adaptComicClipDraftForModel(
 export function analyzeComicModelSwitch(
   clips: readonly Pick<ComicDramaClip, "id" | "ordinal" | "draft">[],
   targetModelId: string | null | undefined,
-  opts?: { hasStyleRef?: boolean; clampDuration?: boolean },
+  opts?: { hasStyleRef?: boolean; clampDuration?: boolean; cast?: readonly ComicSeriesCast[] },
 ): ComicModelSwitchReport | null {
   const model = comicVideoModel(targetModelId);
   const profile = comicVideoProfile(targetModelId ?? null);
@@ -240,7 +243,7 @@ export function analyzeComicModelSwitch(
     const refs = videoInputs?.references ?? [];
     const audioCount = refs.filter(ref => ref.kind === "audio").length;
     const videoCount = refs.filter(ref => ref.kind === "video").length;
-    const allImages = prioritizedImageSlots(draft, hasStyleRef);
+    const allImages = prioritizedImageSlots(draft, hasStyleRef, opts?.cast);
     const activeImagesCount = Math.max(0, allImages.length - countFoldedInAdaptation(videoInputs?.modelAdaptation));
     const totalFiles = activeImagesCount + audioCount + videoCount;
     const issues: ComicModelSwitchIssue[] = [];

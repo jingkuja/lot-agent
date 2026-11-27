@@ -105,7 +105,7 @@ describe("PgComicLibrary character drama attribution", () => {
         return {
           rows: [{
             id: charId, name: "林夏", aliases: [], tags: [], roleKey: "lead",
-            dramaId: null, dramaTitle: null, age: "24", personality: "冷静", appearance: "长发", archived: false,
+            dramaId: null, dramaTitle: null, age: "24", gender: "female", personality: "冷静", appearance: "长发", archived: false,
           }],
           rowCount: 1,
         };
@@ -138,5 +138,37 @@ describe("PgComicLibrary character drama attribution", () => {
       age: "24", personality: "冷静", appearance: "长发",
     });
     expect(calls.some(c => c.sql.includes("FOR UPDATE OF c"))).toBe(true);
+    expect(calls.find(c => c.sql.startsWith("UPDATE lot_comic_drama.cd_characters SET"))?.params[9]).toBe("female");
+  });
+
+  it("binds only an owned ready design in the same transaction as the character update", async () => {
+    vi.stubEnv("QWEN_VOICE_API_KEY", "fixture-key");
+    try {
+      let ownedReadyVoice = false;
+      const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes("FOR UPDATE OF c")) return { rows: [{ id: charId, roleKey: null, gender: "female" }] };
+        if (sql.includes("FROM lot_comic_drama.cd_voices")) return { rowCount: ownedReadyVoice && params[0] === ownerId ? 1 : 0 };
+        return { rowCount: 1, rows: [] };
+      });
+      const client = { query, release: vi.fn() };
+      const lib = new PgComicLibrary({ connect: async () => client } as unknown as Pool);
+      const update = () => lib.editCharacter(ownerId, charId, {
+        name: "林夏", aliases: [], tags: [], roleKey: null, age: "24", personality: "冷静", appearance: "长发", gender: null, designVoiceId: dramaId,
+      });
+      await expect(update()).rejects.toMatchObject({ code: "EDIT_VOICE_UNAVAILABLE" });
+      expect(query).toHaveBeenLastCalledWith("ROLLBACK");
+      expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO lot_comic_drama.cd_character_voice"))).toBe(false);
+
+      ownedReadyVoice = true;
+      query.mockClear();
+      await update();
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("AND kind='design' AND status='OK'"), [ownerId, dramaId, expect.any(String)]);
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("gender=$10"), expect.arrayContaining([null, ownerId]));
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO lot_comic_drama.cd_character_voice"),
+        [ownerId, charId, { kind: "library", voiceId: dramaId }, expect.any(String), null]);
+      expect(query).toHaveBeenLastCalledWith("COMMIT");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

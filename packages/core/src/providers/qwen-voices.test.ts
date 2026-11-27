@@ -21,6 +21,50 @@ describe("Qwen enrollment HTTP contract", () => {
     expect(await client().find("abc123")).toEqual({ voiceId, status: "DEPLOYING" });
     expect(JSON.parse(fetcher.mock.calls[2][1].body).input).toEqual({ action: "list_voice", prefix: "abc123", page_index: 0, page_size: 100 });
   });
+  it("designs a voice with a WAV preview and reconciles only the matching design prefix", async () => {
+    const designedId = `${model}-vd-abc123-unique`;
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({
+      output: { voice_id: designedId, preview_audio: { data: "UklGRg==", response_format: "wav" } },
+    })).mockResolvedValueOnce(Response.json({
+      output: { voice_list: [{ voice_id: voiceId, status: "OK" }, { voice_id: designedId, status: "DEPLOYING" }] },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    const provider = client();
+    const voicePrompt = "A steady voice for a quiet detective";
+    const previewText = "Stay here until the rain stops.";
+    await expect(provider.createCustom({ prefix: "abc123", voicePrompt, previewText, language: "en" }))
+      .resolves.toEqual({ voiceId: designedId, previewAudio: { data: "UklGRg==", format: "wav" } });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      model: "voice-enrollment",
+      input: {
+        action: "create_voice", target_model: model, prefix: "abc123", voice_prompt: voicePrompt,
+        preview_text: previewText, language_hints: ["en"],
+      },
+      parameters: { sample_rate: 24000, response_format: "wav" },
+    });
+    await expect(provider.findCustom("abc123", true)).resolves.toEqual({ voiceId: designedId, status: "DEPLOYING" });
+  });
+  it("passes a selected preview sample rate and format to the design API", async () => {
+    const designedId = `${model}-vd-abc123-unique`;
+    const fetcher = vi.fn().mockResolvedValue(Response.json({
+      output: { voice_id: designedId, preview_audio: { data: "SUQz", response_format: "mp3", sample_rate: 48000 } },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(client().createCustom({
+      prefix: "abc123", voicePrompt: "Female voice, Low pitch, Composed", previewText: "Wait here until the rain stops.",
+      language: "en", sampleRate: 48000, previewFormat: "mp3",
+    })).resolves.toEqual({ voiceId: designedId, previewAudio: { data: "SUQz", format: "mp3" } });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).parameters).toEqual({ sample_rate: 48000, response_format: "mp3" });
+  });
+  it("sends a private clone sample using the audio data URI field", async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ output: { voice_id: voiceId } }));
+    vi.stubGlobal("fetch", fetcher);
+    const audio = "data:audio/wav;base64,UklGRg==";
+    await expect(client().createCustom({ prefix: "abc123", audio })).resolves.toEqual({ voiceId, previewAudio: null });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      model: "voice-enrollment", input: { action: "create_voice", target_model: model, prefix: "abc123", audio },
+    });
+  });
   it.each([null, {}, { output: { voice_id: "wrong-model-abc123-id" } }, { output: { voice_id: 123 } }])("rejects malformed creation output (%j) without vendor text", async body => {
     const fetcher = vi.fn().mockResolvedValue(Response.json(body)); vi.stubGlobal("fetch", fetcher);
     await expect(client().create({ url: "https://a.example", prefix: "abc123" })).rejects.toThrow("INVALID_RESPONSE");

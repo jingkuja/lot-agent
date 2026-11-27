@@ -3,7 +3,8 @@ import {
   comicVideoAudioModes, comicVideoDurationSupported, comicVideoProfile, comicVideoResolutions, resolveComicVideoAudioMode,
   type ComicVideoAudioMode,
 } from "./models.js";
-import { comicCastAsset, type ComicSeriesCast } from "./cast.js";
+import { comicCastAsset, comicCastReferenceAsset, type ComicSeriesCast } from "./cast.js";
+import { resolveComicReferenceCast } from "./checks.js";
 import { comicCharacterUpload, comicMaterialInput, comicSystemDictionary } from "./library.js";
 import type { ComicCharacterUpload } from "./library.js";
 import type { ComicDramaClip, ComicDramaSeries, ComicEpisodeCostSummary } from "./index.js";
@@ -26,7 +27,10 @@ export type ComicGenerationMode = z.infer<typeof comicGenerationModeSchema>;
 export type ComicQuoteLine = {
   clipId: string; modelId: string; unit: "image" | "second"; quantity: number;
   amountMicros: number | null;
-  referenceVersions?: { mediaId: string; version: number; kind?: "image" | "first_frame" | "last_frame" | "audio" | "video" }[];
+  referenceVersions?: {
+    mediaId: string; version: number; kind?: "image" | "appearance" | "expression" | "first_frame" | "last_frame" | "audio" | "video";
+    characterId?: string; characterName?: string;
+  }[];
   advisories?: ComicGenerationNotice[];
   sourceDurationMs?: number;
   followsSource?: boolean;
@@ -302,14 +306,17 @@ export function buildComicGenerationInput(input: ResolvedInputs):
     (isVideo ? draft.videoInputs?.modelAdaptation?.foldedCastRefs ?? [] : [])
       .map(entry => `${entry.characterId}:${entry.kind}`),
   );
-  for (const actor of draft.cast ?? []) {
-    const snapshot = cast.find(entry => entry.snapshot.characterId === actor.characterId)?.snapshot;
-    if (!snapshot) { issues.push({ code: "CAST_REFERENCE_MISSING", characterId: actor.characterId }); continue; }
+  const useVideoReferences = isVideo && !strictFirstFrame;
+  const actors = useVideoReferences ? resolveComicReferenceCast(draft, cast) : draft.cast ?? [];
+  for (const actor of actors) {
+    const member = cast.find(entry => entry.snapshot.characterId === actor.characterId);
+    if (!member) { issues.push({ code: "CAST_REFERENCE_MISSING", characterId: actor.characterId }); continue; }
+    const { snapshot } = member;
     const detail = [snapshot.name, snapshot.age, snapshot.appearance, snapshot.personality, snapshot.outfitName].filter(Boolean).join(", ");
     const actorReferences: string[] = [];
     for (const [kind, key] of [["slot", actor.slotKey], ["expression", actor.expressionKey]] as const) {
       if (!key || strictFirstFrame || foldedCast.has(`${actor.characterId}:${kind}`)) continue;
-      const asset = comicCastAsset(snapshot, kind, key);
+      const asset = useVideoReferences ? comicCastReferenceAsset(member, kind, key) : comicCastAsset(snapshot, kind, key);
       if (!asset) { issues.push({ code: "CAST_REFERENCE_MISSING", characterId: actor.characterId }); continue; }
       const { id: mediaId, mime, sizeBytes, width, height } = asset.media;
       actorReferences.push(`${tag(references.length)} is ${snapshot.name}'s ${kind === "slot" ? "appearance" : "expression"} (${key}).`);

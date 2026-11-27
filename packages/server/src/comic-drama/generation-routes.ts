@@ -300,7 +300,17 @@ export function createComicSeriesPreviewer(deps: ComicSeriesPreviewDeps) {
     if (videoPrice && inputs.some(input => Object.hasOwn(videoPrice.clipAmounts, input.clipId) && videoReferences(input).length)) {
       deps.media.assertVideoReferenceOrigin();
     }
-    return repo.quote(owner, scope, String(detail.series.revision), videoPrice ?? imagePrice, inputs, skipped, replaceAdopted, visualReferences);
+    const quote = await repo.quote(owner, scope, String(detail.series.revision), videoPrice ?? imagePrice, inputs, skipped,
+      replaceAdopted, visualReferences);
+    if (!isVideo) return quote;
+    const names = new Map(detail.cast.map(({ snapshot }) => [snapshot.characterId, snapshot.name]));
+    for (const item of quote.items) {
+      for (const ref of item.referenceVersions ?? []) {
+        const name = ref.characterId && names.get(ref.characterId);
+        if (name) ref.characterName = name;
+      }
+    }
+    return quote;
   };
 }
 

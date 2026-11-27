@@ -1,4 +1,4 @@
-import type { ComicSeriesCast } from "./cast.js";
+import { comicCastDefaultAppearance, type ComicClipCasting, type ComicSeriesCast } from "./cast.js";
 import {
   comicVideoDurationSupported, comicVideoModel, comicVideoProfile, mapComicVideoResolution, resolveComicVideoAudioMode,
   type ComicVideoAudioMode, type ComicVideoOperation, type ComicVideoResolution,
@@ -147,6 +147,44 @@ export function matchComicCharacters<T extends { id: string; name: string; alias
   return partialMatches;
 }
 
+/** Resolve references without changing the saved cast or overriding a manually selected appearance. */
+export function resolveComicReferenceCast(draft: ComicDramaClipDraft, cast: readonly ComicSeriesCast[]): ComicClipCasting {
+  if (draft.cast) {
+    return draft.cast.map(actor => {
+      if (actor.slotKey || actor.descriptionOnly) return actor;
+      const appearance = cast.find(member => member.snapshot.characterId === actor.characterId)?.availableAppearance;
+      return appearance ? { ...actor, slotKey: appearance.key } : actor;
+    });
+  }
+
+  // Include names of all selected characters when detecting ambiguity, even if their outfit has no picture yet.
+  const owners = new Map<string, string | null>();
+  for (const { snapshot } of cast) {
+    for (const name of [snapshot.name, ...snapshot.aliases]) {
+      const key = normalizeComicName(name);
+      if (key && owners.get(key) !== snapshot.characterId) owners.set(key, owners.has(key) ? null : snapshot.characterId);
+    }
+  }
+  const speakers = new Set(draft.lines.filter(line => line.text.trim() && line.speaker).map(line => normalizeComicName(line.speaker!)));
+  const body = [draft.scene, ...draft.shots.map(shot => shot.description)].join("\n").normalize("NFKC").toLowerCase();
+  return cast.flatMap(member => {
+    const { snapshot, archived } = member;
+    const appearance = archived ? undefined : comicCastDefaultAppearance(snapshot) ?? member.availableAppearance;
+    if (!appearance) return [];
+    const matched = [snapshot.name, ...snapshot.aliases].some(name => {
+      const key = normalizeComicName(name);
+      if (owners.get(key) !== snapshot.characterId) return false;
+      if (speakers.has(key)) return true;
+      const text = name.normalize("NFKC").trim().toLowerCase();
+      if (text.length < 2) return false;
+      if (/\p{Script=Han}/u.test(text)) return body.includes(text);
+      const literal = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?<![\\p{L}\\p{N}])${literal}(?![\\p{L}\\p{N}])`, "u").test(body);
+    });
+    return matched ? [{ characterId: snapshot.characterId, slotKey: appearance.key, expressionKey: null }] : [];
+  }).slice(0, 32);
+}
+
 /** Estimate spoken duration in ms for a clip's dialogue lines (supports CJK + Latin languages and speed). */
 export function estimateComicDialogueMs(lines: readonly ComicDramaClip["draft"]["lines"][number][]): number {
   let totalMs = 0;
@@ -164,12 +202,12 @@ export function estimateComicDialogueMs(lines: readonly ComicDramaClip["draft"][
   return totalMs > 0 ? totalMs - 200 : 0;
 }
 
-export function countComicClipFoldedReferences(draft: ComicDramaClipDraft, opts?: { hasStyleRef?: boolean }): number {
+export function countComicClipFoldedReferences(draft: ComicDramaClipDraft, opts?: { hasStyleRef?: boolean; cast?: readonly ComicSeriesCast[] }): number {
   const adaptation = draft.videoInputs?.modelAdaptation;
   if (!adaptation) return 0;
   let folded = 0;
   const foldedCast = new Set((adaptation.foldedCastRefs ?? []).map(entry => `${entry.characterId}:${entry.kind}`));
-  for (const actor of draft.cast ?? []) {
+  for (const actor of opts?.cast ? resolveComicReferenceCast(draft, opts.cast) : draft.cast ?? []) {
     if (actor.slotKey && foldedCast.has(`${actor.characterId}:slot`)) folded += 1;
     if (actor.expressionKey && foldedCast.has(`${actor.characterId}:expression`)) folded += 1;
   }
@@ -189,14 +227,14 @@ export function countComicClipFoldedReferences(draft: ComicDramaClipDraft, opts?
 /** Count active image references that a clip will send to generation (respecting non-destructive model folding). */
 export function countComicClipReferences(
   clip: ComicDramaClip,
-  opts?: { hasStyleRef?: boolean; includeKeyframe?: boolean; ignoreModelFolding?: boolean },
+  opts?: { hasStyleRef?: boolean; includeKeyframe?: boolean; ignoreModelFolding?: boolean; cast?: readonly ComicSeriesCast[] },
 ): number {
   const adaptation = opts?.ignoreModelFolding ? undefined : clip.draft.videoInputs?.modelAdaptation;
   const foldedCast = new Set((adaptation?.foldedCastRefs ?? []).map(entry => `${entry.characterId}:${entry.kind}`));
   const foldedProps = new Set(adaptation?.foldedPropMediaIds ?? []);
   const foldedExtra = new Set(adaptation?.foldedExtraImageMediaIds ?? []);
   let count = 0;
-  for (const actor of clip.draft.cast ?? []) {
+  for (const actor of opts?.cast ? resolveComicReferenceCast(clip.draft, opts.cast) : clip.draft.cast ?? []) {
     if (actor.slotKey && !foldedCast.has(`${actor.characterId}:slot`)) count += 1;
     if (actor.expressionKey && !foldedCast.has(`${actor.characterId}:expression`)) count += 1;
   }
@@ -220,7 +258,9 @@ export function checkComicClipIssues(
   opts?: { hasStyleRef?: boolean; generationMode?: ComicGenerationMode },
 ): ComicClipCheckIssue[] {
   const issues: ComicClipCheckIssue[] = [];
-  const castInClip = new Set((clip.draft.cast ?? []).map(actor => actor.characterId));
+  const videoCast = series.videoModel && opts?.generationMode !== "from_keyframe" && opts?.generationMode !== "keyframe" ? cast : undefined;
+  const actors = videoCast ? resolveComicReferenceCast(clip.draft, videoCast) : clip.draft.cast ?? [];
+  const castInClip = new Set(actors.map(actor => actor.characterId));
   const castSearchList = cast.map(entry => ({
     id: entry.snapshot.characterId,
     name: entry.snapshot.name,
@@ -254,6 +294,7 @@ export function checkComicClipIssues(
   const limit = profile ? profile.referenceImages.total : COMIC_KEYFRAME_MAX_REFERENCES;
   const count = countComicClipReferences(clip, {
     hasStyleRef: opts?.hasStyleRef,
+    cast: videoCast,
     includeKeyframe: !!profile && !comicVideoModel(series.videoModel) && !!clip.progress?.keyframeApproved,
   });
   if (count > limit) {
@@ -280,7 +321,7 @@ export function checkComicClipIssues(
   }
 
   // 4. Cast member has library updates or generated output predates latest cast snapshot
-  for (const actor of clip.draft.cast ?? []) {
+  for (const actor of actors) {
     const member = cast.find(entry => entry.snapshot.characterId === actor.characterId);
     if (!member) continue;
     if (member.hasUpdates) {

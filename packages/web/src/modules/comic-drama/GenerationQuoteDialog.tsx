@@ -53,7 +53,9 @@ const fields: Record<NonNullable<ComicGenerationIssue["field"]>, string> = {
   edge: "边长（像素）", aspect: "宽高比", fps: "帧率", pixels: "总像素", format: "文件格式", codec: "编码",
   resolution: "输出分辨率", prompt: "最终提示词", videoMode: "生成模式", audioMode: "音频来源模式",
 };
-const referenceKindLabels = { image: "参考图", first_frame: "首帧", last_frame: "尾帧", audio: "参考音频", video: "参考视频" } as const;
+const referenceKindLabels = {
+  image: "参考图", appearance: "角色定妆照", expression: "角色表情图", first_frame: "首帧", last_frame: "尾帧", audio: "参考音频", video: "参考视频",
+} as const;
 
 export function GenerationQuoteDialog({
   quote, label, close, confirm, submitted, editClip, reviewKeyframe, onSwitchToReferences, describeSkipped,
@@ -138,7 +140,8 @@ export function GenerationQuoteDialog({
         </small>
           {!!item.referenceVersions?.length && <small>{item.unit === "image"
             ? t("参考图版本 · {0}", [item.referenceVersions.map(ref => `V${ref.version}`).join(" / ")])
-            : item.referenceVersions.map(ref => `${t(referenceKindLabels[ref.kind ?? "image"])} V${ref.version}`).join(" · ")}</small>}
+            : item.referenceVersions.map(ref => [ref.characterName, `${t(referenceKindLabels[ref.kind ?? "image"])} V${ref.version}`]
+              .filter(Boolean).join(" ")).join(" · ")}</small>}
           {item.sourceDurationMs !== undefined && <small>{t(
             item.followsSource ? "源视频 {0} 秒 · 自动输出时长和画幅" : "源视频 {0} 秒 · 自动输出画幅",
             [numberFormat.format(item.sourceDurationMs / 1000)])}</small>}

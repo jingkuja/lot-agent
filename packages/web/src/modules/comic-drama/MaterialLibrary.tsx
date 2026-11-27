@@ -7,8 +7,10 @@ import { comicGenerationApi } from "./generation-api.js";
 import { ComicTakeStatus, hasActiveComicTakes, ImageTakeActions, useGenerationHistory } from "./GenerationHistory.js";
 import { comicGenerationError } from "./GenerationQuoteDialog.js";
 import { MaterialImageGeneration } from "./MaterialImageGeneration.js";
+import { ComicVoiceLibrary } from "./ComicVoiceLibrary.js";
 
 export const comicMaterialLabels = { scene: "场景", prop: "道具", sound: "音效", music: "背景音乐", other: "其他" } as const;
+const materialTabs = ["scene", "prop", "voice", "sound", "music", "other"] as const;
 const images = "image/jpeg,image/png,image/webp";
 const audio = ".mp3,.wav,audio/mpeg,audio/wav";
 const options = {
@@ -24,9 +26,10 @@ const options = {
 const isImageKind = (kind: ComicMaterialKind): kind is ComicMaterialImageKind => kind === "scene" || kind === "prop";
 const isImageMaterial = (material: ComicMaterial): material is ComicMaterial & { kind: ComicMaterialImageKind } => isImageKind(material.kind);
 
-export function MaterialLibrary() {
+export function MaterialLibrary({ initialVoiceTab = false }: { initialVoiceTab?: boolean } = {}) {
   const { locale, t } = useI18n();
   const [kind, setKind] = useState<ComicMaterialKind>("scene");
+  const [voiceTab, setVoiceTab] = useState(initialVoiceTab);
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
   const [page, setPage] = useState(1);
@@ -45,27 +48,38 @@ export function MaterialLibrary() {
   const readyKey = generation.current?.filter(take => take.state === "ready").map(take => take.id).join(",");
   useEffect(() => { if (readyKey) setRefresh(value => value + 1); }, [readyKey]);
   useEffect(() => {
+    if (voiceTab) return;
     const controller = new AbortController();
     setList(null);
     void comicLibraryApi.materials({ kind, query, archived: String(archived), page: String(page) }, controller.signal).then(rows => {
       if (!controller.signal.aborted) setList(rows);
     }).catch(() => { if (!controller.signal.aborted) setList("error"); });
     return () => controller.abort();
-  }, [kind, query, archived, page, refresh]);
+  }, [kind, query, archived, page, refresh, voiceTab]);
   const versions = useCallback((signal: AbortSignal) => versionId ?
     comicLibraryApi.materialVersions(versionId, signal) : Promise.resolve([]), [versionId]);
+  const tabs = <nav className="comic-steps" aria-label={t("素材分类")}>
+    {materialTabs.map(value => value === "voice" ? (
+      <button key={value} type="button" aria-pressed={voiceTab} onClick={() => setVoiceTab(true)}>{t("人物配音")}</button>
+    ) : (
+      <button key={value} type="button" aria-pressed={!voiceTab && kind === value} onClick={() => {
+        setVoiceTab(false);
+        setKind(value);
+        setPage(1);
+      }}>{t(comicMaterialLabels[value])}</button>
+    ))}
+  </nav>;
+
+  if (voiceTab) return <ComicVoiceLibrary tabs={tabs} />;
 
   return <>
-    <header className="comic-heading"><h1>{t("素材库")}</h1>
+    <header className="comic-heading comic-material-heading"><h1>{t("素材库")}</h1>
       <div className="comic-actions">
         {isImageKind(kind) && !archived && <button type="button" onClick={() => setGenerating({ kind })}>{t("生成素材图片")}</button>}
         <button className="primary" onClick={() => setUploading("new")}>＋ {t("上传素材")}</button>
       </div>
     </header>
-    <nav className="comic-steps" aria-label={t("素材分类")}>
-      {comicMaterialKinds.map(value => <button key={value} aria-pressed={kind === value} onClick={() => { setKind(value); setPage(1); }}>
-        {t(comicMaterialLabels[value])}</button>)}
-    </nav>
+    {tabs}
     <LibrarySearch query={query} search={value => { setQuery(value); setPage(1); }} archived={archived}
       onArchived={value => { setArchived(value); setPage(1); }} />
     {(!!generation.current?.length || generation.failed) && <details className="comic-edit-card">

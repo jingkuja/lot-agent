@@ -1,18 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Pool, PoolClient } from "pg";
 import { Hono } from "hono";
-import { ProviderError, type SpeechProvider } from "@lot-agent/core";
+import { OpenaiVideoAdapter, ProviderError, type SpeechProvider } from "@lot-agent/core";
 import {
-  comicDramaClipDraftSchema, layoutComicTimeline,
+  comicDramaClipDraftSchema, comicVideoTakeInput, layoutComicTimeline,
   type ComicDramaClip, type ComicDramaDetail, type ComicEdit, type ComicGenerationQuote, type ComicTakeInput,
 } from "@lot-agent/core/comic-drama";
 import { PgComicEdits } from "./edit-repository.js";
+import { editSeriesCast } from "./cast-store.js";
 import { createComicEditRoutes } from "./edit-routes.js";
 import { ComicEditSpeech } from "./edit-speech.js";
 import { createComicBudgetPredictionCache, estimateComicEpisode, type EpisodeBudgetPricing } from "./episode-budget.js";
 import { PgComicGeneration, type FrozenVisualReference } from "./generation-repository.js";
 import { createComicGenerationRoutes, createComicSeriesPreviewer } from "./generation-routes.js";
-import { ComicSelectionConflictError } from "./library-db.js";
+import { ComicSelectionConflictError, type ComicQuery } from "./library-db.js";
 import type { PgComicLibrary } from "./library-repository.js";
 import type { ComicMediaLibrary } from "./media-library.js";
 import { PgComicDramaRepository, summarizeEpisodeCosts, type EpisodeSpendRow } from "./repository.js";
@@ -212,6 +213,80 @@ describe("P1 #3: concurrent keyframe/video selection conflict without mutating c
     });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ code: "SELECTION_CONFLICT", currentSelectionRevision: 3 });
+  });
+});
+
+describe("character appearance references", () => {
+  it("selects the first synced appearance for older automatic clips and preserves explicit description-only clips", async () => {
+    const characterId = uuid(103), outfitId = uuid(104);
+    const actor = { characterId, slotKey: null, expressionKey: null };
+    const auto = { ...makeClip(clipA, 1).draft, cast: [actor] };
+    const description = { ...makeClip(clipB, 2).draft, cast: [{ ...actor, descriptionOnly: true }] };
+    const photo = { id: uuid(105), mime: "image/png", sizeBytes: 4096, width: 720, height: 1280, durationMs: null, hasThumbnail: true };
+    const snapshot = {
+      schemaVersion: 1, characterId, name: "丽丽", aliases: [], age: "22", personality: "", appearance: "", roleKey: null,
+      outfitId, outfitName: "雨衣", assets: [{ kind: "slot", key: "front", version: 1, media: photo }],
+    };
+    const query = vi.fn(async (sql: string, _params: unknown[]) => {
+      if (sql.startsWith("SELECT outfit_id")) return { rows: [{ outfitId, hasAppearance: false }] };
+      if (sql.includes("FROM lot_comic_drama.cd_characters c JOIN")) return { rows: [{ snapshot }] };
+      if (sql.startsWith("SELECT id,draft")) return { rows: [{ id: clipA, draft: auto }, { id: clipB, draft: description }] };
+      return { rowCount: 1, rows: [] };
+    });
+    await editSeriesCast({ query } as unknown as ComicQuery, ownerId, seriesId, { action: "sync", characterId });
+    const updates = query.mock.calls.filter(([sql]) => sql.startsWith("UPDATE lot_comic_drama.cd_clips"));
+    expect(updates.map(([, params]) => params)).toEqual([[clipA, { ...auto, cast: [{ ...actor, slotKey: "front" }] }]]);
+  });
+
+  it("freezes and submits a late appearance photo for a named speaker in direct reference mode", async () => {
+    const initial = makeClip(clipA, 1);
+    const clip = { ...initial, draft: { ...initial.draft, lines: [
+      { id: uuid(101), speaker: "小丽", text: "店里怎么突然停电了？", emotionKey: null, speed: 1 },
+    ] } };
+    const mediaId = uuid(110), characterId = uuid(111);
+    const photo = { id: mediaId, mime: "image/png" as const, sizeBytes: 4096, width: 720, height: 1280, durationMs: null, hasThumbnail: true };
+    const modelId = "doubao-seedance-2-0";
+    const detail: ComicDramaDetail = {
+      series: {
+        id: seriesId, dramaId: uuid(99), parentId: null, title: "雨夜便利店", logline: "", seriesGroup: null, episodeNo: 2,
+        styleKey: "thick_painting", aspectRatio: "9:16", videoModel: modelId, revision: 4, archivedAt: null,
+      },
+      clips: [clip], script: null,
+      cast: [{
+        archived: false, hasUpdates: true, availableAppearance: { kind: "slot", key: "front", version: 2, media: photo },
+        snapshot: {
+          schemaVersion: 1, characterId, name: "丽丽", aliases: ["小丽"], age: "22", personality: "", appearance: "", roleKey: null,
+          outfitId: uuid(112), outfitName: "雨衣", assets: [],
+        },
+      }],
+    };
+    const query = vi.fn(async (sql: string, _params: unknown[]) => ({ rows: sql.includes("INSERT INTO")
+      ? [{ id: uuid(113), expiresAt: new Date() }] : [] }));
+    const media = {
+      assertAvailable: vi.fn(), assertVideoReferenceOrigin: vi.fn(),
+      inspectVideoReference: vi.fn(async () => ({ ...photo, kind: "image" as const })),
+      videoReference: vi.fn(async () => "https://cdn.example.invalid/appearance.png?signature=fixture"),
+    };
+    const previewSeries = createComicSeriesPreviewer({
+      pool: { query } as unknown as Pool, series: { get: async () => detail }, media,
+      quotePrice: async () => null, quoteVideoPrice: async () => ({ modelId, unit: "second", currency: "CNY", clipAmounts: { [clipA]: 1000 } }),
+      settings: { getStylePreset: async () => null }, readStyleDictionary: async () => [],
+      video: { frames: async () => new Map(), generationReferences: async () => [],
+        inspectReferences: async () => ({ resolved: new Map(), invalid: new Map() }) },
+    });
+    const quote = await previewSeries(ownerId, { kind: "series", id: seriesId }, {
+      mode: "references", expectedSeriesRevision: detail.series.revision, targets: [{ clipId: clipA, expectedRevision: clip.revision }],
+    });
+    expect(quote.skipped).toEqual([]);
+    expect(quote.items[0].referenceVersions).toEqual([{ mediaId, version: 2, kind: "appearance", characterId, characterName: "丽丽" }]);
+    expect(media.inspectVideoReference).toHaveBeenCalledWith(ownerId, mediaId, expect.any(AbortSignal));
+    const frozen = query.mock.calls.find(([sql]) => sql.includes("INSERT INTO"))?.[1][4] as { inputs: unknown[] };
+    const request = await prepareComicVideoRequest(media, ownerId, { id: take1, input: comicVideoTakeInput.parse(frozen.inputs[0]) });
+    expect(media.videoReference).toHaveBeenCalledWith(ownerId, mediaId);
+    expect(new OpenaiVideoAdapter().buildCreateBody(request, modelId)).toMatchObject({
+      input_reference: ["https://cdn.example.invalid/appearance.png?signature=fixture"],
+      prompt: expect.stringContaining("@Image1 is 丽丽's appearance"),
+    });
   });
 });
 
@@ -720,6 +795,35 @@ describe("P1 #5 & P1 #6: audition release, per-attempt stale callback guard, and
     expect(run2.synthesizedCount).toBe(0); // Remaining is 0 after trimmed line 2 filled clip, or if room left synthesizes only line 3
     expect(run2.items.find(item => item.lineId === lineOverflowId)?.status).toBe("trimmed");
     expect(env.getSynthCount()).toBe(3); // Zero duplicate TTS calls for lines 1 & 2!
+
+    const voiceId = uuid(67);
+    const ready = vi.fn(async () => ({ targetModel: "qwen-audio-3.0-tts-plus", voiceId: "provider-voice-id" }));
+    const local = { synthesize: vi.fn() };
+    const librarySpeech = new ComicEditSpeech(env.pool, edits, env.media, {
+      localSpeech: local,
+      ownerSpeech: async () => provider,
+      libraryVoices: { ready, choices: async () => [] },
+    });
+    const app = new Hono<{ Variables: { userId: string } }>();
+    app.use("*", async (c, next) => { c.set("userId", ownerId); await next(); });
+    app.route("/", createComicEditRoutes(edits, librarySpeech));
+    const url = `/edits/${editId}/items/${videoItemId}/lines/${lineCachedId}/speech`;
+    const submit = () => app.request(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: run2.edit.revision, expectedClipRevision: 1, voice: { kind: "library", voiceId } }),
+    });
+    const first = await submit();
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ cached: false });
+    expect(ready).toHaveBeenCalledWith(ownerId, voiceId, false);
+    expect(provider.synthesize).toHaveBeenLastCalledWith(expect.objectContaining({
+      model: "qwen-audio-3.0-tts-plus", voice: "provider-voice-id",
+    }), expect.any(AbortSignal));
+    expect(local.synthesize).not.toHaveBeenCalled();
+    const repeat = await submit();
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toMatchObject({ cached: true });
+    expect(env.getSynthCount()).toBe(4);
   });
 });
 

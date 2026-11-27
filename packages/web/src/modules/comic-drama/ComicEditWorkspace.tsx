@@ -28,6 +28,7 @@ export function ComicEditWorkspace({
   embeddedInDramaTask = false,
   exit,
   openVideo,
+  openVoiceLibrary,
   setGuard,
   autoOpenDialogue,
   onAutoDialogueOpened,
@@ -43,6 +44,7 @@ export function ComicEditWorkspace({
   embeddedInDramaTask?: boolean;
   exit: () => void;
   openVideo: (seriesId: string, clipId: string) => void;
+  openVoiceLibrary?: () => void;
   setGuard: (guard: (() => boolean) | null) => void;
   autoOpenDialogue?: boolean;
   onAutoDialogueOpened?: () => void;
@@ -740,6 +742,7 @@ export function ComicEditWorkspace({
             subtitles={timeline.subtitles}
             addSubtitle={cue => apply({ ...timeline, subtitles: [...timeline.subtitles, cue] })}
             disabled={editorLocked}
+            openVoiceLibrary={openVoiceLibrary}
             clipContext={dialogueContext}
             collapsed={stageCollapsed.dialogue}
             onToggleCollapse={() => toggleStageCard("dialogue")}
